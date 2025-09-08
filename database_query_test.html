@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料庫查詢 API 測試頁面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        .button:hover {
+            background-color: #0056b3;
+        }
+        .filter-input {
+            padding: 5px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .result {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .loading {
+            color: #007bff;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .success {
+            color: #28a745;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .filter-section {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 YOLOv11 資料庫查詢 API 測試</h1>
+    
+    <!-- 統計資訊 -->
+    <div class="container">
+        <h2>📈 資料庫統計資訊</h2>
+        <button class="button" onclick="getStats()">取得統計資訊</button>
+        <div id="statsResult" class="result" style="display:none;"></div>
+    </div>
+    
+    <!-- 分析任務查詢 -->
+    <div class="container">
+        <h2>📋 分析任務表查詢</h2>
+        <div class="filter-section">
+            <label>每頁筆數: <input type="number" id="taskLimit" class="filter-input" value="20" min="1" max="200"></label>
+            <label>偏移量: <input type="number" id="taskOffset" class="filter-input" value="0" min="0"></label>
+            <label>任務類型: 
+                <select id="taskType" class="filter-input">
+                    <option value="">全部</option>
+                    <option value="realtime_camera">即時攝影機</option>
+                    <option value="video_file">影片檔案</option>
+                </select>
+            </label>
+            <label>狀態: 
+                <select id="taskStatus" class="filter-input">
+                    <option value="">全部</option>
+                    <option value="pending">等待中</option>
+                    <option value="running">執行中</option>
+                    <option value="completed">已完成</option>
+                    <option value="failed">失敗</option>
+                </select>
+            </label>
+        </div>
+        <button class="button" onclick="getTasks()">查詢分析任務</button>
+        <div id="tasksResult" class="result" style="display:none;"></div>
+    </div>
+    
+    <!-- 檢測結果查詢 -->
+    <div class="container">
+        <h2>🎯 檢測結果表查詢</h2>
+        <div class="filter-section">
+            <label>每頁筆數: <input type="number" id="detectionLimit" class="filter-input" value="50" min="1" max="500"></label>
+            <label>偏移量: <input type="number" id="detectionOffset" class="filter-input" value="0" min="0"></label>
+            <label>任務ID: <input type="number" id="detectionTaskId" class="filter-input" placeholder="特定任務ID"></label>
+            <label>物件類型: <input type="text" id="detectionObjectType" class="filter-input" placeholder="person, car, bike..."></label>
+            <label>最小信心度: <input type="number" id="detectionMinConf" class="filter-input" step="0.1" min="0" max="1" placeholder="0.0-1.0"></label>
+        </div>
+        <button class="button" onclick="getDetections()">查詢檢測結果</button>
+        <div id="detectionsResult" class="result" style="display:none;"></div>
+    </div>
+    
+    <!-- 任務詳情查詢 -->
+    <div class="container">
+        <h2>🔍 任務詳情查詢</h2>
+        <div class="filter-section">
+            <label>任務ID: <input type="number" id="taskDetailId" class="filter-input" placeholder="輸入任務ID"></label>
+            <label><input type="checkbox" id="includeDetections"> 包含檢測結果</label>
+            <label>檢測結果限制: <input type="number" id="detectionDetailLimit" class="filter-input" value="50" min="1" max="200"></label>
+        </div>
+        <button class="button" onclick="getTaskDetail()">查詢任務詳情</button>
+        <div id="taskDetailResult" class="result" style="display:none;"></div>
+    </div>
+    
+    <!-- API 文檔連結 -->
+    <div class="container">
+        <h2>📚 API 文檔</h2>
+        <p>完整的 API 文檔請訪問: <a href="/docs" target="_blank">FastAPI 自動文檔</a></p>
+        <p>API 端點列表：</p>
+        <ul>
+            <li><code>GET /api/v1/database/stats</code> - 資料庫統計資訊</li>
+            <li><code>GET /api/v1/database/tasks</code> - 分析任務表查詢</li>
+            <li><code>GET /api/v1/database/detection-results</code> - 檢測結果表查詢</li>
+            <li><code>GET /api/v1/database/tasks/{task_id}</code> - 特定任務詳情</li>
+        </ul>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        
+        async function apiCall(url, resultElementId) {
+            const resultElement = document.getElementById(resultElementId);
+            resultElement.style.display = 'block';
+            resultElement.textContent = '⏳ 載入中...';
+            resultElement.className = 'result loading';
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultElement.textContent = JSON.stringify(data, null, 2);
+                    resultElement.className = 'result success';
+                } else {
+                    resultElement.textContent = `錯誤 ${response.status}: ${JSON.stringify(data, null, 2)}`;
+                    resultElement.className = 'result error';
+                }
+            } catch (error) {
+                resultElement.textContent = `網路錯誤: ${error.message}`;
+                resultElement.className = 'result error';
+            }
+        }
+        
+        function getStats() {
+            apiCall(`${API_BASE}/api/v1/database/stats`, 'statsResult');
+        }
+        
+        function getTasks() {
+            const limit = document.getElementById('taskLimit').value;
+            const offset = document.getElementById('taskOffset').value;
+            const taskType = document.getElementById('taskType').value;
+            const status = document.getElementById('taskStatus').value;
+            
+            let url = `${API_BASE}/api/v1/database/tasks?limit=${limit}&offset=${offset}`;
+            if (taskType) url += `&task_type=${taskType}`;
+            if (status) url += `&status=${status}`;
+            
+            apiCall(url, 'tasksResult');
+        }
+        
+        function getDetections() {
+            const limit = document.getElementById('detectionLimit').value;
+            const offset = document.getElementById('detectionOffset').value;
+            const taskId = document.getElementById('detectionTaskId').value;
+            const objectType = document.getElementById('detectionObjectType').value;
+            const minConf = document.getElementById('detectionMinConf').value;
+            
+            let url = `${API_BASE}/api/v1/database/detection-results?limit=${limit}&offset=${offset}`;
+            if (taskId) url += `&task_id=${taskId}`;
+            if (objectType) url += `&object_type=${objectType}`;
+            if (minConf) url += `&min_confidence=${minConf}`;
+            
+            apiCall(url, 'detectionsResult');
+        }
+        
+        function getTaskDetail() {
+            const taskId = document.getElementById('taskDetailId').value;
+            const includeDetections = document.getElementById('includeDetections').checked;
+            const detectionLimit = document.getElementById('detectionDetailLimit').value;
+            
+            if (!taskId) {
+                alert('請輸入任務ID');
+                return;
+            }
+            
+            let url = `${API_BASE}/api/v1/database/tasks/${taskId}?include_detections=${includeDetections}&detection_limit=${detectionLimit}`;
+            
+            apiCall(url, 'taskDetailResult');
+        }
+    </script>
+</body>
+</html>

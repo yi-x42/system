@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 連接測試 - YOLOv11 系統</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .test-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .status-ok { color: #28a745; }
+        .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+        .code-block {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 10px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-10">
+                <div class="test-card p-4 mb-4">
+                    <h1 class="text-center mb-4">
+                        <i class="bi bi-wifi"></i> 
+                        YOLOv11 系統 API 連接測試
+                    </h1>
+                    
+                    <!-- 環境資訊 -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5><i class="bi bi-info-circle"></i> 環境資訊</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="environmentInfo">載入中...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5><i class="bi bi-gear"></i> API 配置</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="apiConfigInfo">載入中...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 測試結果 -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5><i class="bi bi-check-circle"></i> 連接測試</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="testResults">
+                                <div class="d-flex justify-content-center">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">測試中...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 手動測試按鈕 -->
+                    <div class="text-center">
+                        <button id="runTestBtn" class="btn btn-primary btn-lg">
+                            <i class="bi bi-arrow-clockwise"></i> 重新測試
+                        </button>
+                        <a href="index.html" class="btn btn-success btn-lg ms-3">
+                            <i class="bi bi-house"></i> 返回主頁
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="api-config.js"></script>
+    
+    <script>
+        class APITester {
+            constructor() {
+                this.testEndpoints = [
+                    { name: 'API 健康檢查', endpoint: '/api/v1/health', method: 'GET' },
+                    { name: '系統統計', endpoint: '/api/v1/frontend/stats', method: 'GET' },
+                    { name: '快速統計', endpoint: '/api/v1/frontend/quick-stats', method: 'GET' },
+                    { name: '檢測結果', endpoint: '/api/v1/frontend/detection-results?limit=1', method: 'GET' },
+                    { name: '資料來源列表', endpoint: '/api/v2/analysis/data-sources', method: 'GET' }
+                ];
+            }
+
+            async runAllTests() {
+                const resultsContainer = document.getElementById('testResults');
+                resultsContainer.innerHTML = '<h6>執行測試中...</h6>';
+
+                let results = [];
+                
+                for (const test of this.testEndpoints) {
+                    const result = await this.testEndpoint(test);
+                    results.push(result);
+                }
+
+                this.displayResults(results);
+            }
+
+            async testEndpoint(test) {
+                const startTime = Date.now();
+                
+                try {
+                    const response = await fetch(window.apiConfig.buildAPIURL(test.endpoint), {
+                        method: test.method,
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const duration = Date.now() - startTime;
+                    const isSuccess = response.ok;
+                    
+                    let responseData = null;
+                    try {
+                        responseData = await response.json();
+                    } catch (e) {
+                        responseData = await response.text();
+                    }
+
+                    return {
+                        name: test.name,
+                        endpoint: test.endpoint,
+                        method: test.method,
+                        status: response.status,
+                        statusText: response.statusText,
+                        success: isSuccess,
+                        duration: duration,
+                        data: responseData,
+                        error: null
+                    };
+
+                } catch (error) {
+                    const duration = Date.now() - startTime;
+                    
+                    return {
+                        name: test.name,
+                        endpoint: test.endpoint,
+                        method: test.method,
+                        status: 0,
+                        statusText: 'Network Error',
+                        success: false,
+                        duration: duration,
+                        data: null,
+                        error: error.message
+                    };
+                }
+            }
+
+            displayResults(results) {
+                const resultsContainer = document.getElementById('testResults');
+                
+                const successCount = results.filter(r => r.success).length;
+                const totalCount = results.length;
+                
+                let html = `
+                    <div class="alert ${successCount === totalCount ? 'alert-success' : successCount > 0 ? 'alert-warning' : 'alert-danger'}" role="alert">
+                        <h6><i class="bi bi-graph-up"></i> 測試摘要</h6>
+                        成功: ${successCount} / ${totalCount} 個端點
+                    </div>
+                    
+                    <div class="row">
+                `;
+
+                results.forEach(result => {
+                    const statusClass = result.success ? 'status-ok' : 'status-error';
+                    const icon = result.success ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+                    
+                    html += `
+                        <div class="col-md-6 mb-3">
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span><strong>${result.name}</strong></span>
+                                    <span class="${statusClass}">
+                                        <i class="bi ${icon}"></i>
+                                        ${result.status}
+                                    </span>
+                                </div>
+                                <div class="card-body">
+                                    <small>
+                                        <strong>端點:</strong> ${result.method} ${result.endpoint}<br>
+                                        <strong>耗時:</strong> ${result.duration}ms<br>
+                                        <strong>狀態:</strong> ${result.statusText}
+                                    </small>
+                                    
+                                    ${result.error ? `
+                                        <div class="mt-2">
+                                            <small class="text-danger">
+                                                <strong>錯誤:</strong> ${result.error}
+                                            </small>
+                                        </div>
+                                    ` : ''}
+                                    
+                                    ${result.data && result.success ? `
+                                        <details class="mt-2">
+                                            <summary><small>查看回應資料</small></summary>
+                                            <div class="code-block mt-2">
+                                                ${JSON.stringify(result.data, null, 2)}
+                                            </div>
+                                        </details>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                resultsContainer.innerHTML = html;
+            }
+
+            displayEnvironmentInfo() {
+                const envInfo = window.apiConfig.getEnvironmentInfo();
+                
+                document.getElementById('environmentInfo').innerHTML = `
+                    <div class="code-block">
+主機: ${envInfo.host}
+端口: ${envInfo.port}
+本機: ${envInfo.isLocal ? '是' : '否'}
+Radmin: ${envInfo.isRadmin ? '是' : '否'}
+                    </div>
+                `;
+
+                document.getElementById('apiConfigInfo').innerHTML = `
+                    <div class="code-block">
+API 基礎 URL: ${envInfo.apiBaseURL}
+WebSocket URL: ${envInfo.websocketURL}
+                    </div>
+                `;
+            }
+        }
+
+        // 初始化測試器
+        const tester = new APITester();
+
+        // 頁面載入後執行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 顯示環境資訊
+            tester.displayEnvironmentInfo();
+            
+            // 執行測試
+            tester.runAllTests();
+            
+            // 綁定重新測試按鈕
+            document.getElementById('runTestBtn').addEventListener('click', function() {
+                tester.runAllTests();
+            });
+        });
+    </script>
+</body>
+</html>

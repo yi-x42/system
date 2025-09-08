@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .dashboard-card { 
+            border: none; 
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            transition: transform 0.2s;
+        }
+        .dashboard-card:hover { transform: translateY(-2px); }
+        .stats-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .system-card { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        .tasks-card { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; }
+        .sources-card { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; }
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 50px;
+        }
+        .sidebar {
+            background: linear-gradient(180deg, #2c3e50 0%, #3498db 100%);
+            min-height: 100vh;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.8) !important;
+            border-radius: 0.5rem;
+            margin: 0.2rem 0;
+        }
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 側邊欄 -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h5 class="text-white">
+                            <i class="fas fa-eye text-warning"></i>
+                            YOLOv11 系統
+                        </h5>
+                        <small class="text-light">數位雙生分析平台 v2.0</small>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/admin/v2/">
+                                <i class="fas fa-tachometer-alt"></i> 主控台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/tasks">
+                                <i class="fas fa-tasks"></i> 任務管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/sources">
+                                <i class="fas fa-database"></i> 資料來源
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/config">
+                                <i class="fas fa-cogs"></i> 系統配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/yolo-config">
+                                <i class="fas fa-robot"></i> YOLO模型配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/camera-management">
+                                <i class="fas fa-video"></i> 攝影機管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/analytics">
+                                <i class="fas fa-chart-bar"></i> 分析統計
+                            </a>
+                        </li>
+                        <li class="nav-item mt-3">
+                            <a class="nav-link" href="/admin/">
+                                <i class="fas fa-arrow-left"></i> 舊版後台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/docs">
+                                <i class="fas fa-book"></i> API 文檔
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 主要內容 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">
+                        <i class="fas fa-tachometer-alt text-primary"></i>
+                        系統儀表板
+                    </h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshDashboard()">
+                                <i class="fas fa-sync-alt"></i> 重新整理
+                            </button>
+                        </div>
+                        <span class="badge bg-info">{{ current_time }}</span>
+                    </div>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    系統錯誤：{{ error }}
+                </div>
+                {% endif %}
+
+                <!-- 統計卡片 -->
+                <div class="row mb-4">
+                    {% if stats %}
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card stats-card">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">總任務數</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ stats.total_tasks or 0 }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-tasks fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card system-card">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">檢測結果</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ stats.total_detections or 0 }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-search fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card tasks-card">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">資料來源</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ stats.total_sources or 0 }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-database fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card sources-card">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">執行中任務</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ running_count or 0 }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-play-circle fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- 系統資源監控 -->
+                <div class="row mb-4">
+                    {% if system_info %}
+                    <div class="col-lg-6 mb-4">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-server text-primary"></i>
+                                    系統資源使用情況
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label">CPU 使用率</label>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-info" style="width: {{ system_info.cpu.percent }}%">
+                                            {{ "%.1f"|format(system_info.cpu.percent) }}%
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">記憶體使用率</label>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-warning" style="width: {{ system_info.memory.percent }}%">
+                                            {{ "%.1f"|format(system_info.memory.percent) }}%
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">磁碟使用率</label>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-danger" style="width: {{ system_info.disk.percent }}%">
+                                            {{ "%.1f"|format(system_info.disk.percent) }}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- 執行中任務 -->
+                    <div class="col-lg-6 mb-4">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-play-circle text-success"></i>
+                                    執行中任務
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                {% if running_tasks %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>類型</th>
+                                                <th>開始時間</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for task in running_tasks %}
+                                            <tr>
+                                                <td>{{ task.id }}</td>
+                                                <td>
+                                                    <span class="badge bg-primary">
+                                                        {{ '即時攝影機' if task.task_type == 'realtime_camera' else '影片檔案' }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ task.created_at if task.created_at else '' }}</td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-danger" onclick="stopTask({{ task.id }})">
+                                                        <i class="fas fa-stop"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="text-center text-muted py-3">
+                                    <i class="fas fa-info-circle"></i>
+                                    目前沒有執行中的任務
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 最近任務 -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-history text-info"></i>
+                                    最近任務
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                {% if recent_tasks %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>任務類型</th>
+                                                <th>狀態</th>
+                                                <th>創建時間</th>
+                                                <th>完成時間</th>
+                                                <th>備註</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for task in recent_tasks %}
+                                            <tr>
+                                                <td>{{ task.id }}</td>
+                                                <td>
+                                                    <span class="badge bg-info">
+                                                        {{ '即時攝影機' if task.task_type == 'realtime_camera' else '影片檔案' }}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    {% if task.status == 'completed' %}
+                                                        <span class="badge bg-success">已完成</span>
+                                                    {% elif task.status == 'running' %}
+                                                        <span class="badge bg-primary">執行中</span>
+                                                    {% elif task.status == 'failed' %}
+                                                        <span class="badge bg-danger">失敗</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary">{{ task.status }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ task.created_at if task.created_at else '' }}</td>
+                                                <td>{{ task.completed_at if task.completed_at else '-' }}</td>
+                                                <td>{{ task.task_description or '-' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-info-circle fa-2x"></i>
+                                    <p class="mt-2">目前沒有任務記錄</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function refreshDashboard() {
+            location.reload();
+        }
+
+        function stopTask(taskId) {
+            if (confirm('確定要停止這個任務嗎？')) {
+                fetch(`/admin/v2/api/tasks/${taskId}/stop`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('任務已停止');
+                        location.reload();
+                    } else {
+                        alert('停止任務失敗：' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('操作失敗：' + error);
+                });
+            }
+        }
+
+        // 頁面載入時初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化完成
+        });
+
+        // 每30秒自動重新整理系統資源資訊
+        setInterval(function() {
+            fetch('/admin/v2/api/system-status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 更新進度條
+                        document.querySelector('.progress-bar.bg-info').style.width = data.data.cpu.percent + '%';
+                        document.querySelector('.progress-bar.bg-info').textContent = data.data.cpu.percent.toFixed(1) + '%';
+                        
+                        document.querySelector('.progress-bar.bg-warning').style.width = data.data.memory.percent + '%';
+                        document.querySelector('.progress-bar.bg-warning').textContent = data.data.memory.percent.toFixed(1) + '%';
+                        
+                        document.querySelector('.progress-bar.bg-danger').style.width = data.data.disk.percent + '%';
+                        document.querySelector('.progress-bar.bg-danger').textContent = data.data.disk.percent.toFixed(1) + '%';
+                    }
+                })
+                .catch(error => console.log('更新系統資源失敗:', error));
+        }, 30000);
+    </script>
+</body>
+</html>

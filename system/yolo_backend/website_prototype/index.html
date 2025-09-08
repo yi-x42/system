@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+             <li class="nav-item">
+                <a href="#analytics" class="nav-link" data-section="analytics">
+                    <i class="fas fa-chart-line"></i>
+                    <span>統計分析</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#multi-camera" class="nav-link" data-section="multi-camera">
+                    <i class="fas fa-th-large"></i>
+                    <span>多攝影機管理</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#data-export" class="nav-link" data-section="data-export">
+                    <i class="fas fa-download"></i>
+                    <span>數據匯出</span>
+                </a>
+            </li>ta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>YOLOv11 數位雙生分析系統</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 側邊導航 -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-eye"></i>
+                <span>YOLO AI</span>
+            </div>
+            <div class="version">v2.0</div>
+        </div>
+        
+        <ul class="nav-menu">
+            <li class="nav-item active">
+                <a href="#dashboard" class="nav-link" data-section="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>儀表板</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#ai-engine" class="nav-link" data-section="ai-engine">
+                    <i class="fas fa-brain"></i>
+                    <span>智能分析引擎</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#realtime-detection" class="nav-link" data-section="realtime-detection">
+                    <i class="fas fa-play-circle"></i>
+                    <span>即時辨識</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/website/data_source.html" class="nav-link">
+                    <i class="fas fa-video"></i>
+                    <span>資料來源管理</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#task-scheduler" class="nav-link" data-section="task-scheduler">
+                    <i class="fas fa-tasks"></i>
+                    <span>任務排程</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#analytics" class="nav-link" data-section="analytics">
+                    <i class="fas fa-chart-line"></i>
+                    <span>結果分析</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#data-management" class="nav-link" data-section="data-management">
+                    <i class="fas fa-database"></i>
+                    <span>數據管理</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#system-config" class="nav-link" data-section="system-config">
+                    <i class="fas fa-cogs"></i>
+                    <span>系統配置</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="#advanced" class="nav-link" data-section="advanced">
+                    <i class="fas fa-rocket"></i>
+                    <span>進階功能</span>
+                </a>
+            </li>
+        </ul>
+        
+        <div class="sidebar-footer">
+            <button type="button" class="shutdown-btn" id="shutdown-system-btn">
+                <i class="fas fa-power-off"></i>
+                <span>停止系統</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 主要內容區域 -->
+    <main class="main-content">
+        <!-- 頂部導航 -->
+        <header class="top-header">
+            <div class="header-left">
+                <button class="sidebar-toggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="breadcrumb">
+                    <span class="current-page">儀表板</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" placeholder="搜尋功能...">
+                </div>
+                <div class="notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="badge">3</span>
+                </div>
+                <div class="user-menu">
+                    <img src="https://via.placeholder.com/32x32/4CAF50/FFFFFF?text=U" alt="User">
+                    <span>管理員</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+        </header>
+
+        <!-- 儀表板內容 -->
+        <section id="dashboard" class="content-section active">
+            <div class="section-header">
+                <h1>系統監控中心</h1>
+                <p>即時監控系統狀態與分析結果</p>
+            </div>
+            
+            <!-- 快速統計卡片 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon cpu">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>CPU 使用率</h3>
+                        <div class="stat-value" id="cpu-usage">載入中...</div>
+                        <div class="cpu-progress">
+                            <div class="progress-bar bg-info" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon memory">
+                        <i class="fas fa-memory"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>記憶體使用</h3>
+                        <div class="stat-value" id="memory-usage">載入中...</div>
+                        <div class="memory-progress">
+                            <div class="progress-bar bg-info" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon gpu">
+                        <i class="fas fa-dice-d6"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>GPU 使用率</h3>
+                        <div class="stat-value" id="gpu-usage">載入中...</div>
+                        <div class="gpu-progress">
+                            <div class="progress-bar bg-info" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon tasks">
+                        <i class="fas fa-play-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3>活躍任務</h3>
+                        <div class="stat-value" id="active-tasks">載入中...</div>
+                        <div class="stat-subtitle">總檢測數: <span id="total-detections">載入中...</span></div>
+                        <div class="stat-change system-status">載入中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 即時預覽與圖表 -->
+            <div class="dashboard-grid">
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-eye me-2"></i>即時檢測預覽</h3>
+                        <div class="card-actions">
+                            <button class="btn-icon"><i class="fas fa-expand"></i></button>
+                            <button class="btn-icon"><i class="fas fa-cog"></i></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="video-preview">
+                            <div class="preview-placeholder">
+                                <i class="fas fa-video"></i>
+                                <p>攝影機預覽區域</p>
+                                <button class="btn btn-primary">開始檢測</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-chart-area me-2"></i>系統效能圖表</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-placeholder">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-list me-2"></i>最近檢測結果</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="detection-list">
+                            <div class="detection-item">
+                                <div class="detection-thumb">
+                                    <img src="https://via.placeholder.com/60x40/FF6B6B/FFFFFF?text=IMG" alt="Detection">
+                                </div>
+                                <div class="detection-info">
+                                    <div class="detection-title">檢測到 3 個物件</div>
+                                    <div class="detection-time">2 分鐘前</div>
+                                </div>
+                                <div class="detection-status">
+                                    <span class="status-badge success">完成</span>
+                                </div>
+                            </div>
+                            <div class="detection-item">
+                                <div class="detection-thumb">
+                                    <img src="https://via.placeholder.com/60x40/4ECDC4/FFFFFF?text=IMG" alt="Detection">
+                                </div>
+                                <div class="detection-info">
+                                    <div class="detection-title">檢測到 7 個物件</div>
+                                    <div class="detection-time">5 分鐘前</div>
+                                </div>
+                                <div class="detection-status">
+                                    <span class="status-badge success">完成</span>
+                                </div>
+                            </div>
+                            <div class="detection-item">
+                                <div class="detection-thumb">
+                                    <img src="https://via.placeholder.com/60x40/45B7D1/FFFFFF?text=IMG" alt="Detection">
+                                </div>
+                                <div class="detection-info">
+                                    <div class="detection-title">檢測到 1 個物件</div>
+                                    <div class="detection-time">8 分鐘前</div>
+                                </div>
+                                <div class="detection-status">
+                                    <span class="status-badge success">完成</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-tachometer-alt me-2"></i>快速操作</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="quick-actions">
+                            <button class="quick-action-btn">
+                                <i class="fas fa-play"></i>
+                                <span>開始分析</span>
+                            </button>
+                            <button class="quick-action-btn">
+                                <i class="fas fa-upload"></i>
+                                <span>上傳影片</span>
+                            </button>
+                            <button class="quick-action-btn">
+                                <i class="fas fa-camera"></i>
+                                <span>新增攝影機</span>
+                            </button>
+                            <button class="quick-action-btn">
+                                <i class="fas fa-download"></i>
+                                <span>匯出報表</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 智能分析引擎 -->
+        <section id="ai-engine" class="content-section">
+            <div class="section-header">
+                <h1>智能分析引擎</h1>
+                <p>YOLO 模型配置與管理</p>
+            </div>
+            
+            <div class="engine-grid">
+                <div class="engine-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-cube me-2"></i>模型管理</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="yolo-model-selector">
+                            <!-- 模型將由JavaScript動態載入 -->
+                        </div>
+                        <div class="model-actions">
+                            <button class="btn btn-primary" id="load-model-btn">
+                                <i class="fas fa-download me-1"></i>載入模型
+                            </button>
+                            <button class="btn btn-secondary" id="unload-model-btn">
+                                <i class="fas fa-trash me-1"></i>卸載模型
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="engine-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-sliders-h me-2"></i>參數配置</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="config-form">
+                            <div class="config-item">
+                                <label>信心度閾值 (Confidence)</label>
+                                <div class="slider-container">
+                                    <input type="range" id="confidence-slider" min="0" max="1" step="0.01" value="0.5" class="config-slider">
+                                    <span class="slider-value" id="confidence-value">50%</span>
+                                </div>
+                                <small>檢測結果的最低信心度要求</small>
+                            </div>
+                            <div class="config-item">
+                                <label>IoU 閾值 (Non-Maximum Suppression)</label>
+                                <div class="slider-container">
+                                    <input type="range" id="iou-slider" min="0" max="1" step="0.01" value="0.45" class="config-slider">
+                                    <span class="slider-value" id="iou-value">45%</span>
+                                </div>
+                                <small>重疊檢測框的過濾閾值</small>
+                            </div>
+                            <div class="config-item">
+                                <label>最大檢測數</label>
+                                <input type="number" id="max-detections" value="1000" class="config-input" min="1" max="10000">
+                                <small>單張圖片最大檢測物件數量</small>
+                            </div>
+                            <div class="config-item">
+                                <label>影像尺寸</label>
+                                <select id="image-size" class="config-select">
+                                    <option value="320">320x320 (快速)</option>
+                                    <option value="416">416x416 (平衡)</option>
+                                    <option value="512">512x512 (精確)</option>
+                                    <option value="640" selected>640x640 (標準)</option>
+                                    <option value="736">736x736 (高精度)</option>
+                                    <option value="1024">1024x1024 (最高精度)</option>
+                                </select>
+                                <small>檢測時的影像輸入尺寸</small>
+                            </div>
+                            <div class="config-actions">
+                                <button class="btn btn-primary" id="apply-config-btn">
+                                    <i class="fas fa-check me-1"></i>應用設定
+                                </button>
+                                <button class="btn btn-secondary" id="reset-config-btn">
+                                    <i class="fas fa-undo me-1"></i>重置為預設
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 即時辨識 -->
+        <section id="realtime-detection" class="content-section">
+            <div class="section-header">
+                <h1>即時辨識</h1>
+                <p>攝影機即時物件檢測與分析</p>
+            </div>
+            
+            <!-- WebSocket 連接狀態 -->
+            <div class="alert alert-info" id="websocket-status">
+                <i class="fas fa-wifi me-2"></i>
+                <span id="ws-status-text">準備連接...</span>
+            </div>
+            
+            <div class="row">
+                <!-- 控制面板 -->
+                <div class="col-md-4">
+                    <div class="control-panel">
+                        <div class="card">
+                            <div class="card-header">
+                                <h4><i class="fas fa-gamepad me-2"></i>檢測控制</h4>
+                            </div>
+                            <div class="card-body">
+                                <!-- 攝影機選擇 -->
+                                <div class="mb-3">
+                                    <label class="form-label">選擇攝影機</label>
+                                    <select id="camera-select" class="form-select">
+                                        <option value="0">攝影機 0</option>
+                                        <option value="1">攝影機 1</option>
+                                        <option value="2">攝影機 2</option>
+                                        <option value="3">攝影機 3</option>
+                                    </select>
+                                </div>
+                                
+                                <!-- 檢測狀態 -->
+                                <div class="mb-3">
+                                    <label class="form-label">檢測狀態</label>
+                                    <div class="status-indicator">
+                                        <span id="detection-status" class="badge bg-secondary">未啟動</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- 控制按鈕 -->
+                                <div class="btn-group-vertical w-100 mb-3">
+                                    <button id="start-detection-btn" class="btn btn-success btn-lg">
+                                        <i class="fas fa-play me-2"></i>啟動檢測
+                                    </button>
+                                    <button id="stop-detection-btn" class="btn btn-danger btn-lg" disabled>
+                                        <i class="fas fa-stop me-2"></i>停止檢測
+                                    </button>
+                                    <button id="refresh-status-btn" class="btn btn-info">
+                                        <i class="fas fa-sync me-2"></i>刷新狀態
+                                    </button>
+                                </div>
+                                
+                                <!-- 檢測統計 -->
+                                <div class="stats-grid">
+                                    <div class="stat-item">
+                                        <div class="stat-number" id="detection-count">0</div>
+                                        <div class="stat-label">檢測次數</div>
+                                    </div>
+                                    <div class="stat-item">
+                                        <div class="stat-number" id="object-count">0</div>
+                                        <div class="stat-label">檢測物件</div>
+                                    </div>
+                                    <div class="stat-item">
+                                        <div class="stat-number" id="fps-count">0</div>
+                                        <div class="stat-label">每秒幀數</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 檢測結果顯示 -->
+                <div class="col-md-8">
+                    <div class="detection-results">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h4><i class="fas fa-eye me-2"></i>檢測結果</h4>
+                                <button id="clear-results-btn" class="btn btn-outline-secondary btn-sm">
+                                    <i class="fas fa-trash me-1"></i>清空結果
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <!-- 最新檢測結果 -->
+                                <div class="latest-result" id="latest-result">
+                                    <div class="no-detection">
+                                        <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                                        <p class="text-muted">等待檢測結果...</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- 檢測歷史 -->
+                                <div class="detection-history">
+                                    <h5><i class="fas fa-history me-2"></i>檢測歷史</h5>
+                                    <div id="detection-history-list" class="history-list">
+                                        <!-- 檢測歷史將在這裡動態載入 -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 系統日誌 -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h4><i class="fas fa-terminal me-2"></i>系統日誌</h4>
+                            <button id="clear-log-btn" class="btn btn-outline-secondary btn-sm">
+                                <i class="fas fa-trash me-1"></i>清空日誌
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="system-log" class="system-log">
+                                <div class="log-entry">
+                                    <span class="timestamp">[系統]</span>
+                                    <span class="message">即時辨識系統已載入</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 任務排程與執行 -->
+        <section id="task-scheduler" class="content-section">
+            <div class="section-header">
+                <h1>任務排程與執行</h1>
+                <p>智能任務管理與排程控制</p>
+            </div>
+            
+            <!-- 任務控制面板 -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card task-control-card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-play"></i> 快速啟動</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="task-quick-actions">
+                                <button class="btn btn-primary mb-2" onclick="createQuickTask('realtime')">
+                                    <i class="fas fa-video"></i> 即時分析
+                                </button>
+                                <button class="btn btn-success mb-2" onclick="createQuickTask('batch')">
+                                    <i class="fas fa-layer-group"></i> 批次處理
+                                </button>
+                                <button class="btn btn-warning mb-2" onclick="createQuickTask('scheduled')">
+                                    <i class="fas fa-clock"></i> 排程任務
+                                </button>
+                                <button class="btn btn-info mb-2" onclick="createQuickTask('event')">
+                                    <i class="fas fa-bolt"></i> 事件觸發
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="card task-stats-card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-chart-bar"></i> 任務統計</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="task-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">執行中</span>
+                                    <span class="stat-value text-primary" id="runningTasks">3</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">等待中</span>
+                                    <span class="stat-value text-warning" id="pendingTasks">7</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">已完成</span>
+                                    <span class="stat-value text-success" id="completedTasks">156</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">失敗</span>
+                                    <span class="stat-value text-danger" id="failedTasks">2</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 任務管理標籤 -->
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="taskTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="active-tasks-tab" data-bs-toggle="tab" data-bs-target="#active-tasks" type="button" role="tab">
+                                <i class="fas fa-play-circle"></i> 執行中任務
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="scheduled-tasks-tab" data-bs-toggle="tab" data-bs-target="#scheduled-tasks" type="button" role="tab">
+                                <i class="fas fa-calendar-alt"></i> 排程任務
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="task-history-tab" data-bs-toggle="tab" data-bs-target="#task-history" type="button" role="tab">
+                                <i class="fas fa-history"></i> 歷史記錄
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="card-body">
+                    <div class="tab-content" id="taskTabsContent">
+                        <!-- 執行中任務 -->
+                        <div class="tab-pane fade show active" id="active-tasks" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>目前執行中的任務</h6>
+                                <button class="btn btn-sm btn-outline-primary" onclick="refreshActiveTasks()">
+                                    <i class="fas fa-sync-alt"></i> 重新整理
+                                </button>
+                            </div>
+                            
+                            <div class="task-list" id="activeTasksList">
+                                <!-- 任務項目將由 JavaScript 動態生成 -->
+                            </div>
+                        </div>
+                        
+                        <!-- 排程任務 -->
+                        <div class="tab-pane fade" id="scheduled-tasks" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>排程任務設定</h6>
+                                <button class="btn btn-sm btn-primary" onclick="showCreateScheduleModal()">
+                                    <i class="fas fa-plus"></i> 新增排程
+                                </button>
+                            </div>
+                            
+                            <div class="schedule-list" id="scheduleList">
+                                <!-- 排程項目將由 JavaScript 動態生成 -->
+                            </div>
+                        </div>
+                        
+                        <!-- 歷史記錄 -->
+                        <div class="tab-pane fade" id="task-history" role="tabpanel">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6>任務執行歷史</h6>
+                                <div>
+                                    <select class="form-select form-select-sm d-inline-block w-auto me-2">
+                                        <option>今天</option>
+                                        <option>過去7天</option>
+                                        <option>過去30天</option>
+                                        <option>全部</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-outline-secondary">
+                                        <i class="fas fa-download"></i> 匯出
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="history-list" id="historyList">
+                                <!-- 歷史記錄將由 JavaScript 動態生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 統計分析與報表 -->
+        <section id="analytics" class="content-section">
+            <div class="section-header">
+                <h1>統計分析與報表</h1>
+                <p>基於實際檢測數據的深度分析與視覺化報表</p>
+            </div>
+
+            <!-- 時間範圍選擇器 -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">時間範圍</h5>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary" data-period="1h" onclick="setAnalyticsPeriod('1h')">1小時</button>
+                                <button type="button" class="btn btn-outline-primary active" data-period="24h" onclick="setAnalyticsPeriod('24h')">24小時</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="7d" onclick="setAnalyticsPeriod('7d')">7天</button>
+                                <button type="button" class="btn btn-outline-primary" data-period="30d" onclick="setAnalyticsPeriod('30d')">30天</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">數據狀態</h5>
+                            <div id="analytics-status" class="text-muted">
+                                <i class="fas fa-spinner fa-spin"></i> 載入中...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 統計概覽卡片 -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <div class="stats-icon">
+                            <i class="fas fa-eye"></i>
+                        </div>
+                        <div class="stats-info">
+                            <h3 id="totalDetections">-</h3>
+                            <p>總檢測數</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <div class="stats-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stats-info">
+                            <h3 id="personCount">-</h3>
+                            <p>人員檢測</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <div class="stats-icon">
+                            <i class="fas fa-car"></i>
+                        </div>
+                        <div class="stats-info">
+                            <h3 id="vehicleCount">-</h3>
+                            <p>車輛檢測</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <div class="stats-icon">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="stats-info">
+                            <h3 id="alertCount">-</h3>
+                            <p>異常事件</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 圖表區域 -->
+            <div class="row mb-4">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-chart-line"></i> 檢測趨勢分析</h5>
+                            <div class="chart-controls">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="refreshAnalytics()">
+                                    <i class="fas fa-sync-alt"></i> 重新整理
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="trend-chart-container">
+                                <canvas id="trendChart" height="300"></canvas>
+                                <div id="trend-chart-loading" class="text-center" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i> 載入圖表數據...
+                                </div>
+                                <div id="trend-chart-error" class="text-center text-muted" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle"></i> 暫無數據
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-chart-pie"></i> 物件類型分布</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="category-chart-container">
+                                <canvas id="categoryChart" height="300"></canvas>
+                                <div id="category-chart-loading" class="text-center" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i> 載入圖表數據...
+                                </div>
+                                <div id="category-chart-error" class="text-center text-muted" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle"></i> 暫無數據
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 熱點圖和詳細分析 -->
+            <div class="row">
+            <!-- 詳細分析區域 -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-map-marked-alt"></i> 活動熱點圖</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="heatmap-container">
+                                <canvas id="heatmapChart" height="250"></canvas>
+                                <div id="heatmap-loading" class="text-center" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i> 載入熱點圖數據...
+                                </div>
+                                <div id="heatmap-error" class="text-center text-muted" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle"></i> 暫無熱點數據
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-clock"></i> 時段分析</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="time-analysis-container">
+                                <canvas id="timeAnalysisChart" height="250"></canvas>
+                                <div id="time-analysis-loading" class="text-center" style="display: none;">
+                                    <i class="fas fa-spinner fa-spin"></i> 載入時段分析...
+                                </div>
+                                <div id="time-analysis-error" class="text-center text-muted" style="display: none;">
+                                    <i class="fas fa-exclamation-triangle"></i> 暫無時段數據
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 檢測結果詳細列表 -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5><i class="fas fa-list"></i> 最近檢測結果</h5>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="exportDetectionResults()">
+                                    <i class="fas fa-download"></i> 匯出結果
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="refreshDetectionResults()">
+                                    <i class="fas fa-sync-alt"></i> 重新整理
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="detection-results-container">
+                                <div class="table-responsive">
+                                    <table class="table table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>時間</th>
+                                                <th>來源</th>
+                                                <th>檢測類型</th>
+                                                <th>信心度</th>
+                                                <th>座標</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="detection-results-table">
+                                            <tr>
+                                                <td colspan="6" class="text-center text-muted">
+                                                    <i class="fas fa-spinner fa-spin"></i> 載入檢測結果...
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 多攝影機管理 -->
+        <section id="multi-camera" class="content-section">
+            <div class="section-header">
+                <h1>多攝影機管理</h1>
+                <p>攝影機群組與同步控制</p>
+            </div>
+
+            <!-- 攝影機群組控制 -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card camera-group-card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-layer-group"></i> 攝影機群組</h5>
+                            <button class="btn btn-primary btn-sm" onclick="createCameraGroup()">
+                                <i class="fas fa-plus"></i> 新增群組
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="camera-groups" id="cameraGroups">
+                                <!-- 攝影機群組將由 JavaScript 動態生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 攝影機網格顯示 -->
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-th"></i> 攝影機監控網格</h5>
+                            <div class="camera-grid-controls">
+                                <button class="btn btn-sm btn-outline-primary" onclick="changeGridLayout('2x2')">2x2</button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="changeGridLayout('3x3')">3x3</button>
+                                <button class="btn btn-sm btn-outline-primary" onclick="changeGridLayout('4x4')">4x4</button>
+                                <button class="btn btn-sm btn-success" onclick="startAllCameras()">
+                                    <i class="fas fa-play"></i> 全部啟動
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="stopAllCameras()">
+                                    <i class="fas fa-stop"></i> 全部停止
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="camera-grid-display" id="cameraGridDisplay">
+                                <!-- 攝影機網格將由 JavaScript 動態生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 數據管理 -->
+        <section id="data-management" class="content-section">
+            <div class="section-header">
+                <h1>數據管理與匯出</h1>
+                <p>檢測結果管理、資料庫操作與匯出功能</p>
+            </div>
+
+            <!-- 數據統計總覽 -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body text-center">
+                            <div class="stat-icon">
+                                <i class="fas fa-database text-primary"></i>
+                            </div>
+                            <h3 id="total-records" class="stat-number">-</h3>
+                            <p class="stat-label">總記錄數</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body text-center">
+                            <div class="stat-icon">
+                                <i class="fas fa-eye text-success"></i>
+                            </div>
+                            <h3 id="detection-count" class="stat-number">-</h3>
+                            <p class="stat-label">檢測次數</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body text-center">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar text-warning"></i>
+                            </div>
+                            <h3 id="days-active" class="stat-number">-</h3>
+                            <p class="stat-label">活躍天數</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body text-center">
+                            <div class="stat-icon">
+                                <i class="fas fa-hdd text-info"></i>
+                            </div>
+                            <h3 id="storage-size" class="stat-number">-</h3>
+                            <p class="stat-label">資料大小</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 資料篩選與搜尋 -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-filter"></i> 資料篩選與搜尋</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <label class="form-label">時間範圍</label>
+                                    <select class="form-select" id="data-time-range">
+                                        <option value="today">今天</option>
+                                        <option value="week">最近一週</option>
+                                        <option value="month">最近一個月</option>
+                                        <option value="custom">自定義範圍</option>
+                                        <option value="all" selected>所有資料</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">物件類型</label>
+                                    <select class="form-select" id="data-object-type">
+                                        <option value="">所有類型</option>
+                                        <option value="person">人員</option>
+                                        <option value="car">汽車</option>
+                                        <option value="truck">卡車</option>
+                                        <option value="bus">公車</option>
+                                        <option value="bicycle">自行車</option>
+                                        <option value="motorcycle">機車</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">信心度範圍</label>
+                                    <div class="d-flex">
+                                        <input type="number" class="form-control me-2" id="confidence-min" 
+                                               placeholder="最小值" min="0" max="1" step="0.1" value="0">
+                                        <input type="number" class="form-control" id="confidence-max" 
+                                               placeholder="最大值" min="0" max="1" step="0.1" value="1">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">操作</label>
+                                    <div class="d-flex">
+                                        <button class="btn btn-primary me-2" onclick="DataManager.applyFilters()">
+                                            <i class="fas fa-search"></i> 搜尋
+                                        </button>
+                                        <button class="btn btn-outline-secondary" onclick="DataManager.resetFilters()">
+                                            <i class="fas fa-undo"></i> 重置
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mt-3" id="custom-date-range" style="display: none;">
+                                <div class="col-md-6">
+                                    <label class="form-label">開始日期</label>
+                                    <input type="datetime-local" class="form-control" id="start-date">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">結束日期</label>
+                                    <input type="datetime-local" class="form-control" id="end-date">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 檢測結果列表 -->
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5><i class="fas fa-list"></i> 檢測結果列表</h5>
+                            <div class="btn-group">
+                                <button class="btn btn-success btn-sm" onclick="DataManager.exportData('csv')">
+                                    <i class="fas fa-file-csv"></i> 匯出CSV
+                                </button>
+                                <button class="btn btn-primary btn-sm" onclick="DataManager.exportData('json')">
+                                    <i class="fas fa-file-code"></i> 匯出JSON
+                                </button>
+                                <button class="btn btn-warning btn-sm" onclick="DataManager.exportData('excel')">
+                                    <i class="fas fa-file-excel"></i> 匯出Excel
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>
+                                                <input type="checkbox" id="select-all-data" 
+                                                       onchange="DataManager.toggleSelectAll()">
+                                            </th>
+                                            <th>ID</th>
+                                            <th>時間</th>
+                                            <th>物件類型</th>
+                                            <th>物件ID</th>
+                                            <th>信心度</th>
+                                            <th>位置</th>
+                                            <th>大小</th>
+                                            <th>區域</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="data-results-table">
+                                        <tr>
+                                            <td colspan="10" class="text-center text-muted">
+                                                <i class="fas fa-spinner fa-spin"></i> 載入檢測結果...
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- 分頁控制 -->
+                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                <div class="data-info">
+                                    顯示第 <span id="data-page-start">1</span> - <span id="data-page-end">10</span> 筆，
+                                    共 <span id="data-total-count">0</span> 筆記錄
+                                </div>
+                                <nav>
+                                    <ul class="pagination pagination-sm mb-0" id="data-pagination">
+                                        <!-- 分頁按鈕將由 JavaScript 動態生成 -->
+                                    </ul>
+                                </nav>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 資料庫管理 -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-database"></i> 資料庫管理</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-info" onclick="DataManager.backupDatabase()">
+                                    <i class="fas fa-download"></i> 備份資料庫
+                                </button>
+                                <button class="btn btn-warning" onclick="DataManager.optimizeDatabase()">
+                                    <i class="fas fa-tools"></i> 優化資料庫
+                                </button>
+                                <button class="btn btn-danger" onclick="DataManager.showClearDialog()">
+                                    <i class="fas fa-trash"></i> 清空資料
+                                </button>
+                            </div>
+                            <div class="mt-3">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle"></i> 
+                                    資料庫操作會影響系統效能，建議在維護時段執行
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-chart-pie"></i> 儲存空間分析</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="storage-analysis">
+                                <div class="storage-item">
+                                    <span>檢測結果</span>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-primary" style="width: 60%" id="detection-storage"></div>
+                                    </div>
+                                    <small id="detection-storage-text">計算中...</small>
+                                </div>
+                                <div class="storage-item">
+                                    <span>影片檔案</span>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-success" style="width: 25%" id="video-storage"></div>
+                                    </div>
+                                    <small id="video-storage-text">計算中...</small>
+                                </div>
+                                <div class="storage-item">
+                                    <span>系統日誌</span>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-warning" style="width: 15%" id="log-storage"></div>
+                                    </div>
+                                    <small id="log-storage-text">計算中...</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 資料分析工具 -->
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="fas fa-analytics"></i> 資料分析工具</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>快速統計</h6>
+                                    <div class="quick-stats">
+                                        <div class="stat-item">
+                                            <span>今日檢測數：</span>
+                                            <strong id="today-detections">-</strong>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span>平均信心度：</span>
+                                            <strong id="avg-confidence">-</strong>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span>最常見物件：</span>
+                                            <strong id="most-common-object">-</strong>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span>活躍時段：</span>
+                                            <strong id="peak-hours">-</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>資料品質指標</h6>
+                                    <div class="quality-indicators">
+                                        <div class="indicator">
+                                            <span>高信心度檢測 (>0.8)：</span>
+                                            <div class="progress">
+                                                <div class="progress-bar bg-success" id="high-confidence-bar"></div>
+                                            </div>
+                                            <span id="high-confidence-text">-</span>
+                                        </div>
+                                        <div class="indicator">
+                                            <span>追蹤連續性：</span>
+                                            <div class="progress">
+                                                <div class="progress-bar bg-info" id="tracking-continuity-bar"></div>
+                                            </div>
+                                            <span id="tracking-continuity-text">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 其他內容區塊會類似的方式繼續... -->
+        
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="api-config.js?v=20250810-2"></script>
+    <script src="script_api.js?v=20250810-2"></script>
+    <script src="realtime-detection.js?v=20240903-1"></script>
+    <script src="shutdown.js?v=20250831-1"></script>
+</body>
+</html>

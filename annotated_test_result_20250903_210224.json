@@ -1,0 +1,21 @@
+{
+  "source": "demo_for_annotation.mp4",
+  "processing_time": 3.912831,
+  "total_frames": 150,
+  "processed_frames": 50,
+  "detection_count": 43,
+  "behavior_event_count": 8,
+  "object_types": {
+    "sports ball": 41,
+    "frisbee": 2
+  },
+  "behavior_types": {
+    "abnormal_speed": 8
+  },
+  "zone_activity": {
+    "unknown_area": 43
+  },
+  "start_time": "2025-09-03 21:02:20",
+  "end_time": "2025-09-03 21:02:24",
+  "annotated_video_path": "demo_for_annotation_annotated_20250903_210220.mp4"
+}

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .dashboard-card { 
+            border: none; 
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            transition: transform 0.2s;
+        }
+        .dashboard-card:hover { transform: translateY(-2px); }
+        .sidebar {
+            background: linear-gradient(180deg, #2c3e50 0%, #3498db 100%);
+            min-height: 100vh;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.8) !important;
+            border-radius: 0.5rem;
+            margin: 0.2rem 0;
+        }
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white !important;
+        }
+        .task-type-realtime { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .task-type-video { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .task-status-pending { background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%); }
+        .task-status-running { background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%); }
+        .task-status-completed { background: linear-gradient(135deg, #00b894 0%, #00a085 100%); }
+        .task-status-failed { background: linear-gradient(135deg, #fd79a8 0%, #e84393 100%); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 側邊欄 -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h5 class="text-white">
+                            <i class="fas fa-eye text-warning"></i>
+                            YOLOv11 系統
+                        </h5>
+                        <small class="text-light">數位雙生分析平台 v2.0</small>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/">
+                                <i class="fas fa-tachometer-alt"></i> 主控台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/admin/v2/tasks">
+                                <i class="fas fa-tasks"></i> 任務管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/sources">
+                                <i class="fas fa-database"></i> 資料來源
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/config">
+                                <i class="fas fa-cogs"></i> 系統配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/yolo-config">
+                                <i class="fas fa-robot"></i> YOLO模型配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/camera-management">
+                                <i class="fas fa-video"></i> 攝影機管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/analytics">
+                                <i class="fas fa-chart-bar"></i> 分析統計
+                            </a>
+                        </li>
+                        <li class="nav-item mt-3">
+                            <a class="nav-link" href="/admin/">
+                                <i class="fas fa-arrow-left"></i> 舊版後台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/docs">
+                                <i class="fas fa-book"></i> API 文檔
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 主要內容 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">
+                        <i class="fas fa-tasks text-primary"></i>
+                        任務管理
+                    </h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
+                                <i class="fas fa-plus"></i> 新增任務
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+                                <i class="fas fa-sync-alt"></i> 重新整理
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    錯誤：{{ error }}
+                </div>
+                {% endif %}
+
+                <!-- 任務狀態統計 -->
+                <div class="row mb-4">
+                    {% for status, task_list in tasks_by_status.items() %}
+                    <div class="col-lg-3 col-md-6 mb-3">
+                        <div class="card dashboard-card task-status-{{ status }}">
+                            <div class="card-body text-white">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="card-title mb-0">
+                                            {% if status == 'pending' %}
+                                                等待中
+                                            {% elif status == 'running' %}
+                                                執行中
+                                            {% elif status == 'completed' %}
+                                                已完成
+                                            {% elif status == 'failed' %}
+                                                失敗
+                                            {% else %}
+                                                {{ status }}
+                                            {% endif %}
+                                        </h5>
+                                        <h3 class="mb-0">{{ task_list|length }}</h3>
+                                    </div>
+                                    <div>
+                                        {% if status == 'pending' %}
+                                            <i class="fas fa-clock fa-2x"></i>
+                                        {% elif status == 'running' %}
+                                            <i class="fas fa-play-circle fa-2x"></i>
+                                        {% elif status == 'completed' %}
+                                            <i class="fas fa-check-circle fa-2x"></i>
+                                        {% elif status == 'failed' %}
+                                            <i class="fas fa-times-circle fa-2x"></i>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 任務列表 -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-list text-info"></i>
+                                    任務列表
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <!-- 篩選器 -->
+                                <div class="row mb-3">
+                                    <div class="col-md-3">
+                                        <select class="form-select" id="statusFilter">
+                                            <option value="">所有狀態</option>
+                                            <option value="pending">等待中</option>
+                                            <option value="running">執行中</option>
+                                            <option value="completed">已完成</option>
+                                            <option value="failed">失敗</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <select class="form-select" id="typeFilter">
+                                            <option value="">所有類型</option>
+                                            <option value="realtime_camera">即時攝影機</option>
+                                            <option value="video_file">影片檔案</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="searchInput" placeholder="搜尋任務...">
+                                            <button class="btn btn-outline-secondary" type="button" onclick="filterTasks()">
+                                                <i class="fas fa-search"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {% if tasks %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover" id="tasksTable">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>任務類型</th>
+                                                <th>狀態</th>
+                                                <th>創建時間</th>
+                                                <th>開始時間</th>
+                                                <th>完成時間</th>
+                                                <th>描述</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for task in tasks %}
+                                            <tr data-status="{{ task.status }}" data-type="{{ task.task_type }}">
+                                                <td>{{ task.id }}</td>
+                                                <td>
+                                                    <span class="badge bg-info">
+                                                        {{ '即時攝影機' if task.task_type == 'realtime_camera' else '影片檔案' }}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    {% if task.status == 'completed' %}
+                                                        <span class="badge bg-success">已完成</span>
+                                                    {% elif task.status == 'running' %}
+                                                        <span class="badge bg-primary">執行中</span>
+                                                    {% elif task.status == 'failed' %}
+                                                        <span class="badge bg-danger">失敗</span>
+                                                    {% elif task.status == 'pending' %}
+                                                        <span class="badge bg-warning">等待中</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary">{{ task.status }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ task.created_at if task.created_at else '-' }}</td>
+                                                <td>{{ task.started_at if task.started_at else '-' }}</td>
+                                                <td>{{ task.completed_at if task.completed_at else '-' }}</td>
+                                                <td>{{ task.task_description or '-' }}</td>
+                                                <td>
+                                                    <div class="btn-group" role="group">
+                                                        {% if task.status == 'running' %}
+                                                        <button class="btn btn-sm btn-outline-danger" onclick="stopTask({{ task.id }})">
+                                                            <i class="fas fa-stop"></i>
+                                                        </button>
+                                                        {% endif %}
+                                                        <button class="btn btn-sm btn-outline-info" onclick="viewTaskDetails({{ task.id }})">
+                                                            <i class="fas fa-eye"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-info-circle fa-2x"></i>
+                                    <p class="mt-2">目前沒有任務記錄</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 新增任務 Modal -->
+    <div class="modal fade" id="createTaskModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">新增分析任務</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createTaskForm">
+                        <div class="mb-3">
+                            <label class="form-label">任務類型</label>
+                            <select class="form-select" id="taskType" required>
+                                <option value="">請選擇任務類型</option>
+                                <option value="realtime_camera">即時攝影機分析</option>
+                                <option value="video_file">影片檔案分析</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3" id="dataSourceSelect">
+                            <label class="form-label">資料來源</label>
+                            <select class="form-select" id="dataSourceId">
+                                <option value="">請選擇資料來源</option>
+                                {% for source in data_sources %}
+                                <option value="{{ source.id }}" data-type="{{ source.source_type }}">
+                                    {{ source.source_name }} ({{ source.source_type }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">任務描述</label>
+                            <textarea class="form-control" id="taskDescription" rows="3" placeholder="任務描述..."></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">配置參數</label>
+                            <textarea class="form-control" id="taskConfig" rows="4" placeholder='{"confidence": 0.5, "iou_threshold": 0.4}'></textarea>
+                            <div class="form-text">JSON 格式的配置參數</div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="createTask()">建立任務</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function stopTask(taskId) {
+            if (confirm('確定要停止這個任務嗎？')) {
+                fetch(`/admin/v2/api/tasks/${taskId}/stop`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('任務已停止');
+                        location.reload();
+                    } else {
+                        alert('停止任務失敗：' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('操作失敗：' + error);
+                });
+            }
+        }
+
+        function viewTaskDetails(taskId) {
+            // 實現查看任務詳情功能
+            window.open(`/admin/v2/tasks/${taskId}`, '_blank');
+        }
+
+        function createTask() {
+            const taskType = document.getElementById('taskType').value;
+            const dataSourceId = document.getElementById('dataSourceId').value;
+            const taskDescription = document.getElementById('taskDescription').value;
+            const taskConfig = document.getElementById('taskConfig').value;
+
+            if (!taskType) {
+                alert('請選擇任務類型');
+                return;
+            }
+
+            let config = {};
+            if (taskConfig) {
+                try {
+                    config = JSON.parse(taskConfig);
+                } catch (e) {
+                    alert('配置參數格式錯誤，請使用有效的 JSON 格式');
+                    return;
+                }
+            }
+
+            const taskData = {
+                task_type: taskType,
+                data_source_id: dataSourceId || null,
+                task_description: taskDescription,
+                task_config: config
+            };
+
+            fetch('/api/v2/analysis/create-task', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(taskData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success || data.task_id) {
+                    alert('任務建立成功');
+                    location.reload();
+                } else {
+                    alert('建立任務失敗：' + (data.error || '未知錯誤'));
+                }
+            })
+            .catch(error => {
+                alert('操作失敗：' + error);
+            });
+        }
+
+        function filterTasks() {
+            const statusFilter = document.getElementById('statusFilter').value;
+            const typeFilter = document.getElementById('typeFilter').value;
+            const searchText = document.getElementById('searchInput').value.toLowerCase();
+            
+            const rows = document.querySelectorAll('#tasksTable tbody tr');
+            
+            rows.forEach(row => {
+                const status = row.dataset.status;
+                const type = row.dataset.type;
+                const text = row.textContent.toLowerCase();
+                
+                let show = true;
+                
+                if (statusFilter && status !== statusFilter) show = false;
+                if (typeFilter && type !== typeFilter) show = false;
+                if (searchText && !text.includes(searchText)) show = false;
+                
+                row.style.display = show ? '' : 'none';
+            });
+        }
+
+        // 任務類型變更時更新資料來源選項
+        document.getElementById('taskType').addEventListener('change', function() {
+            const taskType = this.value;
+            const dataSourceSelect = document.getElementById('dataSourceId');
+            const options = dataSourceSelect.querySelectorAll('option');
+            
+            options.forEach(option => {
+                if (option.value === '') {
+                    option.style.display = '';
+                    return;
+                }
+                
+                const sourceType = option.dataset.type;
+                if (taskType === 'realtime_camera' && sourceType === 'camera') {
+                    option.style.display = '';
+                } else if (taskType === 'video_file' && sourceType === 'video_file') {
+                    option.style.display = '';
+                } else {
+                    option.style.display = 'none';
+                }
+            });
+            
+            dataSourceSelect.value = '';
+        });
+
+        // 篩選器變更時自動篩選
+        document.getElementById('statusFilter').addEventListener('change', filterTasks);
+        document.getElementById('typeFilter').addEventListener('change', filterTasks);
+        document.getElementById('searchInput').addEventListener('input', filterTasks);
+    </script>
+</body>
+</html>

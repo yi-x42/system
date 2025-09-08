@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" href="/admin/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap">
+    
+    <style>
+        /* 科技感主題樣式 - 修復版 */
+        :root {
+            --neon-blue: #00f5ff;
+            --neon-purple: #bf00ff;
+            --neon-green: #39ff14;
+            --neon-pink: #ff1493;
+            --neon-yellow: #ffff00;
+            --dark-bg: #0a0a0a;
+            --dark-card: #1a1a2e;
+            --dark-secondary: #16213e;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, var(--dark-bg) 0%, var(--dark-card) 50%, var(--dark-secondary) 100%);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* 霓虹發光效果 */
+        .neon-glow {
+            animation: neonPulse 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes neonPulse {
+            from { 
+                box-shadow: 0 0 5px var(--neon-blue), 0 0 10px var(--neon-blue); 
+            }
+            to { 
+                box-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue), 0 0 30px var(--neon-blue); 
+            }
+        }
+
+        /* 側邊欄樣式 */
+        .sidebar {
+            background: linear-gradient(180deg, rgba(26, 26, 46, 0.95) 0%, rgba(10, 10, 10, 0.98) 100%);
+            border-right: 2px solid var(--neon-blue);
+            backdrop-filter: blur(15px);
+            box-shadow: 2px 0 20px rgba(0, 245, 255, 0.1);
+        }
+
+        .nav-item {
+            position: relative;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+            margin: 4px 8px;
+            border-radius: 8px;
+        }
+
+        .nav-item:hover {
+            border-left-color: var(--neon-green);
+            background: linear-gradient(90deg, rgba(57, 255, 20, 0.15) 0%, transparent 100%);
+            transform: translateX(8px);
+        }
+
+        .nav-item.active {
+            border-left-color: var(--neon-blue);
+            background: linear-gradient(90deg, rgba(0, 245, 255, 0.2) 0%, transparent 100%);
+        }
+
+        /* 頂部導航欄 */
+        .tech-header {
+            background: linear-gradient(90deg, rgba(26, 26, 46, 0.9) 0%, rgba(22, 33, 62, 0.9) 100%);
+            border-bottom: 2px solid var(--neon-blue);
+            backdrop-filter: blur(20px);
+            box-shadow: 0 2px 20px rgba(0, 245, 255, 0.1);
+        }
+
+        /* 科技卡片 */
+        .tech-card {
+            background: linear-gradient(145deg, rgba(26, 26, 46, 0.8) 0%, rgba(22, 33, 62, 0.6) 100%);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .tech-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+            /* 移除掃描線動畫 */
+            display: none;
+        }
+
+        /* 移除掃描線動畫 */
+        @keyframes scanLine {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        .tech-card:hover {
+            border-color: var(--neon-green);
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 245, 255, 0.2);
+        }
+
+        /* 指標卡片 */
+        .metric-card {
+            background: linear-gradient(135deg, var(--dark-card) 0%, var(--dark-secondary) 50%, #0f3460 100%);
+            border: 1px solid var(--neon-blue);
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            padding: 1.5rem;
+        }
+
+        .metric-card::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(transparent, rgba(0, 245, 255, 0.1), transparent);
+            animation: rotate 8s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .metric-value {
+            font-family: 'Orbitron', monospace;
+            font-weight: 700;
+            font-size: 2rem;
+            text-shadow: 0 0 15px var(--neon-blue);
+            position: relative;
+            z-index: 2;
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            position: relative;
+            z-index: 2;
+        }
+
+        /* 科技按鈕 */
+        .tech-button {
+            background: linear-gradient(45deg, rgba(0, 245, 255, 0.1) 0%, rgba(191, 0, 255, 0.1) 100%);
+            border: 1px solid var(--neon-blue);
+            color: var(--neon-blue);
+            border-radius: 8px;
+            padding: 10px 20px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .tech-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 245, 255, 0.3), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .tech-button:hover::before {
+            left: 100%;
+        }
+
+        .tech-button:hover {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            box-shadow: 0 0 20px rgba(57, 255, 20, 0.4);
+            transform: translateY(-2px);
+        }
+
+        /* 圖表容器 */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            background: radial-gradient(circle at center, rgba(0, 245, 255, 0.05) 0%, transparent 70%);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        /* 科技輸入框 */
+        .tech-input {
+            background: rgba(26, 26, 46, 0.8);
+            border: 1px solid rgba(0, 245, 255, 0.3);
+            color: var(--text-primary);
+            border-radius: 8px;
+            padding: 12px;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        .tech-input:focus {
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 15px rgba(0, 245, 255, 0.4);
+            outline: none;
+        }
+
+        /* 模型卡片 */
+        .model-card {
+            background: linear-gradient(145deg, rgba(26, 26, 46, 0.8) 0%, rgba(22, 33, 62, 0.6) 100%);
+            border: 1px solid rgba(191, 0, 255, 0.3);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            padding: 1rem;
+            cursor: pointer;
+        }
+
+        .model-card:hover {
+            border-color: var(--neon-purple);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(191, 0, 255, 0.2);
+        }
+
+        .model-card.selected {
+            border-color: var(--neon-green);
+            background: linear-gradient(145deg, rgba(57, 255, 20, 0.1) 0%, rgba(26, 26, 46, 0.8) 100%);
+        }
+
+        /* 浮動動畫 */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .float {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        /* 脈衝動畫 */
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        /* 背景粒子 */
+        .background-particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .particle {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: var(--neon-blue);
+            border-radius: 50%;
+            opacity: 0.6;
+            animation: float 4s ease-in-out infinite;
+        }
+
+        /* 終端風格日誌 */
+        .terminal-log {
+            background: rgba(0, 0, 0, 0.8);
+            color: var(--neon-green);
+            font-family: 'Courier New', monospace;
+            border: 1px solid var(--neon-green);
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            backdrop-filter: blur(5px);
+        }
+
+        /* 掃描移動動畫 */
+        @keyframes scanMove {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        .scan-line-effect {
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        /* 網格佈局 */
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
+        .grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+        /* 狀態指示器 */
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-online { background-color: var(--neon-green); }
+        .status-offline { background-color: var(--neon-pink); }
+        .status-warning { background-color: var(--neon-yellow); }
+
+        /* 響應式設計 */
+        @media (max-width: 1024px) {
+            .grid-cols-4 { grid-template-columns: repeat(2, 1fr); }
+            .grid-cols-3 { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { 
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            .sidebar.show { 
+                transform: translateX(0); 
+            }
+            .tech-card { 
+                margin-bottom: 1rem; 
+            }
+            .grid-cols-4,
+            .grid-cols-3,
+            .grid-cols-2 { 
+                grid-template-columns: 1fr; 
+            }
+            .metric-card {
+                margin-bottom: 1rem;
+            }
+            .metric-value {
+                font-size: 1.5rem;
+            }
+        }
+
+        /* 滾動條樣式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(26, 26, 46, 0.5);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--neon-blue);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--neon-green);
+        }
+
+        /* 隱藏類別 */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="font-sans">
+    <!-- 背景粒子動畫 -->
+    <div class="background-particles" id="particles"></div>
+    <canvas id="neural-network" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.1;"></canvas>
+    
+    <!-- 通知容器 -->
+    <div id="notification-container" class="fixed top-4 right-4 z-50 space-y-2">
+        <!-- 通知會動態插入此處 -->
+    </div>
+    
+    <!-- 側邊欄 -->
+    <div id="sidebar" class="sidebar fixed inset-y-0 left-0 z-50 w-64 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+        <div class="flex items-center justify-between h-16 px-6 border-b border-cyan-500/30">
+            <div class="flex items-center">
+                <div class="relative w-8 h-8 mr-3">
+                    <div class="absolute inset-0 bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 rounded-xl opacity-80"></div>
+                    <div class="absolute inset-0.5 bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-chart-line text-cyan-400 text-sm neon-glow"></i>
+                    </div>
+                    <div class="absolute inset-0 bg-gradient-to-br from-cyan-400/20 to-purple-600/20 rounded-xl animate-pulse"></div>
+                </div>
+                <h1 class="text-xl font-bold text-cyan-400 font-mono">分析系統</h1>
+            </div>
+            <button id="sidebar-close" class="lg:hidden text-cyan-400 hover:text-cyan-300">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <nav class="mt-8 px-4">
+            <a href="#dashboard" class="nav-item active flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-tachometer-alt mr-3 text-cyan-400"></i>
+                <span class="font-medium">系統監控</span>
+                <div class="ml-auto w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            </a>
+            <a href="#yolo-config" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-cogs mr-3 text-purple-400"></i>
+                <span class="font-medium">YOLO 配置</span>
+            </a>
+            <a href="#camera-manager" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-video mr-3 text-red-400"></i>
+                <span class="font-medium">攝影機管理</span>
+                <div class="ml-auto w-2 h-2 bg-red-400 rounded-full"></div>
+            </a>
+            <a href="#file-manager" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-folder mr-3 text-blue-400"></i>
+                <span class="font-medium">檔案管理</span>
+            </a>
+            <a href="#analytics" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-chart-line mr-3 text-green-400"></i>
+                <span class="font-medium">資料分析</span>
+            </a>
+            <a href="#database" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-database mr-3 text-indigo-400"></i>
+                <span class="font-medium">資料庫管理</span>
+                <div class="ml-auto w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
+            </a>
+            <a href="#api-docs" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-code mr-3 text-orange-400"></i>
+                <span class="font-medium">API 文件</span>
+                <div class="ml-auto w-2 h-2 bg-orange-400 rounded-full"></div>
+            </a>
+            <a href="#network" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-network-wired mr-3 text-pink-400"></i>
+                <span class="font-medium">網絡狀態</span>
+            </a>
+            <a href="#logs" class="nav-item flex items-center px-6 py-4 text-cyan-100 hover:text-cyan-400 transition-all duration-300 rounded-lg mb-2">
+                <i class="fas fa-file-alt mr-3 text-yellow-400"></i>
+                <span class="font-medium">系統日誌</span>
+            </a>
+        </nav>
+        
+        <div class="absolute bottom-0 w-full p-6">
+            <div class="tech-card p-4">
+                <div class="text-sm text-cyan-400 mb-2">系統時間</div>
+                <div id="current-time" class="text-cyan-100 font-mono">{{ current_time }}</div>
+                <div class="mt-2 text-xs text-cyan-500">RADMIN NETWORK ACTIVE</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主內容區域 -->
+    <div class="lg:ml-64">
+        <!-- 頂部導航欄 -->
+        <header class="tech-header backdrop-blur-sm bg-black/20 border-b border-cyan-500/30">
+            <div class="flex items-center justify-between h-16 px-6">
+                <button id="sidebar-toggle" class="lg:hidden tech-button p-2">
+                    <i class="fas fa-bars text-cyan-400"></i>
+                </button>
+                <div class="flex items-center">
+                    <h2 id="page-title" class="text-xl font-bold text-cyan-100 font-mono">[ 系統監控 ]</h2>
+                    <div class="ml-4 w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                </div>
+                <div class="flex items-center space-x-6">
+                    <div class="flex items-center bg-black/40 rounded-lg px-3 py-2 border border-cyan-500/30">
+                        <span class="text-sm text-cyan-400 mr-2">RADMIN IP:</span>
+                        <span class="text-sm text-cyan-100 font-mono">26.86.64.166</span>
+                    </div>
+                    <div id="connection-status" class="flex items-center bg-black/40 rounded-lg px-3 py-2 border border-green-500/30">
+                        <i class="fas fa-circle text-green-400 mr-2 animate-pulse"></i>
+                        <span class="text-sm text-green-400">連線中</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 內容區域 -->
+        <main class="p-6">
+            <!-- 系統監控面板 -->
+            <div id="dashboard" class="section">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                    <div class="metric-card">
+                        <div class="metric-label">CPU 使用率</div>
+                        <div id="cpu-usage" class="metric-value">0%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">記憶體使用率</div>
+                        <div id="memory-usage" class="metric-value">0%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">GPU 使用率</div>
+                        <div id="gpu-usage" class="metric-value">N/A</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">網絡狀態</div>
+                        <div class="metric-value text-green-400">在線</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">系統資源趨勢</h3>
+                        <div class="chart-container">
+                            <canvas id="system-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">記憶體分布</h3>
+                        <div class="chart-container">
+                            <canvas id="memory-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- YOLO 配置面板 -->
+            <div id="yolo-config" class="section hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- 模型選擇區域 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-6">
+                            <h3 class="text-lg font-bold text-cyan-100">YOLO 模型選擇</h3>
+                            <button id="refresh-models" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-md hover:from-blue-700 hover:to-cyan-700 transition-all duration-300">
+                                <i class="fas fa-sync-alt mr-2"></i>重新整理
+                            </button>
+                        </div>
+                        
+                        <!-- 官方模型 -->
+                        <div class="mb-6">
+                            <h4 class="text-md font-medium text-cyan-100 mb-3">
+                                <i class="fas fa-star text-yellow-400 mr-2"></i>官方模型
+                            </h4>
+                            <div id="official-models" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <!-- 動態載入官方模型 -->
+                            </div>
+                        </div>
+                        
+                        <!-- 自定義模型 -->
+                        <div class="mb-6">
+                            <h4 class="text-md font-medium text-cyan-100 mb-3">
+                                <i class="fas fa-user-cog text-blue-400 mr-2"></i>自定義模型
+                            </h4>
+                            <div id="custom-models" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <!-- 動態載入自定義模型 -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 配置參數 -->
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-6">模型配置參數</h3>
+                        <form id="yolo-config-form" class="space-y-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label class="block text-sm font-medium text-cyan-100 mb-2">選中的模型</label>
+                                    <input type="text" id="selected-model" name="model_path" readonly class="tech-input bg-gray-700 cursor-not-allowed">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-cyan-100 mb-2">設備</label>
+                                    <select id="device" name="device" class="tech-input">
+                                        <option value="auto">自動選擇</option>
+                                        <option value="cpu">CPU</option>
+                                        <option value="cuda">GPU (CUDA)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <label class="block text-sm font-medium text-cyan-100 mb-2">
+                                        信心度閾值 
+                                        <span class="text-cyan-400 text-xs">(0.0-1.0)</span>
+                                    </label>
+                                    <input type="range" id="confidence" name="confidence" min="0" max="1" step="0.01" value="0.25" class="tech-input">
+                                    <div class="text-cyan-400 text-sm mt-1">
+                                        值: <span id="confidence-value">0.25</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-cyan-100 mb-2">
+                                        IoU 閾值 
+                                        <span class="text-cyan-400 text-xs">(0.0-1.0)</span>
+                                    </label>
+                                    <input type="range" id="iou" name="iou" min="0" max="1" step="0.01" value="0.45" class="tech-input">
+                                    <div class="text-cyan-400 text-sm mt-1">
+                                        值: <span id="iou-value">0.45</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-cyan-100 mb-2">最大檢測數</label>
+                                    <input type="number" id="max-det" name="max_det" value="1000" min="1" max="10000" class="tech-input">
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-end space-x-4">
+                                <button type="button" id="reset-config" class="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors">
+                                    <i class="fas fa-undo mr-2"></i>重置
+                                </button>
+                                <button type="submit" class="px-6 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                    <i class="fas fa-save mr-2"></i>保存配置
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 攝影機管理面板 -->
+            <div id="camera-manager" class="section hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- 攝影機連接狀態 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">
+                                <i class="fas fa-video mr-2 text-red-400"></i>攝影機設備管理
+                            </h3>
+                            <div class="flex space-x-3">
+                                <button id="scan-cameras" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-md hover:from-blue-700 hover:to-cyan-700 transition-all duration-300">
+                                    <i class="fas fa-search mr-2"></i>掃描設備
+                                </button>
+                                <button id="add-camera" class="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                    <i class="fas fa-plus mr-2"></i>新增攝影機
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 攝影機狀態卡片 -->
+                        <div id="camera-status-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                            <!-- 動態生成攝影機卡片 -->
+                        </div>
+                    </div>
+
+                    <!-- 攝影機配置 -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- 新增/編輯攝影機 -->
+                        <div class="tech-card p-6">
+                            <h3 class="text-lg font-bold text-cyan-100 mb-4">
+                                <i class="fas fa-cog mr-2 text-purple-400"></i>攝影機配置
+                            </h3>
+                            
+                            <form id="camera-config-form">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-cyan-300 text-sm font-medium mb-2">攝影機名稱</label>
+                                        <input type="text" id="camera-name" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="例：前門攝影機">
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-cyan-300 text-sm font-medium mb-2">連接類型</label>
+                                        <select id="camera-type" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400">
+                                            <option value="usb">USB 攝影機</option>
+                                            <option value="rtsp">RTSP 串流</option>
+                                            <option value="ip">IP 攝影機</option>
+                                            <option value="file">影片檔案</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div id="camera-source-config">
+                                        <!-- USB 攝影機配置 -->
+                                        <div id="usb-config" class="camera-config-section">
+                                            <label class="block text-cyan-300 text-sm font-medium mb-2">設備索引</label>
+                                            <select id="usb-device" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400">
+                                                <option value="0">攝影機 0</option>
+                                                <option value="1">攝影機 1</option>
+                                                <option value="2">攝影機 2</option>
+                                            </select>
+                                        </div>
+                                        
+                                        <!-- RTSP/IP 攝影機配置 -->
+                                        <div id="network-config" class="camera-config-section hidden">
+                                            <div class="space-y-3">
+                                                <div>
+                                                    <label class="block text-cyan-300 text-sm font-medium mb-2">串流 URL</label>
+                                                    <input type="text" id="camera-url" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="rtsp://192.168.1.100:554/stream">
+                                                </div>
+                                                <div class="grid grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label class="block text-cyan-300 text-sm font-medium mb-2">用戶名</label>
+                                                        <input type="text" id="camera-username" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="admin">
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-cyan-300 text-sm font-medium mb-2">密碼</label>
+                                                        <input type="password" id="camera-password" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="password">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 檔案配置 -->
+                                        <div id="file-config" class="camera-config-section hidden">
+                                            <label class="block text-cyan-300 text-sm font-medium mb-2">影片檔案路徑</label>
+                                            <div class="flex space-x-2">
+                                                <input type="text" id="video-file-path" class="flex-1 bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="選擇影片檔案...">
+                                                <button type="button" id="browse-video-file" class="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-md hover:from-gray-700 hover:to-gray-800 transition-all duration-300">
+                                                    <i class="fas fa-folder-open"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-cyan-300 text-sm font-medium mb-2">解析度寬度</label>
+                                            <input type="number" id="camera-width" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" value="640">
+                                        </div>
+                                        <div>
+                                            <label class="block text-cyan-300 text-sm font-medium mb-2">解析度高度</label>
+                                            <input type="number" id="camera-height" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" value="480">
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="block text-cyan-300 text-sm font-medium mb-2">幀率 (FPS)</label>
+                                        <input type="number" id="camera-fps" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" value="30" min="1" max="60">
+                                    </div>
+                                    
+                                    <div class="flex items-center">
+                                        <input type="checkbox" id="auto-start" class="mr-2 rounded border-cyan-500/30 bg-gray-800 text-cyan-400 focus:ring-cyan-400">
+                                        <label for="auto-start" class="text-cyan-300 text-sm">自動啟動</label>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex space-x-3 mt-6">
+                                    <button type="submit" class="flex-1 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                        <i class="fas fa-save mr-2"></i>保存配置
+                                    </button>
+                                    <button type="button" id="test-camera" class="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-md hover:from-blue-700 hover:to-cyan-700 transition-all duration-300">
+                                        <i class="fas fa-play mr-2"></i>測試連接
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        
+                        <!-- 即時預覽 -->
+                        <div class="tech-card p-6">
+                            <h3 class="text-lg font-bold text-cyan-100 mb-4">
+                                <i class="fas fa-eye mr-2 text-green-400"></i>即時預覽
+                            </h3>
+                            
+                            <div class="bg-gray-900 border border-cyan-500/30 rounded-lg overflow-hidden mb-4">
+                                <div id="camera-preview" class="relative aspect-video bg-gray-800 flex items-center justify-center">
+                                    <div class="text-center text-gray-400">
+                                        <i class="fas fa-video-slash text-4xl mb-2"></i>
+                                        <p>選擇攝影機開始預覽</p>
+                                    </div>
+                                    <video id="preview-video" class="w-full h-full object-cover hidden" autoplay muted></video>
+                                    <canvas id="preview-canvas" class="w-full h-full object-cover hidden"></canvas>
+                                </div>
+                            </div>
+                            
+                            <div class="flex space-x-3">
+                                <button id="start-preview" class="flex-1 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                    <i class="fas fa-play mr-2"></i>開始預覽
+                                </button>
+                                <button id="stop-preview" class="flex-1 px-4 py-2 bg-gradient-to-r from-red-600 to-pink-600 text-white rounded-md hover:from-red-700 hover:to-pink-700 transition-all duration-300">
+                                    <i class="fas fa-stop mr-2"></i>停止預覽
+                                </button>
+                                <button id="capture-frame" class="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-md hover:from-purple-700 hover:to-indigo-700 transition-all duration-300">
+                                    <i class="fas fa-camera mr-2"></i>截圖
+                                </button>
+                            </div>
+                            
+                            <!-- 攝影機統計資訊 -->
+                            <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+                                <div class="bg-gray-800/50 p-3 rounded-lg">
+                                    <div class="text-cyan-300">狀態</div>
+                                    <div id="camera-status" class="text-cyan-100 font-medium">未連接</div>
+                                </div>
+                                <div class="bg-gray-800/50 p-3 rounded-lg">
+                                    <div class="text-cyan-300">幀率</div>
+                                    <div id="actual-fps" class="text-cyan-100 font-medium">0 FPS</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 攝影機列表 -->
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">
+                            <i class="fas fa-list mr-2 text-blue-400"></i>已配置的攝影機
+                        </h3>
+                        
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-gray-600">
+                                        <th class="text-left text-cyan-300 pb-2">名稱</th>
+                                        <th class="text-left text-cyan-300 pb-2">類型</th>
+                                        <th class="text-left text-cyan-300 pb-2">來源</th>
+                                        <th class="text-left text-cyan-300 pb-2">狀態</th>
+                                        <th class="text-left text-cyan-300 pb-2">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="camera-list">
+                                    <!-- 動態生成攝影機列表 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 檔案管理面板 -->
+            <div id="file-manager" class="section hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- 檔案操作工具列 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">檔案管理器</h3>
+                            <div class="flex space-x-3">
+                                <button id="refresh-files" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-md hover:from-blue-700 hover:to-cyan-700 transition-all duration-300">
+                                    <i class="fas fa-sync-alt mr-2"></i>重新整理
+                                </button>
+                                <button id="create-folder-btn" class="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                    <i class="fas fa-folder-plus mr-2"></i>新建資料夾
+                                </button>
+                                <label for="file-upload" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-md hover:from-purple-700 hover:to-indigo-700 transition-all duration-300 cursor-pointer">
+                                    <i class="fas fa-upload mr-2"></i>上傳檔案
+                                    <input type="file" id="file-upload" class="hidden" multiple>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- 路徑導航 -->
+                        <div class="mb-4">
+                            <div class="flex items-center text-sm text-cyan-300">
+                                <i class="fas fa-folder text-cyan-400 mr-2"></i>
+                                <span>目前路徑：</span>
+                                <div id="breadcrumb" class="ml-2 text-cyan-100">
+                                    <!-- 動態生成路徑導航 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 檔案列表 -->
+                    <div class="tech-card p-6">
+                        <div class="mb-4">
+                            <div class="grid grid-cols-5 gap-4 text-sm font-medium text-cyan-300 border-b border-gray-600 pb-2">
+                                <div>名稱</div>
+                                <div>類型</div>
+                                <div>大小</div>
+                                <div>修改時間</div>
+                                <div>操作</div>
+                            </div>
+                        </div>
+                        
+                        <div id="file-list" class="space-y-2 max-h-96 overflow-y-auto">
+                            <!-- 檔案列表將在此動態生成 -->
+                            <div class="text-center text-gray-400 py-8">
+                                <i class="fas fa-folder-open text-4xl mb-4"></i>
+                                <p>載入中...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 資料分析面板 -->
+            <div id="analytics" class="section hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">檢測結果統計</h3>
+                        <div class="chart-container">
+                            <canvas id="detection-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">資源使用分布</h3>
+                        <div class="chart-container">
+                            <canvas id="resource-pie-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 資料庫管理面板 -->
+            <div id="database" class="section hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- 資料庫總覽 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">資料庫總覽</h3>
+                            <div class="flex space-x-3">
+                                <button onclick="refreshDatabaseStats()" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-md hover:from-indigo-700 hover:to-purple-700 transition-all duration-300">
+                                    <i class="fas fa-sync-alt mr-2"></i>重新整理
+                                </button>
+                                <button onclick="exportDatabaseData()" class="px-4 py-2 bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-md hover:from-green-700 hover:to-teal-700 transition-all duration-300">
+                                    <i class="fas fa-download mr-2"></i>匯出資料
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 資料庫統計卡片 -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 p-4 rounded-lg border border-indigo-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-chart-bar text-indigo-400 mr-2"></i>
+                                    <span class="text-indigo-100 font-medium">分析記錄</span>
+                                </div>
+                                <div id="analysisRecordCount" class="text-2xl font-bold text-indigo-300">載入中...</div>
+                                <div class="text-sm text-gray-400">總計分析任務</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-purple-900/30 to-pink-900/30 p-4 rounded-lg border border-purple-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-search text-purple-400 mr-2"></i>
+                                    <span class="text-purple-100 font-medium">檢測結果</span>
+                                </div>
+                                <div id="detectionResultCount" class="text-2xl font-bold text-purple-300">載入中...</div>
+                                <div class="text-sm text-gray-400">總計檢測數量</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-pink-900/30 to-red-900/30 p-4 rounded-lg border border-pink-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-running text-pink-400 mr-2"></i>
+                                    <span class="text-pink-100 font-medium">行為事件</span>
+                                </div>
+                                <div id="behaviorEventCount" class="text-2xl font-bold text-pink-300">載入中...</div>
+                                <div class="text-sm text-gray-400">總計行為記錄</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 資料表查詢 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">資料表查詢</h3>
+                            <div class="flex space-x-3">
+                                <select id="tableSelect" class="px-3 py-2 bg-gray-700 text-white rounded-md border border-gray-600 focus:border-cyan-500 focus:outline-none">
+                                    <option value="analysis_records">分析記錄表</option>
+                                    <option value="detection_results">檢測結果表</option>
+                                    <option value="behavior_events">行為事件表</option>
+                                </select>
+                                <button onclick="queryTable()" class="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-md hover:from-cyan-700 hover:to-blue-700 transition-all duration-300">
+                                    <i class="fas fa-search mr-2"></i>查詢
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 查詢選項 -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div>
+                                <label class="block text-sm font-medium text-cyan-100 mb-2">顯示數量</label>
+                                <select id="limitSelect" class="w-full px-3 py-2 bg-gray-700 text-white rounded-md border border-gray-600 focus:border-cyan-500 focus:outline-none">
+                                    <option value="10">10 筆</option>
+                                    <option value="25" selected>25 筆</option>
+                                    <option value="50">50 筆</option>
+                                    <option value="100">100 筆</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-cyan-100 mb-2">排序欄位</label>
+                                <select id="sortSelect" class="w-full px-3 py-2 bg-gray-700 text-white rounded-md border border-gray-600 focus:border-cyan-500 focus:outline-none">
+                                    <option value="created_at">建立時間</option>
+                                    <option value="updated_at">更新時間</option>
+                                    <option value="id">ID</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-cyan-100 mb-2">排序方式</label>
+                                <select id="orderSelect" class="w-full px-3 py-2 bg-gray-700 text-white rounded-md border border-gray-600 focus:border-cyan-500 focus:outline-none">
+                                    <option value="DESC">降序 (新→舊)</option>
+                                    <option value="ASC">升序 (舊→新)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- 搜尋過濾 -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-cyan-100 mb-2">智能搜尋過濾</label>
+                            
+                            <!-- 搜尋輸入框 -->
+                            <div class="relative mb-3">
+                                <div class="flex space-x-3">
+                                    <div class="relative flex-1">
+                                        <input id="searchInput" type="text" placeholder="輸入搜尋關鍵字或選擇下方建議..." 
+                                               class="w-full px-3 py-2 bg-gray-700 text-white rounded-md border border-gray-600 focus:border-cyan-500 focus:outline-none"
+                                               autocomplete="off">
+                                        <button id="searchSuggestionsBtn" class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-cyan-400 transition-colors">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </button>
+                                        
+                                        <!-- 搜尋建議下拉選單 -->
+                                        <div id="searchSuggestions" class="hidden absolute top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded-md mt-1 max-h-60 overflow-y-auto z-10 shadow-lg">
+                                            <div id="suggestionsList" class="py-2">
+                                                <!-- 動態生成建議項目 -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button onclick="searchTable()" class="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                        <i class="fas fa-search mr-2"></i>搜尋
+                                    </button>
+                                    <button onclick="clearSearch()" class="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-md hover:from-gray-700 hover:to-gray-800 transition-all duration-300">
+                                        <i class="fas fa-times mr-2"></i>清除
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- 常用篩選快捷按鈕 -->
+                            <div class="mb-3">
+                                <div class="text-xs text-gray-400 mb-2">常用篩選：</div>
+                                <div id="quickFilters" class="flex flex-wrap gap-2">
+                                    <!-- 動態生成快捷篩選按鈕 -->
+                                </div>
+                            </div>
+                            
+                            <!-- 篩選歷史 -->
+                            <div id="searchHistory" class="hidden">
+                                <div class="text-xs text-gray-400 mb-2">最近搜尋：</div>
+                                <div id="historyList" class="flex flex-wrap gap-2">
+                                    <!-- 動態生成歷史記錄 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 資料表顯示 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">查詢結果</h3>
+                            <div id="resultInfo" class="text-sm text-gray-400">等待查詢...</div>
+                        </div>
+                        
+                        <!-- 載入中指示器 -->
+                        <div id="loadingIndicator" class="hidden text-center py-8">
+                            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400"></div>
+                            <div class="mt-2 text-cyan-300">載入中...</div>
+                        </div>
+                        
+                        <!-- 資料表容器 -->
+                        <div id="dataTableContainer" class="overflow-x-auto">
+                            <div class="text-center py-8 text-gray-400">
+                                <i class="fas fa-database text-4xl mb-4"></i>
+                                <div>請選擇資料表並點擊查詢按鈕</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 分頁控制 -->
+                        <div id="paginationContainer" class="hidden mt-4 flex items-center justify-between">
+                            <div class="text-sm text-gray-400">
+                                顯示第 <span id="pageInfo">1-25</span> 筆，共 <span id="totalCount">0</span> 筆
+                            </div>
+                            <div class="flex space-x-2">
+                                <button id="prevPageBtn" onclick="previousPage()" class="px-3 py-1 bg-gray-700 text-white rounded-md hover:bg-gray-600 transition-all duration-300" disabled>
+                                    <i class="fas fa-chevron-left"></i> 上一頁
+                                </button>
+                                <span id="currentPageSpan" class="px-3 py-1 bg-cyan-600 text-white rounded-md">1</span>
+                                <button id="nextPageBtn" onclick="nextPage()" class="px-3 py-1 bg-gray-700 text-white rounded-md hover:bg-gray-600 transition-all duration-300" disabled>
+                                    下一頁 <i class="fas fa-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 快速操作 -->
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">快速操作</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <button onclick="clearOldData()" class="p-4 bg-gradient-to-br from-yellow-600 to-orange-600 text-white rounded-lg hover:from-yellow-700 hover:to-orange-700 transition-all duration-300">
+                                <i class="fas fa-broom text-2xl mb-2"></i>
+                                <div class="font-medium">清理舊資料</div>
+                                <div class="text-sm opacity-80">刪除 30 天前的記錄</div>
+                            </button>
+                            <button onclick="clearAllDatabase()" class="p-4 bg-gradient-to-br from-red-600 to-pink-600 text-white rounded-lg hover:from-red-700 hover:to-pink-700 transition-all duration-300">
+                                <i class="fas fa-trash-alt text-2xl mb-2"></i>
+                                <div class="font-medium">刪除所有資料</div>
+                                <div class="text-sm opacity-80">清空整個資料庫</div>
+                            </button>
+                            <button onclick="backupDatabase()" class="p-4 bg-gradient-to-br from-green-600 to-teal-600 text-white rounded-lg hover:from-green-700 hover:to-teal-700 transition-all duration-300">
+                                <i class="fas fa-shield-alt text-2xl mb-2"></i>
+                                <div class="font-medium">建立備份</div>
+                                <div class="text-sm opacity-80">匯出完整資料庫</div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API 文件面板 -->
+            <div id="api-docs" class="section hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- API 文件快速連結 -->
+                    <div class="tech-card p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-cyan-100">API 文件 & 測試工具</h3>
+                            <div class="flex space-x-3">
+                                <a id="swaggerLink" href="http://localhost:8001/docs" target="_blank" class="px-4 py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-md hover:from-orange-700 hover:to-red-700 transition-all duration-300">
+                                    <i class="fas fa-external-link-alt mr-2"></i>Swagger 文件
+                                </a>
+                                <a id="redocLink" href="http://localhost:8001/redoc" target="_blank" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md hover:from-blue-700 hover:to-indigo-700 transition-all duration-300">
+                                    <i class="fas fa-book mr-2"></i>ReDoc 文件
+                                </a>
+                            </div>
+                        </div>
+                        
+                        <!-- API 資訊卡片 -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div class="bg-gradient-to-br from-cyan-900/30 to-blue-900/30 p-4 rounded-lg border border-cyan-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-server text-cyan-400 mr-2"></i>
+                                    <span class="text-cyan-100 font-medium">網路 API</span>
+                                </div>
+                                <div id="apiAddress" class="text-cyan-300 text-sm">http://localhost:8001</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-purple-900/30 to-pink-900/30 p-4 rounded-lg border border-purple-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-network-wired text-purple-400 mr-2"></i>
+                                    <span class="text-purple-100 font-medium">Radmin 網絡</span>
+                                </div>
+                                <div class="text-purple-300 text-sm" id="radmin-api-url">http://26.86.64.166:8001</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-green-900/30 to-emerald-900/30 p-4 rounded-lg border border-green-500/30">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                                    <span class="text-green-100 font-medium">API 狀態</span>
+                                </div>
+                                <div class="text-green-300 text-sm" id="api-status">檢測中...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- API 測試工具 -->
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">
+                            <i class="fas fa-flask mr-2 text-orange-400"></i>API 測試工具
+                        </h3>
+                        
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- 請求配置 -->
+                            <div>
+                                <div class="mb-4">
+                                    <label class="block text-cyan-300 text-sm font-medium mb-2">API 端點</label>
+                                    <select id="api-endpoint" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400">
+                                        <option value="/api/v1/health">健康檢查 (GET)</option>
+                                        <option value="/admin/api/system/status">系統狀態 (GET)</option>
+                                        <option value="/admin/api/network/status">網絡狀態 (GET)</option>
+                                        <option value="/admin/api/files">檔案列表 (GET)</option>
+                                        <option value="/api/v1/data/analysis">分析記錄 (GET)</option>
+                                        <option value="/api/v1/data/detections">檢測結果 (GET)</option>
+                                        <option value="custom">自定義端點</option>
+                                    </select>
+                                </div>
+                                
+                                <div id="custom-endpoint-input" class="mb-4 hidden">
+                                    <label class="block text-cyan-300 text-sm font-medium mb-2">自定義端點路徑</label>
+                                    <input type="text" id="custom-endpoint" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400" placeholder="/api/v1/...">
+                                </div>
+                                
+                                <div class="mb-4">
+                                    <label class="block text-cyan-300 text-sm font-medium mb-2">HTTP 方法</label>
+                                    <select id="http-method" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400">
+                                        <option value="GET">GET</option>
+                                        <option value="POST">POST</option>
+                                        <option value="PUT">PUT</option>
+                                        <option value="DELETE">DELETE</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-4">
+                                    <label class="block text-cyan-300 text-sm font-medium mb-2">請求參數 (JSON)</label>
+                                    <textarea id="request-body" rows="6" class="w-full bg-gray-800 border border-cyan-500/30 rounded-md px-3 py-2 text-cyan-100 focus:outline-none focus:border-cyan-400 font-mono text-sm" placeholder='{\n  "key": "value"\n}'></textarea>
+                                </div>
+                                
+                                <button id="test-api-btn" class="w-full px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-md hover:from-green-700 hover:to-emerald-700 transition-all duration-300">
+                                    <i class="fas fa-play mr-2"></i>執行 API 測試
+                                </button>
+                            </div>
+                            
+                            <!-- 回應結果 -->
+                            <div>
+                                <div class="mb-4">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <label class="text-cyan-300 text-sm font-medium">回應結果</label>
+                                        <div id="response-status" class="px-2 py-1 rounded text-xs font-medium bg-gray-700 text-gray-300">
+                                            等待測試...
+                                        </div>
+                                    </div>
+                                    <div class="bg-gray-900 border border-cyan-500/30 rounded-md p-4 min-h-[300px]">
+                                        <pre id="response-output" class="text-cyan-100 text-sm font-mono whitespace-pre-wrap">點擊 "執行 API 測試" 開始測試...</pre>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-4">
+                                    <label class="block text-cyan-300 text-sm font-medium mb-2">回應標頭</label>
+                                    <div class="bg-gray-900 border border-cyan-500/30 rounded-md p-3 max-h-32 overflow-y-auto">
+                                        <pre id="response-headers" class="text-gray-400 text-xs font-mono">等待回應...</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 常用 API 快速測試 -->
+                    <div class="tech-card p-6">
+                        <h3 class="text-lg font-bold text-cyan-100 mb-4">
+                            <i class="fas fa-bolt mr-2 text-yellow-400"></i>常用 API 快速測試
+                        </h3>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-blue-900/50 to-cyan-900/50 border border-blue-500/30 rounded-lg hover:border-blue-400 transition-all duration-300" data-endpoint="/api/v1/health">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-heartbeat text-blue-400 mr-2"></i>
+                                    <span class="text-blue-100 font-medium">健康檢查</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /api/v1/health</div>
+                            </button>
+                            
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-purple-900/50 to-pink-900/50 border border-purple-500/30 rounded-lg hover:border-purple-400 transition-all duration-300" data-endpoint="/admin/api/system/status">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-desktop text-purple-400 mr-2"></i>
+                                    <span class="text-purple-100 font-medium">系統狀態</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /admin/api/system/status</div>
+                            </button>
+                            
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-green-900/50 to-emerald-900/50 border border-green-500/30 rounded-lg hover:border-green-400 transition-all duration-300" data-endpoint="/admin/api/files?path=">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-folder-open text-green-400 mr-2"></i>
+                                    <span class="text-green-100 font-medium">檔案列表</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /admin/api/files</div>
+                            </button>
+                            
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-orange-900/50 to-red-900/50 border border-orange-500/30 rounded-lg hover:border-orange-400 transition-all duration-300" data-endpoint="/admin/api/network/status">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-wifi text-orange-400 mr-2"></i>
+                                    <span class="text-orange-100 font-medium">網絡連接</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /admin/api/network/status</div>
+                            </button>
+                            
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-indigo-900/50 to-blue-900/50 border border-indigo-500/30 rounded-lg hover:border-indigo-400 transition-all duration-300" data-endpoint="/api/v1/data/analysis">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-chart-bar text-indigo-400 mr-2"></i>
+                                    <span class="text-indigo-100 font-medium">分析記錄</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /api/v1/data/analysis</div>
+                            </button>
+                            
+                            <button class="quick-test-btn p-4 bg-gradient-to-br from-teal-900/50 to-cyan-900/50 border border-teal-500/30 rounded-lg hover:border-teal-400 transition-all duration-300" data-endpoint="/api/v1/data/detections">
+                                <div class="flex items-center mb-2">
+                                    <i class="fas fa-search text-teal-400 mr-2"></i>
+                                    <span class="text-teal-100 font-medium">檢測結果</span>
+                                </div>
+                                <div class="text-gray-400 text-sm">GET /api/v1/data/detections</div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 網絡狀態面板 -->
+            <div id="network" class="section hidden">
+                <div class="tech-card p-6">
+                    <h3 class="text-lg font-bold text-cyan-100 mb-4">網絡監控</h3>
+                    <div class="chart-container">
+                        <canvas id="network-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系統日誌面板 -->
+            <div id="logs" class="section hidden">
+                <div class="tech-card p-6">
+                    <h3 class="text-lg font-bold text-cyan-100 mb-4">系統日誌</h3>
+                    <pre id="log-content" class="terminal-log">載入中...</pre>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        // 動態更新 API 連結為網路訪問地址
+        document.addEventListener('DOMContentLoaded', function() {
+            // 獲取當前主機地址和端口
+            const currentHost = window.location.hostname;
+            const currentPort = '8001'; // API 端口
+            const baseUrl = `http://${currentHost}:${currentPort}`;
+            
+            // 更新 Swagger 文件連結
+            const swaggerLink = document.getElementById('swaggerLink');
+            if (swaggerLink) {
+                swaggerLink.href = `${baseUrl}/docs`;
+            }
+            
+            // 更新 ReDoc 文件連結
+            const redocLink = document.getElementById('redocLink');
+            if (redocLink) {
+                redocLink.href = `${baseUrl}/redoc`;
+            }
+            
+            // 更新 API 資訊卡片中的地址顯示
+            const apiAddressElement = document.getElementById('apiAddress');
+            if (apiAddressElement) {
+                apiAddressElement.textContent = baseUrl;
+            }
+            
+            console.log(`API 連結已更新為網路訪問地址: ${baseUrl}`);
+        });
+    </script>
+    <script src="/admin/static/admin_enhanced_fixed.js"></script>
+</body>
+</html>

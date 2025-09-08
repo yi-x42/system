@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>資料來源管理 - YOLOv11 數位雙生分析系統</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 側邊導航 -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-eye"></i>
+                <span>YOLO AI</span>
+            </div>
+            <div class="version">v2.0</div>
+        </div>
+        
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="index.html" class="nav-link">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>儀表板</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#ai-engine" class="nav-link">
+                    <i class="fas fa-brain"></i>
+                    <span>智能分析引擎</span>
+                </a>
+            </li>
+            <li class="nav-item active">
+                <a href="data_source.html" class="nav-link">
+                    <i class="fas fa-video"></i>
+                    <span>資料來源管理</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#task-scheduler" class="nav-link">
+                    <i class="fas fa-tasks"></i>
+                    <span>任務排程</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#analytics" class="nav-link">
+                    <i class="fas fa-chart-line"></i>
+                    <span>結果分析</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#data-management" class="nav-link">
+                    <i class="fas fa-database"></i>
+                    <span>數據管理</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#system-config" class="nav-link">
+                    <i class="fas fa-cog"></i>
+                    <span>系統配置</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="index.html#advanced" class="nav-link">
+                    <i class="fas fa-star"></i>
+                    <span>進階功能</span>
+                </a>
+            </li>
+        </ul>
+        
+        <div class="sidebar-footer">
+            <button type="button" class="shutdown-btn" id="shutdown-system-btn">
+                <i class="fas fa-power-off"></i>
+                <span>停止系統</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 主要內容 -->
+    <main class="main-content">
+        <div class="container-fluid">
+            <!-- 頁面標題 -->
+            <div class="page-header">
+                <div class="page-title">
+                    <h1><i class="fas fa-video me-3"></i>資料來源管理</h1>
+                    <p class="text-muted">管理攝影機和影片檔案，配置數據來源</p>
+                </div>
+                <div class="page-actions">
+                    <button class="btn btn-outline-primary">
+                        <i class="fas fa-download me-2"></i>匯出設定
+                    </button>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-upload me-2"></i>匯入設定
+                    </button>
+                </div>
+            </div>
+
+            <!-- 資料來源概覽 -->
+            <section class="data-sources-overview mb-4">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <div class="stats-icon">
+                                <i class="fas fa-video"></i>
+                            </div>
+                            <div class="stats-content">
+                                <h3 id="cameraCount">0</h3>
+                                <p>攝影機</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <div class="stats-icon">
+                                <i class="fas fa-file-video"></i>
+                            </div>
+                            <div class="stats-content">
+                                <h3 id="videoCount">0</h3>
+                                <p>影片檔案</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <div class="stats-icon">
+                                <i class="fas fa-play-circle"></i>
+                            </div>
+                            <div class="stats-content">
+                                <h3 id="activeCount">0</h3>
+                                <p>運行中</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stats-card">
+                            <div class="stats-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stats-content">
+                                <h3 id="errorCount">0</h3>
+                                <p>錯誤</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 攝影機管理 -->
+            <section class="data-sources-section mb-4">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="source-card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-video me-2"></i>攝影機管理</h3>
+                                <div class="d-flex gap-2">
+                                    <button id="addCameraBtn" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-plus me-1"></i>新增攝影機
+                                    </button>
+                                    <button id="scanCameraBtn" class="btn btn-outline-info btn-sm">
+                                        <i class="fas fa-search me-1"></i>自動掃描
+                                    </button>
+                                    <button id="refreshBtn" class="btn btn-outline-secondary btn-sm">
+                                        <i class="fas fa-sync me-1"></i>重新整理
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="cameraList" class="camera-list">
+                                    <div class="text-muted text-center py-5">
+                                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                        <p class="mt-2">正在載入攝影機清單...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 影片檔案管理 -->
+            <section class="data-sources-section mb-4">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="source-card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-file-video me-2"></i>影片檔案管理</h3>
+                                <div class="d-flex gap-2">
+                                    <button id="addVideoBtn" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-plus me-1"></i>新增影片檔案
+                                    </button>
+                                    <button id="uploadVideoBtn" class="btn btn-outline-success btn-sm">
+                                        <i class="fas fa-upload me-1"></i>上傳影片
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="videoList" class="video-file-list">
+                                    <div class="text-muted text-center py-5">
+                                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                        <p class="mt-2">正在載入影片檔案清單...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- 新增資料來源模態對話框 -->
+    <div class="modal fade" id="addSourceModal" tabindex="-1" aria-labelledby="modalTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">新增資料來源</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+                </div>
+                <form id="sourceForm">
+                    <div class="modal-body">
+                        <input type="hidden" id="sourceTypeField" name="source_type" value="camera">
+                        
+                        <div class="mb-3">
+                            <label for="sourceName" class="form-label">名稱</label>
+                            <input type="text" class="form-control" id="sourceName" name="name" required 
+                                   placeholder="輸入資料來源名稱">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="sourcePath" class="form-label">來源路徑</label>
+                            <input type="text" class="form-control" id="sourcePath" name="source_path" required 
+                                   placeholder="例如：rtsp://192.168.1.100:554/stream 或 /path/to/video.mp4">
+                            <div class="form-text">
+                                攝影機：rtsp://IP:PORT/stream 或 http://IP/video<br>
+                                影片檔案：完整的檔案路徑
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="sourceDescription" class="form-label">描述 (選填)</label>
+                            <textarea class="form-control" id="sourceDescription" name="description" rows="3" 
+                                      placeholder="輸入資料來源的描述"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-primary">新增</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 影片上傳模態對話框 -->
+    <div class="modal fade" id="uploadVideoModal" tabindex="-1" aria-labelledby="uploadModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="uploadModalTitle">上傳影片檔案</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">
+                            <i class="fas fa-cloud-upload-alt fa-3x"></i>
+                        </div>
+                        <h4>拖放影片檔案到這裡</h4>
+                        <p class="text-muted">或點擊選擇檔案</p>
+                        <input type="file" id="videoFileInput" accept="video/*" multiple style="display: none;">
+                        <button type="button" class="btn btn-primary" onclick="document.getElementById('videoFileInput').click()">
+                            選擇檔案
+                        </button>
+                    </div>
+                    <div id="uploadProgress" class="upload-progress" style="display: none;">
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <p class="upload-status">準備上傳...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="api-config.js"></script>
+    <script src="script.js"></script>
+    <script src="shutdown.js?v=20250831-1"></script>
+    <script src="data_source_manager.js"></script>
+</body>
+</html>

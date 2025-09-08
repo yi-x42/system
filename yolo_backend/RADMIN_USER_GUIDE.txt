@@ -1,0 +1,127 @@
+"""
+🎉 YOLOv11 服務已成功啟動！
+組員 Radmin 訪問使用指南
+"""
+
+## ✅ 服務狀態確認
+根據日誌顯示：
+- 服務進程ID: 23652
+- 服務已啟動在: http://0.0.0.0:8001
+- 組員連接成功: 來自 26.86.64.166 的訪問請求
+
+## 🌐 Radmin 訪問地址
+
+### 主要入口：
+```
+API 文檔: http://26.86.64.166:8001/docs
+```
+
+### 核心 API 端點：
+```
+健康檢查: http://26.86.64.166:8001/api/v1/health
+資料總覽: http://26.86.64.166:8001/api/v1/data/summary
+行為事件: http://26.86.64.166:8001/api/v1/data/events
+分析記錄: http://26.86.64.166:8001/api/v1/data/analyses
+檢測統計: http://26.86.64.166:8001/api/v1/data/detections/stats
+資料搜尋: http://26.86.64.166:8001/api/v1/data/search
+CSV匯出: http://26.86.64.166:8001/api/v1/data/export/csv?table=events
+```
+
+## 🔧 組員使用步驟
+
+### 1. 基本連接測試
+```
+在瀏覽器打開: http://26.86.64.166:8001/docs
+如果能看到 FastAPI 文檔頁面，表示連接正常
+```
+
+### 2. 健康檢查
+```
+訪問: http://26.86.64.166:8001/api/v1/health
+應返回: {"status": "healthy", "timestamp": "..."}
+```
+
+### 3. 查看數據統計
+```
+訪問: http://26.86.64.166:8001/api/v1/data/summary
+查看資料庫中的數據統計
+```
+
+### 4. 瀏覽行為事件
+```
+訪問: http://26.86.64.166:8001/api/v1/data/events
+或帶參數: http://26.86.64.166:8001/api/v1/data/events?limit=10
+```
+
+## 📊 程式化訪問範例
+
+### Python 範例：
+```python
+import requests
+
+base_url = "http://26.86.64.166:8001"
+
+# 健康檢查
+health = requests.get(f"{base_url}/api/v1/health")
+print("健康狀態:", health.json())
+
+# 獲取資料總覽
+summary = requests.get(f"{base_url}/api/v1/data/summary")
+print("資料統計:", summary.json())
+
+# 獲取行為事件（最新10筆）
+events = requests.get(f"{base_url}/api/v1/data/events?limit=10")
+print("行為事件:", events.json())
+
+# 搜尋特定類型事件
+search = requests.get(f"{base_url}/api/v1/data/search?keyword=crowding")
+print("搜尋結果:", search.json())
+```
+
+### JavaScript 範例：
+```javascript
+const baseUrl = "http://26.86.64.166:8001";
+
+// 獲取健康狀態
+fetch(`${baseUrl}/api/v1/health`)
+  .then(response => response.json())
+  .then(data => console.log('健康狀態:', data));
+
+// 獲取事件數據
+fetch(`${baseUrl}/api/v1/data/events?limit=5`)
+  .then(response => response.json())
+  .then(data => console.log('事件數據:', data));
+```
+
+## 🆘 常見問題解決
+
+### 404 Not Found 錯誤
+- 檢查 URL 是否完整正確
+- 確保包含 `/api/v1/data/` 前綴
+- 嘗試先訪問 `/docs` 頁面確認服務正常
+
+### 連接超時
+- 檢查 Radmin VPN 連接狀態
+- 確認 IP 地址 26.86.64.166 是否正確
+- 重新啟動 Radmin 客戶端
+
+### 500 內部錯誤
+- 可能是資料庫連接問題
+- 聯繫主機管理員檢查服務狀態
+
+## 🎯 推薦使用流程
+
+1. **首次訪問**: 開啟 `http://26.86.64.166:8001/docs`
+2. **探索 API**: 在文檔頁面嘗試不同的端點
+3. **程式整合**: 使用上述程式碼範例進行整合
+4. **數據分析**: 定期查詢事件和統計數據
+
+## 📞 技術支援
+如遇問題請聯繫主機管理員，並提供：
+- 訪問的完整 URL
+- 錯誤訊息截圖
+- Radmin 連接狀態
+
+---
+🕒 更新時間: 2025-07-21
+🌐 服務地址: http://26.86.64.166:8001

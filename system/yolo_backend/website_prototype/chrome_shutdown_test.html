@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Chrome 停止按鈕測試</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .demo-footer {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 20px;
+        }
+        
+        /* Chrome 完全兼容的停止按鈕 */
+        .shutdown-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 16px 20px;
+            background: #dc3545;
+            background: linear-gradient(to bottom, #ff6b6b, #dc3545);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            outline: none;
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.25);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+            position: relative;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .shutdown-btn:hover {
+            background: #c82333;
+            background: linear-gradient(to bottom, #ff5252, #c82333);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(220, 53, 69, 0.3);
+        }
+        
+        .shutdown-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+        }
+        
+        .shutdown-btn:focus {
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.25), 0 0 0 3px rgba(220, 53, 69, 0.2);
+        }
+        
+        .shutdown-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .shutdown-btn i {
+            font-size: 18px;
+        }
+        
+        .shutdown-btn span {
+            font-size: 16px;
+            letter-spacing: 0.5px;
+        }
+        
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        
+        .browser-info {
+            background: #f8f9fa;
+            color: #495057;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+    </style>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1 style="text-align: center; color: #333; margin-bottom: 30px;">
+            🌐 Chrome 停止按鈕測試
+        </h1>
+        
+        <div class="browser-info" id="browser-info">
+            正在檢測瀏覽器...
+        </div>
+        
+        <div class="demo-footer">
+            <button type="button" class="shutdown-btn" id="shutdown-system-btn">
+                <i class="fas fa-power-off"></i>
+                <span>停止系統</span>
+            </button>
+        </div>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <button onclick="testAPI()" style="padding: 8px 16px; margin: 5px; border: 1px solid #ccc; border-radius: 4px; background: #f8f9fa; cursor: pointer;">
+                測試 API 連接
+            </button>
+            <button onclick="debugButton()" style="padding: 8px 16px; margin: 5px; border: 1px solid #ccc; border-radius: 4px; background: #f8f9fa; cursor: pointer;">
+                診斷按鈕
+            </button>
+        </div>
+        
+        <div id="results">
+            <div class="info">等待測試...</div>
+        </div>
+    </div>
+
+    <script>
+        // API 配置
+        const API_CONFIG = {
+            get baseURL() {
+                const currentHost = window.location.hostname;
+                if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+                    return 'http://localhost:8001';
+                } else {
+                    return `http://${currentHost}:8001`;
+                }
+            }
+        };
+        
+        // 日誌函數
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `status ${type}`;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            results.appendChild(logEntry);
+            results.scrollTop = results.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+        
+        // 顯示瀏覽器信息
+        function showBrowserInfo() {
+            const info = document.getElementById('browser-info');
+            const userAgent = navigator.userAgent;
+            const isChrome = userAgent.includes('Chrome');
+            
+            info.innerHTML = `
+                <strong>瀏覽器:</strong> ${isChrome ? 'Chrome ✅' : '其他瀏覽器'}<br>
+                <strong>User Agent:</strong> ${userAgent.substring(0, 80)}...<br>
+                <strong>API URL:</strong> ${API_CONFIG.baseURL}
+            `;
+        }
+        
+        // 停止系統函數
+        async function handleShutdown() {
+            log('🔴 停止系統被觸發', 'info');
+            
+            const confirmed = confirm(
+                '⚠️ 確認停止系統\n\n' +
+                '這將關閉整個 YOLOv11 分析系統\n' +
+                '確定要繼續嗎？'
+            );
+            
+            if (!confirmed) {
+                log('⏹️ 用戶取消停止操作', 'info');
+                return;
+            }
+            
+            const btn = document.getElementById('shutdown-system-btn');
+            const originalHTML = btn.innerHTML;
+            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>停止中...</span>';
+            btn.disabled = true;
+            
+            try {
+                log('🚀 發送停止請求...', 'info');
+                
+                const shutdownURL = `${API_CONFIG.baseURL}/api/v1/frontend/system/shutdown`;
+                log(`📡 請求URL: ${shutdownURL}`, 'info');
+                
+                const response = await fetch(shutdownURL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                log(`📨 服務器回應: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    log(`✅ 停止成功: ${result.message}`, 'success');
+                    btn.innerHTML = '<i class="fas fa-check"></i><span>已停止</span>';
+                    
+                    setTimeout(() => {
+                        alert('✅ 系統已安全停止\n\n重新啟動請執行: python start.py');
+                    }, 500);
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+            } catch (error) {
+                log(`❌ 停止失敗: ${error.message}`, 'error');
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+                alert('❌ 停止系統失敗: ' + error.message);
+            }
+        }
+        
+        // 測試函數
+        async function testAPI() {
+            log('🧪 測試 API 連接...', 'info');
+            try {
+                const response = await fetch(`${API_CONFIG.baseURL}/api/v1/health`);
+                log(`📡 健康檢查: ${response.status}`, response.ok ? 'success' : 'error');
+            } catch (error) {
+                log(`❌ API測試失敗: ${error.message}`, 'error');
+            }
+        }
+        
+        function debugButton() {
+            const btn = document.getElementById('shutdown-system-btn');
+            log('🔍 按鈕診斷:', 'info');
+            log(`  disabled: ${btn.disabled}`, 'info');
+            log(`  innerHTML: ${btn.innerHTML}`, 'info');
+            log(`  可見: ${btn.offsetWidth > 0 && btn.offsetHeight > 0}`, 'info');
+        }
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            showBrowserInfo();
+            log('📄 Chrome測試頁面已載入', 'success');
+            
+            const btn = document.getElementById('shutdown-system-btn');
+            btn.addEventListener('click', handleShutdown);
+            
+            log('✅ 停止按鈕已綁定事件', 'success');
+        });
+    </script>
+</body>
+</html>

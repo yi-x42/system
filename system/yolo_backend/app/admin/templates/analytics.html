@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f8f9fa; }
+        .dashboard-card { 
+            border: none; 
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        }
+        .sidebar {
+            background: linear-gradient(180deg, #2c3e50 0%, #3498db 100%);
+            min-height: 100vh;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.8) !important;
+            border-radius: 0.5rem;
+            margin: 0.2rem 0;
+        }
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white !important;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 側邊欄 -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h5 class="text-white">
+                            <i class="fas fa-eye text-warning"></i>
+                            YOLOv11 系統
+                        </h5>
+                        <small class="text-light">數位雙生分析平台 v2.0</small>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/">
+                                <i class="fas fa-tachometer-alt"></i> 主控台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/tasks">
+                                <i class="fas fa-tasks"></i> 任務管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/sources">
+                                <i class="fas fa-database"></i> 資料來源
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/config">
+                                <i class="fas fa-cogs"></i> 系統配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/yolo-config">
+                                <i class="fas fa-robot"></i> YOLO模型配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/camera-management">
+                                <i class="fas fa-video"></i> 攝影機管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/admin/v2/analytics">
+                                <i class="fas fa-chart-bar"></i> 分析統計
+                            </a>
+                        </li>
+                        <li class="nav-item mt-3">
+                            <a class="nav-link" href="/admin/">
+                                <i class="fas fa-arrow-left"></i> 舊版後台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/docs">
+                                <i class="fas fa-book"></i> API 文檔
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 主要內容 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+                    <h1 class="h2">
+                        <i class="fas fa-chart-bar text-primary"></i>
+                        分析統計
+                    </h1>
+                    <div class="btn-toolbar mb-2 mb-md-0">
+                        <div class="btn-group me-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+                                <i class="fas fa-sync-alt"></i> 重新整理
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="exportReport()">
+                                <i class="fas fa-download"></i> 匯出報告
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    錯誤：{{ error }}
+                </div>
+                {% endif %}
+
+                <!-- 總覽統計 -->
+                {% if analytics_data %}
+                <div class="row mb-4">
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card stats-card">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">總任務數</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ analytics_data.total_tasks }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-tasks fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">完成任務</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ analytics_data.completed_tasks }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-check-circle fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">執行中任務</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ analytics_data.running_tasks }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-play-circle fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-3 col-md-6 mb-4">
+                        <div class="card dashboard-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white;">
+                            <div class="card-body">
+                                <div class="row no-gutters align-items-center">
+                                    <div class="col mr-2">
+                                        <div class="text-xs font-weight-bold text-uppercase mb-1">失敗任務</div>
+                                        <div class="h5 mb-0 font-weight-bold">{{ analytics_data.failed_tasks }}</div>
+                                    </div>
+                                    <div class="col-auto">
+                                        <i class="fas fa-times-circle fa-2x"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 圖表區域 -->
+                <div class="row mb-4">
+                    <!-- 任務類型分布 -->
+                    <div class="col-lg-6 mb-4">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-pie-chart text-primary"></i>
+                                    任務類型分布
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="taskTypeChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 任務狀態分布 -->
+                    <div class="col-lg-6 mb-4">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-chart-bar text-success"></i>
+                                    任務狀態分布
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="taskStatusChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系統統計詳情 -->
+                {% if system_stats %}
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-info-circle text-info"></i>
+                                    系統統計詳情
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <div class="border p-3 rounded text-center">
+                                            <h4 class="text-primary">{{ system_stats.total_tasks or 0 }}</h4>
+                                            <p class="mb-0">總任務數</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="border p-3 rounded text-center">
+                                            <h4 class="text-success">{{ system_stats.total_detections or 0 }}</h4>
+                                            <p class="mb-0">檢測結果</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="border p-3 rounded text-center">
+                                            <h4 class="text-info">{{ system_stats.total_sources or 0 }}</h4>
+                                            <p class="mb-0">資料來源</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="border p-3 rounded text-center">
+                                            <h4 class="text-warning">{{ system_stats.total_configs or 0 }}</h4>
+                                            <p class="mb-0">系統配置</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 最近任務詳情 -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card dashboard-card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-history text-warning"></i>
+                                    最近任務詳情
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                {% if recent_tasks %}
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>ID</th>
+                                                <th>任務類型</th>
+                                                <th>狀態</th>
+                                                <th>創建時間</th>
+                                                <th>執行時間</th>
+                                                <th>描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for task in recent_tasks %}
+                                            <tr>
+                                                <td>{{ task.id }}</td>
+                                                <td>
+                                                    <span class="badge bg-info">
+                                                        {{ '即時攝影機' if task.task_type == 'realtime_camera' else '影片檔案' }}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    {% if task.status == 'completed' %}
+                                                        <span class="badge bg-success">已完成</span>
+                                                    {% elif task.status == 'running' %}
+                                                        <span class="badge bg-primary">執行中</span>
+                                                    {% elif task.status == 'failed' %}
+                                                        <span class="badge bg-danger">失敗</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary">{{ task.status }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ task.created_at if task.created_at else '-' }}</td>
+                                                <td>
+                                                    {% if task.started_at and task.completed_at %}
+                                                        {{ ((task.completed_at - task.started_at).total_seconds() / 60) | round(1) }} 分鐘
+                                                    {% else %}
+                                                        -
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ task.task_description or '-' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-info-circle fa-2x"></i>
+                                    <p class="mt-2">目前沒有任務記錄</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 任務類型分布圖表
+        {% if analytics_data %}
+        const taskTypeCtx = document.getElementById('taskTypeChart').getContext('2d');
+        new Chart(taskTypeCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['即時攝影機', '影片檔案'],
+                datasets: [{
+                    data: [{{ analytics_data.realtime_tasks }}, {{ analytics_data.video_tasks }}],
+                    backgroundColor: ['#667eea', '#f093fb'],
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // 任務狀態分布圖表
+        const taskStatusCtx = document.getElementById('taskStatusChart').getContext('2d');
+        new Chart(taskStatusCtx, {
+            type: 'bar',
+            data: {
+                labels: ['完成', '執行中', '失敗', '等待中'],
+                datasets: [{
+                    label: '任務數量',
+                    data: [
+                        {{ analytics_data.completed_tasks }}, 
+                        {{ analytics_data.running_tasks }}, 
+                        {{ analytics_data.failed_tasks }}, 
+                        {{ analytics_data.total_tasks - analytics_data.completed_tasks - analytics_data.running_tasks - analytics_data.failed_tasks }}
+                    ],
+                    backgroundColor: ['#28a745', '#007bff', '#dc3545', '#ffc107'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                }
+            }
+        });
+        {% endif %}
+
+        function exportReport() {
+            // 實現匯出報告功能
+            alert('匯出報告功能開發中...');
+        }
+    </script>
+</body>
+</html>

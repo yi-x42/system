@@ -1,0 +1,267 @@
+
+                              1. 實體關係模型 (ERM)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+【實體關係圖】
+
+┌─────────────────────┐
+│   ANALYSIS_RECORDS  │  主實體 - 分析記錄
+├─────────────────────┤
+│ * id (PK)           │
+│ * video_path        │
+│ * video_name        │
+│ * analysis_type     │
+│ * status            │
+│ * created_at        │
+│   updated_at        │
+│   total_detections  │
+│   unique_objects    │
+│   progress          │
+│   duration          │
+│   fps               │
+│   total_frames      │
+│   error_message     │
+│   model_version     │
+│   processed_frames  │
+│   analysis_duration │
+│   output_path       │
+└─────────────────────┘
+         │
+         │ 1:N
+         │
+    ┌────▼────────────────┐                ┌────────────────────┐
+    │  DETECTION_RESULTS  │                │  BEHAVIOR_EVENTS   │
+    ├─────────────────────┤                ├────────────────────┤
+    │ * id (PK)           │                │ * id (PK)          │
+    │ * analysis_id (FK)  │◄──────────────►│ * analysis_id (FK) │
+    │ * timestamp         │                │ * timestamp        │
+    │ * frame_number      │                │ * event_type       │
+    │ * object_info       │                │ * object_type      │
+    │ * object_type       │                │ * severity         │
+    │ * confidence        │                │ * position_x       │
+    │ * bbox_x1, y1       │                │ * position_y       │
+    │ * bbox_x2, y2       │                │ * description      │
+    │ * center_x, y       │                │   duration         │
+    │   area              │                │   event_chinese    │
+    │   velocity_x, y     │                │   object_chinese   │
+    │   track_id          │                │   zone             │
+    │   zone              │                │   participant_count│
+    │   quality_score     │                │   risk_score       │
+    │   (其他屬性...)     │                │   alert_level      │
+    └─────────────────────┘                │   metadata         │
+                                           └────────────────────┘
+
+【關聯性說明】
+1. ANALYSIS_RECORDS (1) ←→ (N) DETECTION_RESULTS
+   - 一個分析記錄包含多個檢測結果
+   - 外鍵: detection_results.analysis_id → analysis_records.id
+
+2. ANALYSIS_RECORDS (1) ←→ (N) BEHAVIOR_EVENTS  
+   - 一個分析記錄包含多個行為事件
+   - 外鍵: behavior_events.analysis_id → analysis_records.id
+
+3. DETECTION_RESULTS (N) ←→ (M) BEHAVIOR_EVENTS (間接關聯)
+   - 透過 analysis_id + timestamp 關聯
+   - 檢測結果可能觸發行為事件
+
+【符號說明】
+- * : 必填欄位 (NOT NULL)
+- PK: 主鍵 (Primary Key)
+- FK: 外鍵 (Foreign Key)
+
+════════════════════════════════════════════════════════════════════════════════════════════
+                              2. 資料表結構 (Table Schema)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                           2.1 分析記錄表 (analysis_records)                            │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+CREATE TABLE analysis_records (
+    id                  SERIAL          PRIMARY KEY,
+    created_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    video_path          VARCHAR(500)    NOT NULL,
+    video_name          VARCHAR(255)    NOT NULL,
+    analysis_type       VARCHAR(50)     NOT NULL DEFAULT 'detection',
+    status              VARCHAR(50)     NOT NULL DEFAULT 'processing',
+    total_detections    INTEGER         NOT NULL DEFAULT 0,
+    unique_objects      INTEGER         NOT NULL DEFAULT 0,
+    duration            FLOAT           DEFAULT NULL,
+    fps                 FLOAT           DEFAULT NULL,
+    total_frames        INTEGER         DEFAULT NULL,
+    progress            FLOAT           NOT NULL DEFAULT 0.0,
+    error_message       TEXT            DEFAULT NULL,
+    model_version       VARCHAR(50)     DEFAULT NULL,
+    processed_frames    INTEGER         NOT NULL DEFAULT 0,
+    analysis_duration   FLOAT           DEFAULT NULL,
+    output_path         VARCHAR(500)    DEFAULT NULL
+);
+
+┌──────────────────┬───────────────┬─────────┬──────────────┬──────────────────────────────┐
+│ 欄位名稱         │ 資料型別      │ 必填    │ 預設值       │ 說明                         │
+├──────────────────┼───────────────┼─────────┼──────────────┼──────────────────────────────┤
+│ id               │ SERIAL        │ ✓       │ AUTO         │ 主鍵，自動遞增               │
+│ created_at       │ TIMESTAMP     │ ✓       │ CURRENT_TIME │ 建立時間戳記                 │
+│ updated_at       │ TIMESTAMP     │         │ CURRENT_TIME │ 最後更新時間                 │
+│ video_path       │ VARCHAR(500)  │ ✓       │ -            │ 影片檔案完整路徑             │
+│ video_name       │ VARCHAR(255)  │ ✓       │ -            │ 影片檔案名稱                 │
+│ analysis_type    │ VARCHAR(50)   │ ✓       │ 'detection'  │ 分析類型                     │
+│ status           │ VARCHAR(50)   │ ✓       │ 'processing' │ 處理狀態                     │
+│ total_detections │ INTEGER       │ ✓       │ 0            │ 總檢測物件數量               │
+│ unique_objects   │ INTEGER       │ ✓       │ 0            │ 唯一物件類型數量             │
+│ duration         │ FLOAT         │         │ NULL         │ 影片長度 (秒)                │
+│ fps              │ FLOAT         │         │ NULL         │ 影片幀率                     │
+│ total_frames     │ INTEGER       │         │ NULL         │ 影片總幀數                   │
+│ progress         │ FLOAT         │ ✓       │ 0.0          │ 處理進度 (0.0-1.0)           │
+│ error_message    │ TEXT          │         │ NULL         │ 錯誤訊息                     │
+│ model_version    │ VARCHAR(50)   │         │ NULL         │ YOLO模型版本                 │
+│ processed_frames │ INTEGER       │ ✓       │ 0            │ 已處理的幀數                 │
+│ analysis_duration│ FLOAT         │         │ NULL         │ 分析耗時 (秒)                │
+│ output_path      │ VARCHAR(500)  │         │ NULL         │ 輸出檔案路徑                 │
+└──────────────────┴───────────────┴─────────┴──────────────┴──────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                           2.2 檢測結果表 (detection_results)                           │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+CREATE TABLE detection_results (
+    id                  SERIAL          PRIMARY KEY,
+    created_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    analysis_id         INTEGER         NOT NULL REFERENCES analysis_records(id) ON DELETE CASCADE,
+    timestamp           FLOAT           NOT NULL,
+    frame_number        INTEGER         NOT NULL,
+    object_info         JSONB           NOT NULL,
+    object_type         VARCHAR(50)     NOT NULL,
+    object_chinese      VARCHAR(50)     DEFAULT NULL,
+    confidence          FLOAT           NOT NULL,
+    bbox_x1             FLOAT           NOT NULL,
+    bbox_y1             FLOAT           NOT NULL,
+    bbox_x2             FLOAT           NOT NULL,
+    bbox_y2             FLOAT           NOT NULL,
+    center_x            FLOAT           NOT NULL,
+    center_y            FLOAT           NOT NULL,
+    area                FLOAT           DEFAULT NULL,
+    velocity_x          FLOAT           DEFAULT NULL,
+    velocity_y          FLOAT           DEFAULT NULL,
+    velocity_magnitude  FLOAT           DEFAULT NULL,
+    track_id            VARCHAR(50)     DEFAULT NULL,
+    zone                VARCHAR(50)     DEFAULT NULL,
+    zone_chinese        VARCHAR(50)     DEFAULT NULL,
+    distance_to_camera  FLOAT           DEFAULT NULL,
+    relative_size       FLOAT           DEFAULT NULL,
+    is_moving           BOOLEAN         DEFAULT NULL,
+    occlusion_level     FLOAT           DEFAULT NULL,
+    quality_score       FLOAT           DEFAULT NULL
+);
+
+┌──────────────────┬───────────────┬─────────┬──────────────┬──────────────────────────────┐
+│ 欄位名稱         │ 資料型別      │ 必填    │ 約束條件     │ 說明                         │
+├──────────────────┼───────────────┼─────────┼──────────────┼──────────────────────────────┤
+│ id               │ SERIAL        │ ✓       │ PK           │ 主鍵，自動遞增               │
+│ created_at       │ TIMESTAMP     │ ✓       │ -            │ 建立時間戳記                 │
+│ updated_at       │ TIMESTAMP     │         │ -            │ 最後更新時間                 │
+│ analysis_id      │ INTEGER       │ ✓       │ FK, CASCADE  │ 關聯分析記錄ID               │
+│ timestamp        │ FLOAT         │ ✓       │ -            │ 影片中的時間點 (秒)          │
+│ frame_number     │ INTEGER       │ ✓       │ -            │ 幀編號                       │
+│ object_info      │ JSONB         │ ✓       │ -            │ 完整物件資訊JSON             │
+│ object_type      │ VARCHAR(50)   │ ✓       │ -            │ 物件類型 (person, car, etc.) │
+│ object_chinese   │ VARCHAR(50)   │         │ -            │ 物件中文名稱                 │
+│ confidence       │ FLOAT         │ ✓       │ 0.0-1.0      │ 檢測信心度                   │
+│ bbox_x1          │ FLOAT         │ ✓       │ -            │ 邊界框左上角X座標            │
+│ bbox_y1          │ FLOAT         │ ✓       │ -            │ 邊界框左上角Y座標            │
+│ bbox_x2          │ FLOAT         │ ✓       │ -            │ 邊界框右下角X座標            │
+│ bbox_y2          │ FLOAT         │ ✓       │ -            │ 邊界框右下角Y座標            │
+│ center_x         │ FLOAT         │ ✓       │ -            │ 物件中心X座標                │
+│ center_y         │ FLOAT         │ ✓       │ -            │ 物件中心Y座標                │
+│ area             │ FLOAT         │         │ -            │ 物件面積 (像素)              │
+│ velocity_x       │ FLOAT         │         │ -            │ X方向速度 (像素/秒)          │
+│ velocity_y       │ FLOAT         │         │ -            │ Y方向速度 (像素/秒)          │
+│ velocity_magnitude│ FLOAT        │         │ -            │ 速度大小                     │
+│ track_id         │ VARCHAR(50)   │         │ -            │ 物件追蹤ID                   │
+│ zone             │ VARCHAR(50)   │         │ -            │ 檢測區域標識                 │
+│ zone_chinese     │ VARCHAR(50)   │         │ -            │ 區域中文名稱                 │
+│ distance_to_camera│ FLOAT        │         │ -            │ 估計距攝影機距離             │
+│ relative_size    │ FLOAT         │         │ -            │ 相對於畫面的大小比例         │
+│ is_moving        │ BOOLEAN       │         │ -            │ 是否移動中                   │
+│ occlusion_level  │ FLOAT         │         │ 0.0-1.0      │ 遮擋程度                     │
+│ quality_score    │ FLOAT         │         │ 0.0-1.0      │ 檢測品質評分                 │
+└──────────────────┴───────────────┴─────────┴──────────────┴──────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                            2.3 行為事件表 (behavior_events)                            │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+CREATE TABLE behavior_events (
+    id                  SERIAL          PRIMARY KEY,
+    created_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    analysis_id         INTEGER         NOT NULL REFERENCES analysis_records(id) ON DELETE CASCADE,
+    timestamp           FLOAT           NOT NULL,
+    duration            FLOAT           DEFAULT NULL,
+    event_type          VARCHAR(50)     NOT NULL,
+    event_chinese       VARCHAR(50)     DEFAULT NULL,
+    description         TEXT            DEFAULT NULL,
+    severity            VARCHAR(20)     DEFAULT NULL,
+    object_type         VARCHAR(50)     NOT NULL,
+    object_chinese      VARCHAR(50)     DEFAULT NULL,
+    position_x          FLOAT           DEFAULT NULL,
+    position_y          FLOAT           DEFAULT NULL,
+    zone                VARCHAR(50)     DEFAULT NULL,
+    zone_chinese        VARCHAR(50)     DEFAULT NULL,
+    participant_count   INTEGER         DEFAULT NULL,
+    velocity            FLOAT           DEFAULT NULL,
+    risk_score          FLOAT           DEFAULT NULL,
+    alert_level         VARCHAR(20)     DEFAULT NULL,
+    metadata            JSONB           DEFAULT NULL
+);
+
+┌──────────────────┬───────────────┬─────────┬──────────────┬──────────────────────────────┐
+│ 欄位名稱         │ 資料型別      │ 必填    │ 約束條件     │ 說明                         │
+├──────────────────┼───────────────┼─────────┼──────────────┼──────────────────────────────┤
+│ id               │ SERIAL        │ ✓       │ PK           │ 主鍵，自動遞增               │
+│ created_at       │ TIMESTAMP     │ ✓       │ -            │ 建立時間戳記                 │
+│ updated_at       │ TIMESTAMP     │         │ -            │ 最後更新時間                 │
+│ analysis_id      │ INTEGER       │ ✓       │ FK, CASCADE  │ 關聯分析記錄ID               │
+│ timestamp        │ FLOAT         │ ✓       │ -            │ 事件發生時間點 (秒)          │
+│ duration         │ FLOAT         │         │ -            │ 事件持續時間 (秒)            │
+│ event_type       │ VARCHAR(50)   │ ✓       │ -            │ 事件類型                     │
+│ event_chinese    │ VARCHAR(50)   │         │ -            │ 事件中文名稱                 │
+│ description      │ TEXT          │         │ -            │ 事件詳細描述                 │
+│ severity         │ VARCHAR(20)   │         │ -            │ 嚴重程度                     │
+│ object_type      │ VARCHAR(50)   │ ✓       │ -            │ 相關物件類型                 │
+│ object_chinese   │ VARCHAR(50)   │         │ -            │ 物件中文名稱                 │
+│ position_x       │ FLOAT         │         │ -            │ 事件位置X座標                │
+│ position_y       │ FLOAT         │         │ -            │ 事件位置Y座標                │
+│ zone             │ VARCHAR(50)   │         │ -            │ 事件發生區域                 │
+│ zone_chinese     │ VARCHAR(50)   │         │ -            │ 區域中文名稱                 │
+│ participant_count│ INTEGER       │         │ -            │ 參與事件的物件數量           │
+│ velocity         │ FLOAT         │         │ -            │ 相關物件移動速度             │
+│ risk_score       │ FLOAT         │         │ 0.0-1.0      │ 風險評分                     │
+│ alert_level      │ VARCHAR(20)   │         │ -            │ 警示等級                     │
+│ metadata         │ JSONB         │         │ -            │ 額外事件資料                 │
+└──────────────────┴───────────────┴─────────┴──────────────┴──────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════════════════
+                                     索引與約束
+════════════════════════════════════════════════════════════════════════════════════════════
+
+【主要索引】
+CREATE INDEX idx_analysis_records_status ON analysis_records(status);
+CREATE INDEX idx_detection_results_analysis_id ON detection_results(analysis_id);
+CREATE INDEX idx_detection_results_timestamp ON detection_results(timestamp);
+CREATE INDEX idx_behavior_events_analysis_id ON behavior_events(analysis_id);
+CREATE INDEX idx_behavior_events_timestamp ON behavior_events(timestamp);
+
+【外鍵約束】
+detection_results.analysis_id → analysis_records.id (CASCADE DELETE)
+behavior_events.analysis_id → analysis_records.id (CASCADE DELETE)
+
+【檢查約束】
+detection_results.confidence BETWEEN 0.0 AND 1.0
+behavior_events.risk_score BETWEEN 0.0 AND 1.0
+
+═══════════════════════════════════════════════════════════════════════════════════════════
+                                    文件結束
+═══════════════════════════════════════════════════════════════════════════════════════════

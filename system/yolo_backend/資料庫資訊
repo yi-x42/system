@@ -1,0 +1,251 @@
+YOLOv11 數位雙生分析系統 - 資料庫重設計方案
+==========================================================
+日期：2025年8月4日
+目標：重新設計資料庫架構，支援即時攝影機分析和影片檔案分析兩種模式
+
+📋 預計建立的資料表（共6個）
+==========================================================
+
+## 1. analysis_tasks (分析任務表)
+id               INTEGER      主鍵
+task_type        VARCHAR(20)  'realtime_camera' | 'video_file'
+status           VARCHAR(20)  'pending' | 'running' | 'completed' | 'failed'
+source_info      JSON         攝影機配置或影片檔案路徑（不再包含解析度資訊）
+source_width     INTEGER      來源影像寬度（專用欄位）
+source_height    INTEGER      來源影像高度（專用欄位）
+source_fps       FLOAT        來源影像幀率（專用欄位）
+start_time       TIMESTAMP    任務開始時間
+end_time         TIMESTAMP    任務結束時間
+created_at       TIMESTAMP    建立時間
+
+## 2. detection_results (檢測結果表)
+id               INTEGER      主鍵
+task_id          INTEGER      關聯 analysis_tasks.id
+frame_number     INTEGER      幀編號
+timestamp        TIMESTAMP    檢測時間
+object_type      VARCHAR(50)  物件類型 (person, car, bike...)
+confidence       FLOAT        信心度 (0.0-1.0)
+bbox_x1          FLOAT        邊界框左上角X
+bbox_y1          FLOAT        邊界框左上角Y
+bbox_x2          FLOAT        邊界框右下角X
+bbox_y2          FLOAT        邊界框右下角Y
+center_x         FLOAT        中心點X座標
+center_y         FLOAT        中心點Y座標
+
+## 3. behavior_events (行為事件表)   (程式先不要做這部分)
+id               INTEGER      主鍵
+task_id          INTEGER      關聯 analysis_tasks.id
+event_type       VARCHAR(50)  'crowding' | 'abnormal_speed' | 'zone_intrusion'
+severity         VARCHAR(20)  'low' | 'medium' | 'high'
+description      TEXT         事件描述
+confidence_level FLOAT        事件信心度
+timestamp        TIMESTAMP    事件發生時間
+additional_data  JSON         額外事件資料
+
+## 4. data_sources (資料來源表)
+id               INTEGER      主鍵
+source_type      VARCHAR(20)  'camera' | 'video_file'
+name             VARCHAR(100) 來源名稱
+config           JSON         配置資訊（IP、檔案路徑等）
+status           VARCHAR(20)  'active' | 'inactive' | 'error'
+last_check       TIMESTAMP    最後檢查時間
+created_at       TIMESTAMP    建立時間
+
+## 5. users (使用者表)  (程式先不要做這部分)
+id               INTEGER      主鍵
+username         VARCHAR(50)  使用者名稱
+password_hash    VARCHAR(255) 密碼雜湊
+role             VARCHAR(20)  'admin' | 'operator' | 'viewer'
+is_active        BOOLEAN      是否啟用
+last_login       TIMESTAMP    最後登入時間
+created_at       TIMESTAMP    建立時間
+
+## 6. system_config (系統配置表)
+id               INTEGER      主鍵
+config_key       VARCHAR(100) 配置鍵值
+config_value     TEXT         配置值
+description      TEXT         說明
+updated_at       TIMESTAMP    更新時間
+
+==========================================================
+📊 關聯關係說明
+==========================================================
+
+1. data_sources → analysis_tasks (1:N)
+關係: 一個資料來源可以被多個分析任務使用
+實現: analysis_tasks.source_info (JSON) 包含 source_id
+
+範例:
+data_sources.id = 1 (大廳攝影機A)
+  ├── analysis_tasks.id = 10 (今天上午的監控)
+  ├── analysis_tasks.id = 11 (今天下午的監控)
+  └── analysis_tasks.id = 12 (昨天晚上的監控)
+
+2. analysis_tasks → detection_results (1:N)
+關係: 一個分析任務產生多個檢測結果
+實現: detection_results.task_id → analysis_tasks.id (外鍵)
+
+範例:
+analysis_tasks.id = 10 (30分鐘的即時監控)
+  ├── detection_results (54,000筆記錄) # 30分鐘 × 30fps × 60秒
+  └── 每筆記錄包含: 物件類型、座標、信心度等
+
+3. analysis_tasks → behavior_events (1:N)
+關係: 一個分析任務可能產生多個行為事件
+實現: behavior_events.task_id → analysis_tasks.id (外鍵)
+
+範例:
+analysis_tasks.id = 10
+  ├── behavior_events.id = 50 (10:15發生聚集事件)
+  ├── behavior_events.id = 51 (10:20發生異常速度)
+  └── behavior_events.id = 52 (10:25發生區域入侵)
+
+4. users → analysis_tasks (1:N) - 未來擴展
+關係: 一個使用者可以建立多個分析任務
+可能實現: analysis_tasks 新增 user_id 欄位
+
+範例:
+users.id = 1 (管理員張三)
+  ├── analysis_tasks.id = 10 (建立的監控任務A)
+  ├── analysis_tasks.id = 11 (建立的監控任務B)
+  └── analysis_tasks.id = 12 (建立的監控任務C)
+
+5. system_config → 全域設定 (獨立表)
+關係: 系統配置影響所有其他功能
+使用方式: 其他模組讀取配置參數
+
+影響範圍:
+├── analysis_tasks: 讀取並發任務限制、資料保留設定
+├── detection_results: 讀取信心度閾值、檢測參數
+├── data_sources: 讀取攝影機預設配置
+└── behavior_events: 讀取告警閾值設定
+
+==========================================================
+🚀 程式更新進度
+==========================================================
+
+✅ 已完成:
+1. 新資料庫模型定義 (app/models/database.py)
+   - AnalysisTask (分析任務) - ✅ 已添加解析度專用欄位
+   - DetectionResult (檢測結果)  
+   - DataSource (資料來源)
+   - SystemConfig (系統配置)
+
+2. 新資料庫服務層 (app/services/new_database_service.py)
+   - 完整的 CRUD 操作 - ✅ 已更新支援解析度欄位
+   - 統計和查詢功能
+   - 任務生命週期管理
+   - 配置管理功能
+
+3. 新 API 路由 (app/api/v1/new_analysis.py)
+   - 影片分析 API - ✅ 已更新解析度追蹤
+   - 即時攝影機分析 API - ✅ 已更新解析度追蹤
+   - 檢測結果查詢 API
+   - 資料來源管理 API
+   - 系統配置 API
+
+4. 實時檢測路由 (app/api/v1/realtime_routes.py)
+   - ✅ 已更新攝影機解析度獲取邏輯
+
+5. 攝影機路由 (app/api/v1/camera_routes.py)
+   - ✅ 已更新任務創建邏輯支援新解析度欄位
+
+6. 資料庫查詢 API (app/api/v1/database_query.py)
+   - ✅ 完整的 HTTP API 用於查詢分析任務表和檢測結果表
+   - ✅ 支援解析度統計和過濾功能
+
+🔄 進行中:
+- 整合新的模型到主程式 - ✅ 已完成
+- 更新前端管理介面 - 🔄 需要適配新解析度欄位
+- 實作 YOLO 分析邏輯 - ✅ 已完成
+
+🆕 最新更新 (2025年9月3日):
+- ✅ 解析度追蹤功能完成：將來源影像解析度從 JSON 內嵌改為專用資料庫欄位
+- ✅ 攝影機檢測：現在獲取真實攝影機解析度並儲存
+- ✅ 影片分析：現在獲取真實影片解析度並儲存  
+- ✅ 資料庫查詢 API：完整支援解析度統計和查詢功能
+
+⏸️ 待實作:
+- behavior_events 相關功能 (暫緩)
+- users 相關功能 (暫緩)
+- 前端管理介面適配新解析度欄位
+- 資料庫遷移腳本（處理現有資料）
+- 完整的測試驗證
+
+==========================================================
+🎯 解析度追蹤功能改進詳情 (2025年9月3日)
+==========================================================
+
+## 問題背景
+原本的來源影像解析度資訊嵌入在 source_info JSON 欄位中，例如：
+```json
+{
+  "camera_index": 0,
+  "resolution": "auto",
+  "fps": 30
+}
+```
+這樣的設計導致：
+- 無法直接查詢特定解析度的任務
+- 統計分析困難
+- 資料類型不一致（字串 vs 數值）
+
+## 解決方案
+將解析度資訊分離為獨立的資料庫欄位：
+- source_width (INTEGER): 來源影像寬度
+- source_height (INTEGER): 來源影像高度  
+- source_fps (FLOAT): 來源影像幀率
+
+## 實現細節
+
+### 1. 攝影機檢測 (realtime_routes.py)
+```python
+# 獲取攝影機實際解析度
+cap = cv2.VideoCapture(camera_index)
+if cap.isOpened():
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+```
+
+### 2. 影片分析 (new_analysis.py)
+```python
+# 獲取影片檔案實際解析度
+cap = cv2.VideoCapture(video_path)
+if cap.isOpened():
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+```
+
+### 3. 資料庫儲存格式
+```python
+task_data = {
+    "task_type": "realtime_camera",
+    "source_info": {"camera_index": 0},
+    "source_width": 640,
+    "source_height": 480,
+    "source_fps": 30.0
+}
+```
+
+## 好處
+- ✅ 可直接查詢特定解析度的任務
+- ✅ 支援解析度統計分析
+- ✅ 資料類型一致性
+- ✅ 查詢效能提升
+- ✅ 支援解析度範圍過濾
+
+==========================================================
+📝 下一步工作項目
+==========================================================
+
+1. 前端管理介面適配新解析度欄位顯示
+2. 創建資料庫遷移腳本處理現有資料
+3. 實作完整的解析度過濾和統計功能測試
+4. 更新 YOLO 服務整合新的資料結構（如需要）
+5. 驗證所有 API 端點的解析度追蹤功能
+6. 效能測試和優化
+

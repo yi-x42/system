@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 測試 - 任務創建</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>🧪 API 測試 - 任務創建</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h3>📝 請求配置</h3>
+                <form id="taskForm">
+                    <div class="mb-3">
+                        <label class="form-label">任務名稱</label>
+                        <input type="text" class="form-control" id="taskName" value="測試影片分析">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">任務類型</label>
+                        <select class="form-select" id="taskType">
+                            <option value="realtime">即時分析</option>
+                            <option value="batch" selected>批次分析</option>
+                            <option value="scheduled">排程分析</option>
+                            <option value="event">事件觸發</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">資料來源ID</label>
+                        <input type="text" class="form-control" id="cameraId" value="test-video-001">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">模型名稱</label>
+                        <input type="text" class="form-control" id="modelName" value="yolov11s">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">信心度</label>
+                        <input type="number" class="form-control" id="confidence" value="0.5" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">IoU 閾值</label>
+                        <input type="number" class="form-control" id="iouThreshold" value="0.45" step="0.01" min="0" max="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">描述</label>
+                        <textarea class="form-control" id="description">測試影片分析任務</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">🚀 創建任務</button>
+                </form>
+            </div>
+            
+            <div class="col-md-6">
+                <h3>📊 測試結果</h3>
+                <div id="results" class="border p-3 bg-light" style="height: 500px; overflow-y: auto;">
+                    <p class="text-muted">點擊 "創建任務" 查看結果...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.protocol + '//' + window.location.hostname + ':8001';
+        const results = document.getElementById('results');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const alertClass = type === 'error' ? 'alert-danger' : type === 'success' ? 'alert-success' : 'alert-info';
+            results.innerHTML += `
+                <div class="alert ${alertClass} alert-sm">
+                    <small>[${timestamp}]</small> ${message}
+                </div>
+            `;
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        document.getElementById('taskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const taskData = {
+                name: document.getElementById('taskName').value,
+                task_type: document.getElementById('taskType').value,
+                camera_id: String(document.getElementById('cameraId').value), // 確保字符串類型
+                model_name: document.getElementById('modelName').value,
+                confidence: parseFloat(document.getElementById('confidence').value),
+                iou_threshold: parseFloat(document.getElementById('iouThreshold').value),
+                description: document.getElementById('description').value
+            };
+            
+            log('📤 發送請求數據: ' + JSON.stringify(taskData, null, 2));
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/frontend/tasks`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(taskData)
+                });
+                
+                log(`📥 回應狀態: ${response.status} ${response.statusText}`);
+                
+                const responseText = await response.text();
+                log('📥 回應內容: ' + responseText);
+                
+                if (response.ok) {
+                    const result = JSON.parse(responseText);
+                    log('✅ 任務創建成功！', 'success');
+                    log('🆔 任務ID: ' + result.task_id, 'success');
+                } else {
+                    log('❌ 任務創建失敗', 'error');
+                    try {
+                        const errorData = JSON.parse(responseText);
+                        if (errorData.detail) {
+                            if (Array.isArray(errorData.detail)) {
+                                errorData.detail.forEach(err => {
+                                    log(`❌ 驗證錯誤 ${err.loc?.join('.')}: ${err.msg}`, 'error');
+                                });
+                            } else {
+                                log('❌ 錯誤詳情: ' + errorData.detail, 'error');
+                            }
+                        }
+                    } catch (e) {
+                        log('❌ 錯誤回應解析失敗', 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log('❌ 請求失敗: ' + error.message, 'error');
+            }
+        });
+        
+        // 頁面載入時測試 API 連接
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/health`);
+                if (response.ok) {
+                    log('✅ API 連接正常', 'success');
+                } else {
+                    log('⚠️ API 回應異常: ' + response.status, 'error');
+                }
+            } catch (error) {
+                log('❌ API 連接失敗: ' + error.message, 'error');
+            }
+        });
+    </script>
+</body>
+</html>

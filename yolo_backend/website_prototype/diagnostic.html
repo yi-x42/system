@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>載入問題診斷</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>🔍 載入問題診斷</h1>
+        
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>API 測試</h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="testApiBtn" class="btn btn-primary mb-3">測試 API</button>
+                        <div id="apiResults"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>資料來源載入</h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="loadDataBtn" class="btn btn-success mb-3">載入資料來源</button>
+                        <div id="dataResults"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>診斷日誌</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="diagnosticLog" style="height: 300px; overflow-y: auto; background: #f8f9fa; padding: 10px; font-family: monospace;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin.includes('26.86.64.166') 
+            ? 'http://26.86.64.166:8001' 
+            : 'http://localhost:8001';
+
+        function log(message) {
+            const logElement = document.getElementById('diagnosticLog');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        async function testApi() {
+            const btn = document.getElementById('testApiBtn');
+            const results = document.getElementById('apiResults');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 測試中...';
+            
+            log('🔍 開始 API 測試...');
+            
+            const endpoints = [
+                '/api/v1/health/',
+                '/api/v1/frontend/stats',
+                '/api/v1/frontend/data-sources'
+            ];
+            
+            let resultsHtml = '<ul class="list-group">';
+            
+            for (const endpoint of endpoints) {
+                try {
+                    log(`測試端點: ${endpoint}`);
+                    const startTime = Date.now();
+                    
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 10000);
+                    
+                    const response = await fetch(`${API_BASE}${endpoint}`, {
+                        signal: controller.signal
+                    });
+                    
+                    clearTimeout(timeoutId);
+                    const duration = Date.now() - startTime;
+                    
+                    const status = response.ok ? 'success' : 'danger';
+                    resultsHtml += `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            ${endpoint}
+                            <div>
+                                <span class="badge bg-${status}">${response.status}</span>
+                                <small class="text-muted ms-2">${duration}ms</small>
+                            </div>
+                        </li>
+                    `;
+                    
+                    log(`✅ ${endpoint}: ${response.status} (${duration}ms)`);
+                    
+                } catch (error) {
+                    resultsHtml += `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            ${endpoint}
+                            <span class="badge bg-danger">錯誤</span>
+                        </li>
+                    `;
+                    log(`❌ ${endpoint}: ${error.message}`);
+                }
+            }
+            
+            resultsHtml += '</ul>';
+            results.innerHTML = resultsHtml;
+            
+            btn.disabled = false;
+            btn.innerHTML = '測試 API';
+            log('🏁 API 測試完成');
+        }
+
+        async function loadDataSources() {
+            const btn = document.getElementById('loadDataBtn');
+            const results = document.getElementById('dataResults');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 載入中...';
+            
+            log('📡 開始載入資料來源...');
+            
+            try {
+                const startTime = Date.now();
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => {
+                    controller.abort();
+                    log('⏰ 載入超時 (15秒)');
+                }, 15000);
+                
+                const response = await fetch(`${API_BASE}/api/v1/frontend/data-sources`, {
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json',
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                const duration = Date.now() - startTime;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    results.innerHTML = `
+                        <div class="alert alert-success">
+                            <h6>✅ 載入成功</h6>
+                            <p>資料來源數量: ${data.length}</p>
+                            <p>響應時間: ${duration}ms</p>
+                            <details class="mt-2">
+                                <summary>詳細資料</summary>
+                                <pre class="mt-2">${JSON.stringify(data, null, 2)}</pre>
+                            </details>
+                        </div>
+                    `;
+                    
+                    log(`✅ 載入成功: ${data.length} 個資料來源 (${duration}ms)`);
+                    
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+            } catch (error) {
+                results.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h6>❌ 載入失敗</h6>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                
+                log(`❌ 載入失敗: ${error.message}`);
+            }
+            
+            btn.disabled = false;
+            btn.innerHTML = '載入資料來源';
+        }
+
+        // 事件監聽器
+        document.getElementById('testApiBtn').addEventListener('click', testApi);
+        document.getElementById('loadDataBtn').addEventListener('click', loadDataSources);
+
+        // 頁面載入時自動測試
+        document.addEventListener('DOMContentLoaded', () => {
+            log('🚀 診斷頁面已載入');
+            log(`API 基礎 URL: ${API_BASE}`);
+        });
+    </script>
+</body>
+</html>

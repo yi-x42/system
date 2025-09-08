@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Debug Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Analytics API Debug Test</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <button id="testButton" class="btn btn-primary">測試 API (正確配置)</button>
+                <button id="testWrongButton" class="btn btn-danger">測試 API (錯誤配置)</button>
+            </div>
+        </div>
+        
+        <div id="result" class="mt-3"></div>
+        
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">統計數據</div>
+                    <div class="card-body">
+                        <p>總檢測數: <span id="totalDetections">-</span></p>
+                        <p>人員檢測: <span id="personCount">-</span></p>
+                        <p>車輛檢測: <span id="vehicleCount">-</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">趨勢圖</div>
+                    <div class="card-body">
+                        <canvas id="trendChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+
+        document.getElementById('testButton').addEventListener('click', async function() {
+            try {
+                document.getElementById('result').innerHTML = '<div class="alert alert-info">正在測試正確的 API...</div>';
+                
+                // 動態取得 API 地址
+                const currentHost = window.location.hostname;
+                const apiBase = currentHost === 'localhost' || currentHost === '127.0.0.1' 
+                    ? 'http://localhost:8001' 
+                    : `http://${currentHost}:8001`;
+                
+                const response = await fetch(`${apiBase}/api/v1/frontend/analytics?period=24h`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>API 測試成功！</h5>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </div>
+                `;
+                
+                // 更新統計數據
+                const totalDetections = Object.values(data.detection_counts || {}).reduce((a, b) => a + b, 0);
+                const personCount = data.category_distribution?.person || 0;
+                const vehicleCount = (data.category_distribution?.car || 0) + (data.category_distribution?.truck || 0);
+                
+                document.getElementById('totalDetections').textContent = totalDetections;
+                document.getElementById('personCount').textContent = personCount;
+                document.getElementById('vehicleCount').textContent = vehicleCount;
+                
+                // 更新圖表
+                updateChart(data);
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5>API 測試失敗</h5>
+                        <p>錯誤: ${error.message}</p>
+                    </div>
+                `;
+            }
+        });
+
+        document.getElementById('testWrongButton').addEventListener('click', async function() {
+            try {
+                document.getElementById('result').innerHTML = '<div class="alert alert-info">正在測試錯誤的 API...</div>';
+                
+                // 動態取得 API 地址（這裡故意使用錯誤的參數來演示）
+                const currentHost = window.location.hostname;
+                const apiBase = currentHost === 'localhost' || currentHost === '127.0.0.1' 
+                    ? 'http://localhost:8001' 
+                    : `http://${currentHost}:8001`;
+                
+                const response = await fetch(`${apiBase}/api/v1/frontend/analytics?time_range=24h`);
+                
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-success">測試成功（這不應該發生）</div>
+                `;
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-warning">
+                        <h5>預期的錯誤（這是正確的）</h5>
+                        <p>錯誤: ${error.message}</p>
+                        <p>這證明了之前的配置問題</p>
+                    </div>
+                `;
+            }
+        });
+
+        function updateChart(data) {
+            const ctx = document.getElementById('trendChart');
+            
+            if (chart) {
+                chart.destroy();
+            }
+            
+            const hourlyData = data.hourly_trend || [];
+            const labels = hourlyData.map(item => item.hour);
+            const values = hourlyData.map(item => item.total);
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels.length > 0 ? labels : ['00:00', '06:00', '12:00', '18:00'],
+                    datasets: [{
+                        label: '檢測數量',
+                        data: values.length > 0 ? values : [0, 0, 0, 0],
+                        borderColor: '#6c5ce7',
+                        backgroundColor: 'rgba(108, 92, 231, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

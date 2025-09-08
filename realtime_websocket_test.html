@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>實時檢測 WebSocket 測試</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-success { background-color: #28a745; color: white; }
+        .btn-danger { background-color: #dc3545; color: white; }
+        .btn-warning { background-color: #ffc107; color: black; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected { background-color: #d4edda; color: #155724; }
+        .status.disconnected { background-color: #f8d7da; color: #721c24; }
+        .status.detecting { background-color: #fff3cd; color: #856404; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .detection-result {
+            background-color: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 實時檢測 WebSocket 測試介面</h1>
+    
+    <div class="grid">
+        <div class="container">
+            <h2>🔗 WebSocket 連接</h2>
+            <div id="connectionStatus" class="status disconnected">未連接</div>
+            <button id="connectBtn" class="button btn-primary">連接 WebSocket</button>
+            <button id="disconnectBtn" class="button btn-danger">斷開連接</button>
+            
+            <h3>📹 實時檢測控制</h3>
+            <label>攝影機索引：</label>
+            <input type="number" id="cameraIndex" value="0" min="0" max="10">
+            <br>
+            <button id="startDetectionBtn" class="button btn-success">啟動實時檢測</button>
+            <button id="stopDetectionBtn" class="button btn-warning">停止檢測</button>
+            <button id="statusBtn" class="button btn-primary">檢查狀態</button>
+        </div>
+        
+        <div class="container">
+            <h2>📊 檢測狀態</h2>
+            <div id="detectionStatus" class="status disconnected">未檢測</div>
+            <div id="stats">
+                <p>檢測次數: <span id="detectionCount">0</span></p>
+                <p>最後檢測時間: <span id="lastDetection">無</span></p>
+                <p>WebSocket 訊息數: <span id="messageCount">0</span></p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h2>📝 日誌</h2>
+        <button id="clearLogBtn" class="button btn-warning">清空日誌</button>
+        <div id="log" class="log"></div>
+    </div>
+    
+    <div class="container">
+        <h2>🎯 最新檢測結果</h2>
+        <div id="latestResult" class="detection-result">
+            <p>等待檢測結果...</p>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let detectionCount = 0;
+        let messageCount = 0;
+        
+        const API_BASE = 'http://26.86.64.166:8001/api/v1';
+        const WS_URL = 'ws://26.86.64.166:8001/ws/detection';
+        
+        // DOM 元素
+        const connectionStatus = document.getElementById('connectionStatus');
+        const detectionStatus = document.getElementById('detectionStatus');
+        const log = document.getElementById('log');
+        const detectionCountSpan = document.getElementById('detectionCount');
+        const lastDetectionSpan = document.getElementById('lastDetection');
+        const messageCountSpan = document.getElementById('messageCount');
+        const latestResult = document.getElementById('latestResult');
+        
+        // 日誌函數
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `<span style="color: #666;">[${timestamp}]</span> ${message}`;
+            if (type === 'error') logEntry.style.color = '#dc3545';
+            if (type === 'success') logEntry.style.color = '#28a745';
+            if (type === 'warning') logEntry.style.color = '#ffc107';
+            log.appendChild(logEntry);
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        // WebSocket 連接
+        function connectWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                addLog('WebSocket 已經連接', 'warning');
+                return;
+            }
+            
+            addLog('正在連接 WebSocket...');
+            ws = new WebSocket(WS_URL);
+            
+            ws.onopen = function() {
+                addLog('WebSocket 連接成功！', 'success');
+                connectionStatus.textContent = '已連接';
+                connectionStatus.className = 'status connected';
+            };
+            
+            ws.onmessage = function(event) {
+                messageCount++;
+                messageCountSpan.textContent = messageCount;
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    addLog(`收到訊息: ${JSON.stringify(data, null, 2)}`, 'success');
+                    
+                    if (data.type === 'detection_result') {
+                        detectionCount++;
+                        detectionCountSpan.textContent = detectionCount;
+                        lastDetectionSpan.textContent = new Date().toLocaleTimeString();
+                        
+                        // 更新最新檢測結果
+                        latestResult.innerHTML = `
+                            <h4>檢測結果 #${detectionCount}</h4>
+                            <p><strong>任務ID:</strong> ${data.task_id}</p>
+                            <p><strong>攝影機:</strong> ${data.camera_index}</p>
+                            <p><strong>檢測物件數量:</strong> ${data.detections ? data.detections.length : 0}</p>
+                            <p><strong>時間:</strong> ${data.timestamp}</p>
+                            ${data.detections && data.detections.length > 0 ? 
+                                '<p><strong>檢測到的物件:</strong> ' + 
+                                data.detections.map(d => `${d.class_name} (信心度: ${d.confidence})`).join(', ') + 
+                                '</p>' : '<p>未檢測到物件</p>'
+                            }
+                        `;
+                    }
+                } catch (e) {
+                    addLog(`解析訊息失敗: ${e.message}`, 'error');
+                }
+            };
+            
+            ws.onclose = function() {
+                addLog('WebSocket 連接已斷開', 'warning');
+                connectionStatus.textContent = '未連接';
+                connectionStatus.className = 'status disconnected';
+            };
+            
+            ws.onerror = function(error) {
+                addLog(`WebSocket 錯誤: ${error}`, 'error');
+            };
+        }
+        
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+                addLog('手動斷開 WebSocket 連接');
+            }
+        }
+        
+        // API 調用
+        async function apiCall(url, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                };
+                
+                if (body) {
+                    options.body = JSON.stringify(body);
+                }
+                
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addLog(`API 調用成功: ${method} ${url}`, 'success');
+                    addLog(`回應: ${JSON.stringify(data, null, 2)}`);
+                    return data;
+                } else {
+                    addLog(`API 調用失敗: ${response.status} - ${JSON.stringify(data)}`, 'error');
+                    return null;
+                }
+            } catch (error) {
+                addLog(`API 調用錯誤: ${error.message}`, 'error');
+                return null;
+            }
+        }
+        
+        async function startDetection() {
+            const cameraIndex = document.getElementById('cameraIndex').value;
+            const result = await apiCall(`${API_BASE}/realtime/start/${cameraIndex}`, 'POST');
+            
+            if (result) {
+                detectionStatus.textContent = '檢測中';
+                detectionStatus.className = 'status detecting';
+                addLog(`實時檢測已啟動，任務ID: ${result.task_id}`, 'success');
+            }
+        }
+        
+        async function stopDetection() {
+            const cameraIndex = document.getElementById('cameraIndex').value;
+            const result = await apiCall(`${API_BASE}/realtime/stop/${cameraIndex}`, 'POST');
+            
+            if (result) {
+                detectionStatus.textContent = '已停止';
+                detectionStatus.className = 'status disconnected';
+                addLog(`實時檢測已停止，總檢測數: ${result.total_detections}`, 'success');
+            }
+        }
+        
+        async function checkStatus() {
+            const cameraIndex = document.getElementById('cameraIndex').value;
+            const result = await apiCall(`${API_BASE}/realtime/status/${cameraIndex}`);
+            
+            if (result) {
+                if (result.running) {
+                    detectionStatus.textContent = '檢測中';
+                    detectionStatus.className = 'status detecting';
+                } else {
+                    detectionStatus.textContent = '未檢測';
+                    detectionStatus.className = 'status disconnected';
+                }
+                
+                addLog(`檢測狀態: ${result.running ? '運行中' : '未運行'}`, 'info');
+                if (result.running) {
+                    addLog(`任務ID: ${result.task_id}, 檢測數量: ${result.detection_count}`);
+                }
+            }
+        }
+        
+        function clearLog() {
+            log.innerHTML = '';
+            addLog('日誌已清空');
+        }
+        
+        // 事件監聽器
+        document.getElementById('connectBtn').addEventListener('click', connectWebSocket);
+        document.getElementById('disconnectBtn').addEventListener('click', disconnectWebSocket);
+        document.getElementById('startDetectionBtn').addEventListener('click', startDetection);
+        document.getElementById('stopDetectionBtn').addEventListener('click', stopDetection);
+        document.getElementById('statusBtn').addEventListener('click', checkStatus);
+        document.getElementById('clearLogBtn').addEventListener('click', clearLog);
+        
+        // 頁面載入時的初始化
+        addLog('頁面已載入，準備開始測試');
+        addLog(`API 基礎地址: ${API_BASE}`);
+        addLog(`WebSocket 地址: ${WS_URL}`);
+    </script>
+</body>
+</html>

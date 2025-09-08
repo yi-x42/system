@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>攝影機測試</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { border-color: #28a745; background: #d4edda; }
+        .error { border-color: #dc3545; background: #f8d7da; }
+        .info { border-color: #17a2b8; background: #d1ecf1; }
+        .camera-card {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #fff;
+        }
+        .status-ok { color: #28a745; font-weight: bold; }
+        .status-fail { color: #dc3545; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 攝影機掃描測試</h1>
+        <p><strong>目的:</strong> 測試能否檢測到您的筆記型電腦攝影機</p>
+        
+        <div style="margin: 20px 0;">
+            <button onclick="testBasicScan()" id="basicBtn">基本掃描</button>
+            <button onclick="testForceScan()" id="forceBtn">強制掃描</button>
+            <button onclick="testDirectOpenCV()" id="opencvBtn">直接 OpenCV 測試</button>
+            <button onclick="clearResults()" id="clearBtn">清除結果</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function logObject(obj, title = '') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = 'result info';
+            div.innerHTML = `<strong>${title}</strong><br>${JSON.stringify(obj, null, 2)}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        function setButtonsDisabled(disabled) {
+            ['basicBtn', 'forceBtn', 'opencvBtn'].forEach(id => {
+                document.getElementById(id).disabled = disabled;
+            });
+        }
+
+        async function testBasicScan() {
+            log('🔍 開始基本掃描測試...', 'info');
+            setButtonsDisabled(true);
+
+            try {
+                const response = await fetch('/api/v1/cameras/scan');
+                log(`HTTP 狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    logObject(data, '基本掃描結果:');
+                    
+                    const availableCount = data.available_indices?.length || 0;
+                    if (availableCount > 0) {
+                        log(`✅ 成功！找到 ${availableCount} 個攝影機: [${data.available_indices.join(', ')}]`, 'success');
+                    } else {
+                        log('❌ 沒有找到可用的攝影機', 'error');
+                    }
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ 掃描失敗: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 網路錯誤: ${error.message}`, 'error');
+            } finally {
+                setButtonsDisabled(false);
+            }
+        }
+
+        async function testForceScan() {
+            log('🔍 開始強制掃描測試 (force_probe=true, retries=3)...', 'info');
+            setButtonsDisabled(true);
+
+            try {
+                // 快速掃描模式 - 使用新的預設值，更快的回應時間
+                const response = await fetch('/api/v1/cameras/scan');
+                log(`HTTP 狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    logObject(data, '強制掃描結果:');
+                    
+                    const availableCount = data.available_indices?.length || 0;
+                    const cameras = data.devices || data.cameras || [];
+                    
+                    if (availableCount > 0) {
+                        log(`✅ 成功！找到 ${availableCount} 個攝影機`, 'success');
+                        
+                        // 顯示每個攝影機的詳細信息
+                        cameras.forEach(camera => {
+                            const status = camera.frame_ok ? 'OK' : 'FAIL';
+                            log(`📷 攝影機 ${camera.index}: ${status} (${camera.backend}) ${camera.width}x${camera.height}`, camera.frame_ok ? 'success' : 'error');
+                        });
+                        
+                        // 測試第一個可用攝影機
+                        if (data.available_indices.length > 0) {
+                            await testForceOpen(data.available_indices[0]);
+                        }
+                    } else {
+                        log('❌ 沒有找到可用的攝影機', 'error');
+                    }
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ 強制掃描失敗: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 網路錯誤: ${error.message}`, 'error');
+            } finally {
+                setButtonsDisabled(false);
+            }
+        }
+
+        async function testForceOpen(cameraIndex) {
+            log(`🎥 測試 force-open 攝影機 ${cameraIndex}...`, 'info');
+            
+            try {
+                const response = await fetch(`/api/v1/cameras/force-open?index=${cameraIndex}&warmup_frames=10`);
+                log(`Force-open HTTP 狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.frame_base64_jpeg) {
+                        log(`✅ 成功獲取影格！長度: ${data.frame_base64_jpeg.length} 字元`, 'success');
+                        log(`解析度: ${data.width}x${data.height}, 後端: ${data.backend}`, 'info');
+                        
+                        // 顯示影像
+                        showImage(data.frame_base64_jpeg, `攝影機 ${cameraIndex}`);
+                    } else {
+                        log('❌ 無法獲取影格資料', 'error');
+                    }
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ Force-open 失敗: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Force-open 錯誤: ${error.message}`, 'error');
+            }
+        }
+
+        async function testDirectOpenCV() {
+            log('🔧 測試直接 OpenCV 呼叫...', 'info');
+            setButtonsDisabled(true);
+
+            try {
+                // 這個端點可能不存在，但我們試試看
+                const response = await fetch('/api/v1/test/opencv-camera');
+                log(`OpenCV 測試 HTTP 狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    logObject(data, 'OpenCV 測試結果:');
+                } else {
+                    log('❌ 直接 OpenCV 測試不可用 (這是正常的)', 'info');
+                }
+            } catch (error) {
+                log(`❌ OpenCV 測試錯誤: ${error.message}`, 'info');
+            } finally {
+                setButtonsDisabled(false);
+            }
+        }
+
+        function showImage(base64Data, title) {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = 'camera-card';
+            div.innerHTML = `
+                <h4>${title} - 攝影機預覽</h4>
+                <img src="data:image/jpeg;base64,${base64Data}" style="max-width: 100%; height: auto; border: 1px solid #ddd;" />
+                <p><small>如果看到影像，表示攝影機工作正常！</small></p>
+            `;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+
+        // 頁面載入時的初始化
+        window.onload = function() {
+            log('🚀 攝影機測試頁面已載入', 'info');
+            log('💡 建議順序: 1. 基本掃描 → 2. 強制掃描 (如果基本掃描失敗)', 'info');
+            log(`🌐 當前位址: ${window.location.href}`, 'info');
+        };
+    </script>
+</body>
+</html>

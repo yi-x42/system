@@ -1,0 +1,15 @@
+﻿event_id,timestamp,object_id,object_type,behavior,zone,position_x,position_y,duration,confidence,metadata,source
+crowd_unknown_area_1756907841,2025-09-03 21:57:21.450924,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
+crowd_unknown_area_1756907841,2025-09-03 21:57:21.872064,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
+crowd_unknown_area_1756907842,2025-09-03 21:57:22.298642,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
+crowd_unknown_area_1756907842,2025-09-03 21:57:22.742345,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
+crowd_unknown_area_1756907843,2025-09-03 21:57:23.157299,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
+crowd_unknown_area_1756907843,2025-09-03 21:57:23.563802,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 7, ""threshold"": 5}",system
+crowd_unknown_area_1756907843,2025-09-03 21:57:23.955698,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907844,2025-09-03 21:57:24.380886,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907844,2025-09-03 21:57:24.831176,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907845,2025-09-03 21:57:25.216979,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907845,2025-09-03 21:57:25.566488,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 9, ""threshold"": 5}",system
+crowd_unknown_area_1756907845,2025-09-03 21:57:25.886515,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907846,2025-09-03 21:57:26.211293,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 8, ""threshold"": 5}",system
+crowd_unknown_area_1756907846,2025-09-03 21:57:26.517533,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 7, ""threshold"": 5}",system

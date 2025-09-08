@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #f8f9fa; 
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #2c3e50 0%, #3498db 100%);
+            min-height: 100vh;
+        }
+        
+        .nav-link {
+            color: rgba(255,255,255,0.8) !important;
+            border-radius: 0.5rem;
+            margin: 0.2rem 0;
+        }
+        
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white !important;
+        }
+        
+        .config-section {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .config-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f8f9fa;
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin: 0;
+        }
+        
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        .config-item {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .config-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+            border-color: #667eea;
+        }
+        
+        .config-item.modified {
+            border-color: #ffc107;
+            background: #fff9e6;
+        }
+        
+        .config-item.saved {
+            border-color: #198754;
+            background: #e6f7e6;
+        }
+        
+        .config-label {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .config-key {
+            font-family: 'Courier New', monospace;
+            background: #e9ecef;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-bottom: 0.75rem;
+        }
+        
+        .config-input {
+            border: none;
+            background: white;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        
+        .config-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        /* 切換開關樣式 */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .toggle-slider {
+            background-color: #667eea;
+        }
+        
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        
+        .toggle-label {
+            margin-left: 1rem;
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .toggle-label.active {
+            color: #667eea;
+        }
+        
+        /* 選項按鈕組樣式 */
+        .option-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .option-btn {
+            padding: 0.5rem 1rem;
+            border: 2px solid #e9ecef;
+            background: white;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .option-btn:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+        
+        .option-btn.selected {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+        
+        /* 滑桿樣式 */
+        .range-container {
+            margin: 1rem 0;
+        }
+        
+        .range-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .range-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .range-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .range-value {
+            font-weight: 600;
+            color: #667eea;
+            margin-left: 0.5rem;
+        }
+        
+        .range-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+        
+        /* 下拉選單樣式 */
+        .config-select {
+            border: none;
+            background: white;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        .config-select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        /* 數字微調器樣式 */
+        .number-stepper {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        
+        .stepper-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: #f8f9fa;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        
+        .stepper-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .stepper-input {
+            border: none;
+            background: transparent;
+            padding: 0.5rem;
+            text-align: center;
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .stepper-input:focus {
+            outline: none;
+        }
+        
+        .config-description {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+        
+        .config-actions {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .action-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 0.875rem;
+        }
+        
+        .btn-save {
+            background: #198754;
+            color: white;
+        }
+        
+        .btn-save:hover {
+            background: #157347;
+            transform: scale(1.1);
+        }
+        
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-delete:hover {
+            background: #bb2d3b;
+            transform: scale(1.1);
+        }
+        
+        .quick-actions {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .quick-action-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        .quick-action-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        .quick-action-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .quick-action-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            opacity: 0.9;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            text-align: center;
+            box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+            border-left: 4px solid;
+        }
+        
+        .stat-card.primary { border-left-color: #667eea; }
+        .stat-card.success { border-left-color: #198754; }
+        .stat-card.warning { border-left-color: #ffc107; }
+        .stat-card.info { border-left-color: #0dcaf0; }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #6c757d;
+        }
+        
+        .empty-state .fa-cogs {
+            font-size: 4rem;
+            color: #dee2e6;
+            margin-bottom: 1rem;
+        }
+        
+        @media (max-width: 768px) {
+            .config-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-action-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 側邊欄 -->
+            <nav class="col-md-3 col-lg-2 d-md-block sidebar">
+                <div class="position-sticky pt-3">
+                    <div class="text-center mb-4">
+                        <h5 class="text-white">
+                            <i class="fas fa-eye text-warning"></i>
+                            YOLOv11 系統
+                        </h5>
+                        <small class="text-light">數位雙生分析平台 v2.0</small>
+                    </div>
+                    
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/">
+                                <i class="fas fa-tachometer-alt"></i> 主控台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/tasks">
+                                <i class="fas fa-tasks"></i> 任務管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/sources">
+                                <i class="fas fa-database"></i> 資料來源
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/admin/v2/config">
+                                <i class="fas fa-cogs"></i> 系統配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/yolo-config">
+                                <i class="fas fa-robot"></i> YOLO模型配置
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/camera-management">
+                                <i class="fas fa-video"></i> 攝影機管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/v2/analytics">
+                                <i class="fas fa-chart-bar"></i> 分析統計
+                            </a>
+                        </li>
+                        <li class="nav-item mt-3">
+                            <a class="nav-link" href="/admin/">
+                                <i class="fas fa-arrow-left"></i> 舊版後台
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/docs">
+                                <i class="fas fa-book"></i> API 文檔
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <!-- 主要內容 -->
+            <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+                <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3">
+                    <h1 class="h2">
+                        <i class="fas fa-cogs text-primary me-2"></i>
+                        系統配置中心
+                    </h1>
+                    <div class="btn-toolbar">
+                        <button class="btn btn-primary me-2" onclick="showAddModal()">
+                            <i class="fas fa-plus me-2"></i>新增配置
+                        </button>
+                        <button class="btn btn-success me-2" onclick="saveAllConfigs()">
+                            <i class="fas fa-save me-2"></i>批量儲存
+                        </button>
+                        <button class="btn btn-warning me-2" onclick="resetAllConfigs()">
+                            <i class="fas fa-undo me-2"></i>重置修改
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="location.reload()">
+                            <i class="fas fa-sync-alt me-2"></i>重新整理
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 統計資訊 -->
+                <div class="stats-grid">
+                    <div class="stat-card primary">
+                        <div class="stat-value" id="totalConfigs">0</div>
+                        <div class="stat-label">總配置項目</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-value" id="activeConfigs">0</div>
+                        <div class="stat-label">啟用配置</div>
+                    </div>
+                    <div class="stat-card warning">
+                        <div class="stat-value" id="modifiedConfigs">0</div>
+                        <div class="stat-label">待儲存變更</div>
+                    </div>
+                    <div class="stat-card info">
+                        <div class="stat-value" id="configCategories">0</div>
+                        <div class="stat-label">配置分類</div>
+                    </div>
+                </div>
+
+                <!-- 快速操作 -->
+                <div class="quick-actions">
+                    <h3><i class="fas fa-rocket me-2"></i>快速配置模板</h3>
+                    <p class="mb-0">選擇常用的配置模板快速建立系統配置</p>
+                    
+                    <div class="quick-action-grid">
+                        <div class="quick-action-card" onclick="applyTemplate('yolo')">
+                            <div class="quick-action-icon">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <h5>YOLO 模型配置</h5>
+                            <p class="mb-0">包含信心度、IoU 門檻等模型參數</p>
+                        </div>
+                        
+                        <div class="quick-action-card" onclick="applyTemplate('camera')">
+                            <div class="quick-action-icon">
+                                <i class="fas fa-video"></i>
+                            </div>
+                            <h5>攝影機設定</h5>
+                            <p class="mb-0">攝影機 FPS、解析度等參數</p>
+                        </div>
+                        
+                        <div class="quick-action-card" onclick="applyTemplate('performance')">
+                            <div class="quick-action-icon">
+                                <i class="fas fa-tachometer-alt"></i>
+                            </div>
+                            <h5>效能調優</h5>
+                            <p class="mb-0">系統效能與資源管理配置</p>
+                        </div>
+                        
+                        <div class="quick-action-card" onclick="applyTemplate('security')">
+                            <div class="quick-action-icon">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <h5>安全設定</h5>
+                            <p class="mb-0">API 存取控制與安全參數</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- 錯誤訊息 -->
+                {% if error %}
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>錯誤：</strong>{{ error }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                {% endif %}
+
+                <!-- 配置內容 -->
+                <div id="configContent">
+                    <!-- 配置項目將通過 JavaScript 動態載入 -->
+                    {% if grouped_configs %}
+                        {% for category, config_list in grouped_configs.items() %}
+                        <div class="config-section" data-category="{{ category }}">
+                            <div class="section-header">
+                                <h2 class="section-title">
+                                    <i class="fas fa-folder-open me-2"></i>
+                                    {{ category.title() }} 配置
+                                </h2>
+                                <span class="badge bg-primary">{{ config_list|length }} 項目</span>
+                            </div>
+                            
+                            <div class="config-grid">
+                                {% for config in config_list %}
+                                <div class="config-item" data-key="{{ config.config_key }}">
+                                    <div class="config-actions">
+                                        <button class="action-btn btn-save" onclick="saveConfig('{{ config.config_key }}')" title="儲存">
+                                            <i class="fas fa-save"></i>
+                                        </button>
+                                        <button class="action-btn btn-delete" onclick="deleteConfig('{{ config.config_key }}')" title="刪除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="config-label">配置項目</div>
+                                    <div class="config-key">{{ config.config_key }}</div>
+                                    
+                                    <div class="config-label">值</div>
+                                    
+                                    <!-- 根據配置類型顯示不同的控制項 -->
+                                    {% set config_type = 'text' %}
+                                    {% set config_value = config.config_value or '' %}
+                                    
+                                    <!-- 布林型配置 (切換開關) -->
+                                    {% if config.config_key.endswith('enable') or config.config_key.endswith('enabled') or 
+                                          'enable_' in config.config_key or (config_value and config_value.lower() in ['true', 'false']) %}
+                                        {% set config_type = 'boolean' %}
+                                        <div class="d-flex align-items-center">
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" 
+                                                       data-key="{{ config.config_key }}" 
+                                                       data-original="{{ config_value }}"
+                                                       {% if config_value and config_value.lower() == 'true' %}checked{% endif %}
+                                                       onchange="markAsModified(this); updateToggleLabel(this)">
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                            <span class="toggle-label {% if config_value and config_value.lower() == 'true' %}active{% endif %}" 
+                                                  id="label-{{ config.config_key }}">
+                                                {% if config_value and config_value.lower() == 'true' %}啟用{% else %}停用{% endif %}
+                                            </span>
+                                        </div>
+                                    
+                                    <!-- 閾值型配置 (滑桿) -->
+                                    {% elif 'threshold' in config.config_key or 'confidence' in config.config_key %}
+                                        {% set config_type = 'range' %}
+                                        <div class="range-container">
+                                            <div class="d-flex align-items-center">
+                                                <span class="config-label me-2">值：</span>
+                                                <span class="range-value" id="value-{{ config.config_key }}">{{ config_value }}</span>
+                                            </div>
+                                            <input type="range" 
+                                                   class="range-slider" 
+                                                   data-key="{{ config.config_key }}" 
+                                                   data-original="{{ config_value }}"
+                                                   min="0" max="1" step="0.01" 
+                                                   value="{{ config_value }}"
+                                                   oninput="updateRangeValue(this); markAsModified(this)">
+                                            <div class="range-labels">
+                                                <span>0.0</span>
+                                                <span>1.0</span>
+                                            </div>
+                                        </div>
+                                    
+                                    <!-- 數量型配置 (數字微調器) -->
+                                    {% elif 'count' in config.config_key or 'limit' in config.config_key or 
+                                            'max' in config.config_key or ('threshold' in config.config_key and config_value and config_value.isdigit()) %}
+                                        {% set config_type = 'number' %}
+                                        <div class="number-stepper">
+                                            <button type="button" class="stepper-btn" onclick="adjustNumber('{{ config.config_key }}', -1)">
+                                                <i class="fas fa-minus"></i>
+                                            </button>
+                                            <input type="number" 
+                                                   class="stepper-input" 
+                                                   data-key="{{ config.config_key }}" 
+                                                   data-original="{{ config_value }}"
+                                                   value="{{ config_value }}" 
+                                                   min="1" max="1000"
+                                                   onchange="markAsModified(this)">
+                                            <button type="button" class="stepper-btn" onclick="adjustNumber('{{ config.config_key }}', 1)">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                    
+                                    <!-- 選項型配置 (按鈕組或下拉選單) -->
+                                    {% elif 'device' in config.config_key or 'mode' in config.config_key or 
+                                            'type' in config.config_key or 'level' in config.config_key %}
+                                        {% set config_type = 'options' %}
+                                        {% if 'device' in config.config_key %}
+                                            <div class="option-group">
+                                                <button type="button" class="option-btn {% if config_value == 'auto' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'auto', this)">
+                                                    <i class="fas fa-magic me-1"></i>自動
+                                                </button>
+                                                <button type="button" class="option-btn {% if config_value == 'cpu' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'cpu', this)">
+                                                    <i class="fas fa-microchip me-1"></i>CPU
+                                                </button>
+                                                <button type="button" class="option-btn {% if config_value == 'gpu' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'gpu', this)">
+                                                    <i class="fas fa-bolt me-1"></i>GPU
+                                                </button>
+                                            </div>
+                                        {% elif 'level' in config.config_key %}
+                                            <select class="config-select" 
+                                                    data-key="{{ config.config_key }}" 
+                                                    data-original="{{ config_value }}"
+                                                    onchange="markAsModified(this)">
+                                                <option value="debug" {% if config_value == 'debug' %}selected{% endif %}>DEBUG - 詳細除錯</option>
+                                                <option value="info" {% if config_value == 'info' %}selected{% endif %}>INFO - 一般資訊</option>
+                                                <option value="warning" {% if config_value == 'warning' %}selected{% endif %}>WARNING - 警告</option>
+                                                <option value="error" {% if config_value == 'error' %}selected{% endif %}>ERROR - 錯誤</option>
+                                            </select>
+                                        {% elif 'mode' in config.config_key %}
+                                            <div class="option-group">
+                                                <button type="button" class="option-btn {% if config_value == 'fast' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'fast', this)">
+                                                    <i class="fas fa-rocket me-1"></i>快速
+                                                </button>
+                                                <button type="button" class="option-btn {% if config_value == 'balanced' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'balanced', this)">
+                                                    <i class="fas fa-balance-scale me-1"></i>平衡
+                                                </button>
+                                                <button type="button" class="option-btn {% if config_value == 'accurate' %}selected{% endif %}" 
+                                                        onclick="selectOption('{{ config.config_key }}', 'accurate', this)">
+                                                    <i class="fas fa-bullseye me-1"></i>精確
+                                                </button>
+                                            </div>
+                                        {% else %}
+                                            <select class="config-select" 
+                                                    data-key="{{ config.config_key }}" 
+                                                    data-original="{{ config_value }}"
+                                                    onchange="markAsModified(this)">
+                                                <option value="{{ config_value }}" selected>{{ config_value }}</option>
+                                            </select>
+                                        {% endif %}
+                                        <input type="hidden" 
+                                               data-key="{{ config.config_key }}" 
+                                               data-original="{{ config_value }}"
+                                               value="{{ config_value }}">
+                                    
+                                    <!-- 預設文字輸入 (其他類型) -->
+                                    {% else %}
+                                        <input type="text" class="config-input" 
+                                               data-key="{{ config.config_key }}" 
+                                               data-original="{{ config_value }}"
+                                               value="{{ config_value }}" 
+                                               placeholder="輸入配置值"
+                                               oninput="markAsModified(this)">
+                                    {% endif %}
+                                    
+                                    {% if config.description %}
+                                    <div class="config-description">
+                                        {{ config.description }}
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <div class="config-description">
+                                        更新時間：{{ config.updated_at if config.updated_at else '未知' }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="config-section">
+                        <div class="empty-state">
+                            <i class="fas fa-cogs"></i>
+                            <h3>尚未建立任何系統配置</h3>
+                            <p>點擊上方的「新增配置」按鈕或選擇快速配置模板開始建立您的第一個配置項目</p>
+                            <button class="btn btn-primary btn-lg" onclick="showAddModal()">
+                                <i class="fas fa-plus me-2"></i>立即開始
+                            </button>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 新增配置 Modal -->
+    <div class="modal fade" id="addConfigModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-plus me-2"></i>新增系統配置
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addConfigForm">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-key me-1"></i>配置鍵值
+                                </label>
+                                <input type="text" class="form-control" id="configKey" required 
+                                       placeholder="例如：model.confidence_threshold">
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    建議使用點號分隔的層級結構，如：category.parameter_name
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-tag me-1"></i>配置值
+                                </label>
+                                <input type="text" class="form-control" id="configValue" required 
+                                       placeholder="輸入配置值">
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    支援數字、文字、布林值等
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-comment me-1"></i>描述
+                            </label>
+                            <textarea class="form-control" id="configDescription" rows="3" 
+                                      placeholder="詳細說明此配置項目的用途和影響..."></textarea>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <i class="fas fa-lightbulb me-2"></i>
+                            <strong>提示：</strong>良好的配置命名和描述有助於後續的維護和管理
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i>取消
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="addConfig()">
+                        <i class="fas fa-plus me-2"></i>新增配置
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 配置模板 Modal -->
+    <div class="modal fade" id="templateModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-magic me-2"></i>配置模板
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="templateContent">
+                        <!-- 模板內容將通過 JavaScript 載入 -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-success" onclick="applySelectedTemplate()">
+                        <i class="fas fa-check me-2"></i>套用模板
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let modifiedConfigs = new Set();
+        
+        // 頁面載入時更新統計
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStats();
+        });
+        
+        // 更新統計資訊
+        function updateStats() {
+            const totalConfigs = document.querySelectorAll('.config-item').length;
+            const activeConfigs = totalConfigs; // 假設所有配置都是啟用的
+            const modifiedCount = modifiedConfigs.size;
+            const categories = new Set();
+            
+            document.querySelectorAll('.config-section').forEach(section => {
+                const category = section.dataset.category;
+                if (category) categories.add(category);
+            });
+            
+            document.getElementById('totalConfigs').textContent = totalConfigs;
+            document.getElementById('activeConfigs').textContent = activeConfigs;
+            document.getElementById('modifiedConfigs').textContent = modifiedCount;
+            document.getElementById('configCategories').textContent = categories.size;
+        }
+        
+        // 標記配置為已修改
+        function markAsModified(element) {
+            const key = element.dataset.key;
+            const configItem = element.closest('.config-item');
+            
+            let current, original;
+            
+            // 根據元素類型獲取當前值和原始值
+            if (element.type === 'checkbox') {
+                current = element.checked ? 'true' : 'false';
+                original = element.dataset.original;
+            } else if (element.type === 'range' || element.type === 'number') {
+                current = element.value;
+                original = element.dataset.original;
+            } else if (element.tagName === 'SELECT') {
+                current = element.value;
+                original = element.dataset.original;
+            } else if (element.type === 'hidden') {
+                current = element.value;
+                original = element.dataset.original;
+            } else {
+                current = element.value;
+                original = element.dataset.original;
+            }
+            
+            if (current !== original) {
+                modifiedConfigs.add(key);
+                configItem.classList.add('modified');
+                configItem.classList.remove('saved');
+            } else {
+                modifiedConfigs.delete(key);
+                configItem.classList.remove('modified');
+            }
+            
+            updateStats();
+        }
+
+        // 更新切換開關標籤
+        function updateToggleLabel(checkbox) {
+            const label = document.getElementById('label-' + checkbox.dataset.key);
+            if (label) {
+                if (checkbox.checked) {
+                    label.textContent = '啟用';
+                    label.classList.add('active');
+                } else {
+                    label.textContent = '停用';
+                    label.classList.remove('active');
+                }
+            }
+        }
+
+        // 更新滑桿數值顯示
+        function updateRangeValue(slider) {
+            const valueDisplay = document.getElementById('value-' + slider.dataset.key);
+            if (valueDisplay) {
+                valueDisplay.textContent = parseFloat(slider.value).toFixed(2);
+            }
+        }
+
+        // 調整數字輸入
+        function adjustNumber(key, delta) {
+            const input = document.querySelector(`input[data-key="${key}"]`);
+            if (input) {
+                const currentValue = parseInt(input.value) || 0;
+                const newValue = Math.max(parseInt(input.min) || 1, 
+                                         Math.min(parseInt(input.max) || 1000, currentValue + delta));
+                input.value = newValue;
+                markAsModified(input);
+            }
+        }
+
+        // 選擇選項
+        function selectOption(key, value, button) {
+            // 移除同組其他按鈕的選中狀態
+            const group = button.closest('.option-group');
+            if (group) {
+                group.querySelectorAll('.option-btn').forEach(btn => {
+                    btn.classList.remove('selected');
+                });
+                button.classList.add('selected');
+            }
+            
+            // 更新隱藏輸入值
+            const hiddenInput = document.querySelector(`input[type="hidden"][data-key="${key}"]`);
+            if (hiddenInput) {
+                hiddenInput.value = value;
+                markAsModified(hiddenInput);
+            }
+        }
+        
+        // 顯示新增配置 Modal
+        function showAddModal() {
+            const modal = new bootstrap.Modal(document.getElementById('addConfigModal'));
+            modal.show();
+        }
+        
+        // 新增配置
+        function addConfig() {
+            const key = document.getElementById('configKey').value.trim();
+            const value = document.getElementById('configValue').value.trim();
+            const description = document.getElementById('configDescription').value.trim();
+
+            if (!key || !value) {
+                alert('請填寫配置鍵值和值');
+                return;
+            }
+
+            const configData = {
+                value: value,
+                description: description
+            };
+
+            fetch(`/admin/v2/api/config/${encodeURIComponent(key)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(configData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccessMessage('配置新增成功');
+                    location.reload();
+                } else {
+                    showErrorMessage('新增失敗：' + data.error);
+                }
+            })
+            .catch(error => {
+                showErrorMessage('操作失敗：' + error);
+            });
+        }
+        
+        // 儲存單個配置
+        function saveConfig(key) {
+            const configItem = document.querySelector(`.config-item[data-key="${key}"]`);
+            if (!configItem) return;
+
+            // 獲取當前值
+            let value, inputElement;
+            const checkbox = configItem.querySelector('input[type="checkbox"]');
+            const range = configItem.querySelector('input[type="range"]');
+            const number = configItem.querySelector('input[type="number"]');
+            const select = configItem.querySelector('select');
+            const hidden = configItem.querySelector('input[type="hidden"]');
+            const textInput = configItem.querySelector('input[type="text"].config-input');
+
+            if (checkbox) {
+                value = checkbox.checked ? 'true' : 'false';
+                inputElement = checkbox;
+            } else if (range) {
+                value = range.value;
+                inputElement = range;
+            } else if (number) {
+                value = number.value;
+                inputElement = number;
+            } else if (select) {
+                value = select.value;
+                inputElement = select;
+            } else if (hidden) {
+                value = hidden.value;
+                inputElement = hidden;
+            } else if (textInput) {
+                value = textInput.value;
+                inputElement = textInput;
+            } else {
+                console.error('無法找到配置值輸入元素');
+                return;
+            }
+            
+            const configData = {
+                value: value,
+                description: '' // 可以從其他地方獲取描述
+            };
+
+            fetch(`/admin/v2/api/config/${encodeURIComponent(key)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(configData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    configItem.classList.remove('modified');
+                    configItem.classList.add('saved');
+                    modifiedConfigs.delete(key);
+                    if (inputElement) {
+                        inputElement.dataset.original = value;
+                    }
+                    updateStats();
+                    showSuccessMessage(`配置 "${key}" 儲存成功`);
+                    
+                    // 2秒後移除儲存狀態
+                    setTimeout(() => {
+                        configItem.classList.remove('saved');
+                    }, 2000);
+                } else {
+                    showErrorMessage('儲存失敗：' + data.error);
+                }
+            })
+            .catch(error => {
+                showErrorMessage('儲存失敗：' + error);
+            });
+        }
+        
+        // 刪除配置
+        function deleteConfig(key) {
+            if (!confirm(`確定要刪除配置 "${key}" 嗎？此操作無法復原。`)) {
+                return;
+            }
+
+            fetch(`/admin/v2/api/config/${encodeURIComponent(key)}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccessMessage(`配置 "${key}" 已刪除`);
+                    location.reload();
+                } else {
+                    showErrorMessage('刪除失敗：' + data.error);
+                }
+            })
+            .catch(error => {
+                showErrorMessage('刪除失敗：' + error);
+            });
+        }
+        
+        // 重置所有修改
+        function resetAllConfigs() {
+            if (modifiedConfigs.size === 0) {
+                showWarningMessage('沒有配置需要重置');
+                return;
+            }
+
+            if (!confirm(`確定要重置 ${modifiedConfigs.size} 個配置的修改嗎？這將會還原到原始值。`)) {
+                return;
+            }
+
+            modifiedConfigs.forEach(key => {
+                const configItem = document.querySelector(`.config-item[data-key="${key}"]`);
+                if (!configItem) return;
+
+                // 重置所有輸入元素到原始值
+                const checkbox = configItem.querySelector('input[type="checkbox"]');
+                const range = configItem.querySelector('input[type="range"]');
+                const number = configItem.querySelector('input[type="number"]');
+                const select = configItem.querySelector('select');
+                const hidden = configItem.querySelector('input[type="hidden"]');
+                const textInput = configItem.querySelector('input[type="text"].config-input');
+
+                if (checkbox && checkbox.dataset.original !== undefined) {
+                    checkbox.checked = checkbox.dataset.original.toLowerCase() === 'true';
+                    updateToggleLabel(checkbox);
+                } else if (range && range.dataset.original !== undefined) {
+                    range.value = range.dataset.original;
+                    updateRangeValue(range);
+                } else if (number && number.dataset.original !== undefined) {
+                    number.value = number.dataset.original;
+                } else if (select && select.dataset.original !== undefined) {
+                    select.value = select.dataset.original;
+                } else if (hidden && hidden.dataset.original !== undefined) {
+                    hidden.value = hidden.dataset.original;
+                    
+                    // 重置選項按鈕
+                    const optionButtons = configItem.querySelectorAll('.option-btn');
+                    if (optionButtons.length > 0) {
+                        optionButtons.forEach(btn => btn.classList.remove('selected'));
+                        const originalValue = hidden.dataset.original;
+                        optionButtons.forEach(btn => {
+                            const onclick = btn.getAttribute('onclick');
+                            if (onclick && onclick.includes(`'${originalValue}'`)) {
+                                btn.classList.add('selected');
+                            }
+                        });
+                    }
+                } else if (textInput && textInput.dataset.original !== undefined) {
+                    textInput.value = textInput.dataset.original;
+                }
+
+                configItem.classList.remove('modified');
+            });
+
+            modifiedConfigs.clear();
+            updateStats();
+            showSuccessMessage('所有修改已重置');
+        }
+
+        // 搜尋配置項目
+        function searchConfigs() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const configItems = document.querySelectorAll('.config-item');
+            let visibleCount = 0;
+
+            configItems.forEach(item => {
+                const key = item.querySelector('.config-key').textContent.toLowerCase();
+                const description = item.querySelector('.config-description')?.textContent?.toLowerCase() || '';
+                const isVisible = key.includes(searchTerm) || description.includes(searchTerm);
+                
+                item.style.display = isVisible ? 'block' : 'none';
+                if (isVisible) visibleCount++;
+            });
+
+            // 更新結果計數
+            const resultCount = document.querySelector('.search-results');
+            if (resultCount) {
+                resultCount.textContent = `找到 ${visibleCount} 個配置項目`;
+            }
+        }
+
+        // 批量儲存所有修改的配置
+        function saveAllConfigs() {
+            if (modifiedConfigs.size === 0) {
+                showWarningMessage('沒有配置需要儲存');
+                return;
+            }
+
+            const promises = Array.from(modifiedConfigs).map(key => {
+                const configItem = document.querySelector(`.config-item[data-key="${key}"]`);
+                if (!configItem) return null;
+
+                // 獲取當前值
+                let value;
+                const checkbox = configItem.querySelector('input[type="checkbox"]');
+                const range = configItem.querySelector('input[type="range"]');
+                const number = configItem.querySelector('input[type="number"]');
+                const select = configItem.querySelector('select');
+                const hidden = configItem.querySelector('input[type="hidden"]');
+                const textInput = configItem.querySelector('input[type="text"].config-input');
+
+                if (checkbox) {
+                    value = checkbox.checked ? 'true' : 'false';
+                } else if (range) {
+                    value = range.value;
+                } else if (number) {
+                    value = number.value;
+                } else if (select) {
+                    value = select.value;
+                } else if (hidden) {
+                    value = hidden.value;
+                } else if (textInput) {
+                    value = textInput.value;
+                } else {
+                    return null;
+                }
+
+                return fetch(`/admin/v2/api/config/${encodeURIComponent(key)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        value: value,
+                        description: ''
+                    })
+                });
+            }).filter(promise => promise !== null);
+
+            Promise.all(promises)
+                .then(responses => Promise.all(responses.map(r => r.json())))
+                .then(results => {
+                    const failures = results.filter(r => !r.success);
+                    const successes = results.length - failures.length;
+                    
+                    if (failures.length === 0) {
+                        showSuccessMessage(`成功儲存 ${successes} 個配置`);
+                        location.reload();
+                    } else {
+                        showWarningMessage(`儲存了 ${successes} 個配置，${failures.length} 個失敗`);
+                    }
+                })
+                .catch(error => {
+                    showErrorMessage('批量儲存失敗：' + error);
+                });
+        }
+        
+        // 套用配置模板
+        function applyTemplate(templateType) {
+            const templates = {
+                yolo: [
+                    { key: 'model.confidence_threshold', value: '0.5', description: 'YOLO 模型檢測信心度門檻' },
+                    { key: 'model.iou_threshold', value: '0.4', description: 'IoU 重疊度門檻，用於非極大值抑制' },
+                    { key: 'model.max_detections', value: '100', description: '單張圖片最大檢測物件數量' },
+                    { key: 'model.device', value: 'auto', description: '運算設備選擇（auto/cpu/cuda）' }
+                ],
+                camera: [
+                    { key: 'camera.default_fps', value: '30', description: '預設攝影機 FPS' },
+                    { key: 'camera.resolution_width', value: '1920', description: '攝影機解析度寬度' },
+                    { key: 'camera.resolution_height', value: '1080', description: '攝影機解析度高度' },
+                    { key: 'camera.buffer_size', value: '5', description: '攝影機緩衝區大小' }
+                ],
+                performance: [
+                    { key: 'system.max_concurrent_tasks', value: '5', description: '最大同時執行任務數' },
+                    { key: 'system.cleanup_days', value: '30', description: '日誌清理天數' },
+                    { key: 'system.memory_limit_mb', value: '4096', description: '記憶體使用限制（MB）' },
+                    { key: 'system.cpu_threads', value: '4', description: 'CPU 執行緒數量' }
+                ],
+                security: [
+                    { key: 'api.rate_limit', value: '100', description: 'API 每分鐘請求限制' },
+                    { key: 'api.auth_required', value: 'true', description: '是否需要身份驗證' },
+                    { key: 'api.cors_origins', value: '*', description: 'CORS 允許的來源' },
+                    { key: 'security.session_timeout', value: '3600', description: '會話逾時時間（秒）' }
+                ]
+            };
+            
+            const templateData = templates[templateType];
+            if (!templateData) {
+                showErrorMessage('未知的模板類型');
+                return;
+            }
+            
+            // 生成模板內容
+            let templateHTML = `<h5>即將新增以下 ${templateData.length} 個配置項目：</h5><div class="row">`;
+            
+            templateData.forEach(config => {
+                templateHTML += `
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title">${config.key}</h6>
+                                <p class="card-text text-muted">${config.description}</p>
+                                <span class="badge bg-primary">${config.value}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            templateHTML += '</div>';
+            
+            document.getElementById('templateContent').innerHTML = templateHTML;
+            
+            // 儲存當前模板數據以供套用
+            window.currentTemplate = templateData;
+            
+            const modal = new bootstrap.Modal(document.getElementById('templateModal'));
+            modal.show();
+        }
+        
+        // 套用選中的模板
+        function applySelectedTemplate() {
+            if (!window.currentTemplate) {
+                showErrorMessage('沒有選擇模板');
+                return;
+            }
+            
+            const promises = window.currentTemplate.map(config => 
+                fetch(`/admin/v2/api/config/${encodeURIComponent(config.key)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        value: config.value,
+                        description: config.description
+                    })
+                })
+            );
+            
+            Promise.all(promises)
+                .then(responses => Promise.all(responses.map(r => r.json())))
+                .then(results => {
+                    const failures = results.filter(r => !r.success);
+                    const successes = results.length - failures.length;
+                    
+                    if (failures.length === 0) {
+                        showSuccessMessage(`成功套用模板，新增 ${successes} 個配置項目`);
+                        location.reload();
+                    } else {
+                        showWarningMessage(`套用了 ${successes} 個配置，${failures.length} 個失敗`);
+                    }
+                })
+                .catch(error => {
+                    showErrorMessage('套用模板失敗：' + error);
+                });
+        }
+        
+        // 顯示成功訊息
+        function showSuccessMessage(message) {
+            showToast(message, 'success');
+        }
+        
+        // 顯示錯誤訊息
+        function showErrorMessage(message) {
+            showToast(message, 'danger');
+        }
+        
+        // 顯示警告訊息
+        function showWarningMessage(message) {
+            showToast(message, 'warning');
+        }
+        
+        // 顯示 Toast 訊息
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            toast.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // 3秒後自動移除
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

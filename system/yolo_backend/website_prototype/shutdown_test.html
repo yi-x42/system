@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>停止系統測試頁面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #c82333;
+        }
+        .info-btn {
+            background: #007bff;
+        }
+        .info-btn:hover {
+            background: #0056b3;
+        }
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔴 停止系統功能測試</h1>
+        
+        <div class="test-section">
+            <h3>環境信息</h3>
+            <div id="env-info"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>API 連接測試</h3>
+            <button class="info-btn" onclick="testHealthCheck()">測試健康檢查 API</button>
+            <button class="info-btn" onclick="testAPIConnection()">測試前端統計 API</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>停止功能測試</h3>
+            <button onclick="testShutdownAPI()">測試停止 API</button>
+            <button onclick="testShutdownWithConfirm()">模擬前端停止流程</button>
+        </div>
+        
+        <div class="test-section">
+            <h3>調試工具</h3>
+            <button class="info-btn" onclick="clearResults()">清除結果</button>
+            <button class="info-btn" onclick="toggleConsole()">開啟/關閉控制台調試</button>
+        </div>
+        
+        <div id="results">
+            <div class="info">等待測試結果...</div>
+        </div>
+    </div>
+
+    <script>
+        let consoleDebug = true;
+        
+        // 環境配置
+        const API_CONFIG = {
+            get baseURL() {
+                const currentHost = window.location.hostname;
+                if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+                    return 'http://localhost:8001';
+                } else {
+                    return `http://${currentHost}:8001`;
+                }
+            }
+        };
+        
+        // 初始化頁面
+        document.addEventListener('DOMContentLoaded', function() {
+            showEnvironmentInfo();
+            log('📄 測試頁面已載入', 'info');
+        });
+        
+        function showEnvironmentInfo() {
+            const envInfo = document.getElementById('env-info');
+            const info = `
+                <div class="status info">
+                    <strong>當前主機：</strong> ${window.location.hostname}<br>
+                    <strong>當前端口：</strong> ${window.location.port || '80'}<br>
+                    <strong>API 基礎 URL：</strong> ${API_CONFIG.baseURL}<br>
+                    <strong>瀏覽器：</strong> ${navigator.userAgent.split(' ').slice(-2).join(' ')}
+                </div>
+            `;
+            envInfo.innerHTML = info;
+        }
+        
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `status ${type}`;
+            logEntry.innerHTML = `<strong>[${timestamp}]</strong> ${message}`;
+            results.appendChild(logEntry);
+            results.scrollTop = results.scrollHeight;
+            
+            if (consoleDebug) {
+                console.log(`[${timestamp}] ${message}`);
+            }
+        }
+        
+        async function testHealthCheck() {
+            log('🔍 測試健康檢查 API...', 'info');
+            try {
+                const url = `${API_CONFIG.baseURL}/api/v1/health`;
+                log(`📡 請求URL: ${url}`, 'info');
+                
+                const response = await fetch(url);
+                log(`📨 回應狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ 健康檢查成功: ${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    log(`❌ 健康檢查失敗: ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 健康檢查錯誤: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testAPIConnection() {
+            log('📊 測試前端統計 API...', 'info');
+            try {
+                const url = `${API_CONFIG.baseURL}/api/v1/frontend/stats`;
+                log(`📡 請求URL: ${url}`, 'info');
+                
+                const response = await fetch(url);
+                log(`📨 回應狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ 統計API成功: 活躍任務 ${data.active_tasks}`, 'success');
+                } else {
+                    log(`❌ 統計API失敗: ${response.statusText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 統計API錯誤: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testShutdownAPI() {
+            log('🔴 測試停止系統 API...', 'info');
+            try {
+                const url = `${API_CONFIG.baseURL}/api/v1/frontend/system/shutdown`;
+                log(`📡 停止請求URL: ${url}`, 'info');
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                log(`📨 停止API回應狀態: ${response.status}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ 停止API成功: ${data.message}`, 'success');
+                    log(`⚠️ 注意：系統將在2秒後停止`, 'info');
+                } else {
+                    const errorText = await response.text();
+                    log(`❌ 停止API失敗: ${response.statusText} - ${errorText}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 停止API錯誤: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testShutdownWithConfirm() {
+            const confirmed = confirm(
+                '這將測試完整的停止流程（包含確認對話框）\n\n' +
+                '確定要繼續嗎？系統可能會真的停止！'
+            );
+            
+            if (!confirmed) {
+                log('⏹️ 用戶取消停止操作', 'info');
+                return;
+            }
+            
+            log('🚀 開始完整停止流程...', 'info');
+            await testShutdownAPI();
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '<div class="info">結果已清除...</div>';
+        }
+        
+        function toggleConsole() {
+            consoleDebug = !consoleDebug;
+            log(`🔧 控制台調試已${consoleDebug ? '開啟' : '關閉'}`, 'info');
+        }
+        
+        // 全域測試函數
+        window.testShutdown = testShutdownAPI;
+        window.testHealth = testHealthCheck;
+        window.testStats = testAPIConnection;
+    </script>
+</body>
+</html>

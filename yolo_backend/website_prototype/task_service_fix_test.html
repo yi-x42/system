@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>🚀 任務服務修復測試</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>🚀 任務服務修復測試</h1>
+        <div class="alert alert-warning">
+            <h5>🔧 修復內容</h5>
+            <p>修改 API 調用以匹配 <code>task_service_new.py</code> 的方法簽名</p>
+            <ul>
+                <li><code>name</code> → <code>task_name</code></li>
+                <li>參數重組為 <code>config</code> 對象</li>
+            </ul>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h3>🧪 測試區域</h3>
+                <button class="btn btn-success btn-lg" onclick="testNewTaskAPI()">測試修復後的任務創建</button>
+                <div class="mt-3">
+                    <h5>測試數據:</h5>
+                    <pre id="testData" class="bg-light p-3 small"></pre>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <h3>📊 測試結果</h3>
+                <div id="results" class="border p-3 bg-light" style="height: 400px; overflow-y: auto;">
+                    <p class="text-muted">點擊測試按鈕查看結果...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.protocol + '//' + window.location.hostname + ':8001';
+        const results = document.getElementById('results');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const alertClass = type === 'error' ? 'alert-danger' : type === 'success' ? 'alert-success' : 'alert-info';
+            results.innerHTML += `
+                <div class="alert ${alertClass} alert-sm mb-2">
+                    <small>[${timestamp}]</small> ${message}
+                </div>
+            `;
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        const testTaskData = {
+            name: "修復測試任務 v2",
+            task_type: "batch",
+            camera_id: "test-video-001",
+            model_name: "yolov11s",
+            confidence: 0.6,
+            iou_threshold: 0.5,
+            description: "測試修復後的任務創建 API"
+        };
+        
+        document.getElementById('testData').textContent = JSON.stringify(testTaskData, null, 2);
+        
+        async function testNewTaskAPI() {
+            log('🚀 測試修復後的任務創建 API...');
+            
+            try {
+                // 等待系統重新載入完成
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                const response = await fetch(`${API_BASE}/api/v1/frontend/tasks`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testTaskData)
+                });
+                
+                log(`📥 回應狀態: ${response.status} ${response.statusText}`);
+                
+                const responseText = await response.text();
+                log(`📥 回應內容: ${responseText}`);
+                
+                if (response.ok) {
+                    const result = JSON.parse(responseText);
+                    log('✅ 任務創建成功！', 'success');
+                    log(`🆔 任務ID: ${result.task_id}`, 'success');
+                    log('✅ TaskService 方法簽名修復成功！', 'success');
+                } else {
+                    log('❌ 任務創建失敗', 'error');
+                    
+                    try {
+                        const errorData = JSON.parse(responseText);
+                        if (errorData.error) {
+                            log(`❌ 錯誤詳情: ${errorData.error}`, 'error');
+                        }
+                        if (errorData.detail) {
+                            if (Array.isArray(errorData.detail)) {
+                                errorData.detail.forEach(err => {
+                                    log(`❌ 驗證錯誤 ${err.loc?.join('.')}: ${err.msg}`, 'error');
+                                });
+                            } else {
+                                log(`❌ 錯誤詳情: ${errorData.detail}`, 'error');
+                            }
+                        }
+                    } catch (e) {
+                        log('❌ 錯誤回應解析失敗', 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log('❌ 請求失敗: ' + error.message, 'error');
+            }
+        }
+        
+        // 頁面載入時檢查 API 狀態
+        window.addEventListener('load', async () => {
+            log('⏳ 等待系統重新載入完成...');
+            
+            // 等待系統重載
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/health`);
+                if (response.ok) {
+                    log('✅ API 服務重新載入完成', 'success');
+                } else {
+                    log('⚠️ API 服務狀態異常: ' + response.status, 'error');
+                }
+            } catch (error) {
+                log('❌ API 連接測試失敗: ' + error.message, 'error');
+            }
+        });
+    </script>
+</body>
+</html>
