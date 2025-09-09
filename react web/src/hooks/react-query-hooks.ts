@@ -81,3 +81,89 @@ export const useScanCameras = () => {
     mutationFn: scanCameras,
   });
 };
+
+// 影片上傳回應介面
+export interface VideoUploadResponse {
+  message: string;
+  source_id: number;
+  file_path: string;
+  original_name: string;
+  size: number;
+  video_info: {
+    duration: number;
+    fps: number;
+    resolution: string;
+    frame_count: number;
+  };
+}
+
+// 影片上傳的非同步函式
+const uploadVideo = async (formData: FormData): Promise<VideoUploadResponse> => {
+  const { data } = await apiClient.post('/frontend/data-sources/upload/video', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return data;
+};
+
+// 建立影片上傳的 mutation hook
+export const useVideoUpload = () => {
+  return useMutation<VideoUploadResponse, Error, FormData>({
+    mutationFn: uploadVideo,
+  });
+};
+
+// YOLO 模型清單型別
+export interface YoloModelFileInfo {
+  id: string;
+  name: string;
+  modelType: string;
+  parameterCount: string;
+  fileSize: string;
+  status: string;
+  size: number;
+  created_at: number;
+  modified_at: number;
+  path: string;
+}
+
+// 取得 YOLO 模型清單
+const fetchYoloModelList = async (): Promise<YoloModelFileInfo[]> => {
+  const { data } = await apiClient.get('/frontend/models/list');
+  return data;
+};
+
+export const useYoloModelList = () => {
+  return useQuery<YoloModelFileInfo[], Error>({
+    queryKey: ['yoloModelList'],
+    queryFn: fetchYoloModelList,
+    refetchOnWindowFocus: false,
+  });
+};
+
+// 模型狀態切換
+const toggleModelStatus = async (modelId: string): Promise<any> => {
+  const { data } = await apiClient.post(`/frontend/models/${modelId}/toggle`);
+  return data;
+};
+
+export const useToggleModelStatus = () => {
+  return useMutation({
+    mutationFn: toggleModelStatus,
+  });
+};
+
+// 取得已啟用的模型清單（供其他功能使用）
+const fetchActiveModels = async (): Promise<YoloModelFileInfo[]> => {
+  const { data } = await apiClient.get('/frontend/models/active');
+  return data;
+};
+
+export const useActiveModels = () => {
+  return useQuery<YoloModelFileInfo[], Error>({
+    queryKey: ['activeModels'],
+    queryFn: fetchActiveModels,
+    refetchOnWindowFocus: false,
+  });
+};

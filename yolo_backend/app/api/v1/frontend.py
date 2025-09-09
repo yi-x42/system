@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, File, UploadFile, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, delete, select, text
 from pydantic import BaseModel, Field
@@ -25,6 +26,21 @@ from app.services.new_database_service import DatabaseService
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
+
+# ===== 模型清單相關模型 =====
+
+class ModelFileInfo(BaseModel):
+    """YOLO 模型檔案資訊"""
+    id: str
+    name: str
+    modelType: str
+    parameterCount: str
+    fileSize: str
+    status: str
+    size: int
+    created_at: float
+    modified_at: float
+    path: str
 
 # ===== 數據模型 =====
 
@@ -143,6 +159,143 @@ class ImageFolderConfig(BaseModel):
     folder_path: str = Field(..., description="圖片資料夾路徑")
     supported_formats: List[str] = Field(["jpg", "jpeg", "png", "bmp"], description="支援的格式")
     scan_subdirs: bool = Field(False, description="掃描子資料夾")
+
+# ===== YOLO 模型輔助函式 =====
+
+def get_model_info_from_filename(filename: str, file_size: int) -> dict:
+    """根據檔案名稱推斷模型資訊"""
+    # 模型參數映射表
+    model_params = {
+        'yolo11n': {'params': '2.6M', 'type': '物體偵測'},
+        'yolo11s': {'params': '9.4M', 'type': '物體偵測'},
+        'yolo11m': {'params': '20.1M', 'type': '物體偵測'},
+        'yolo11l': {'params': '25.3M', 'type': '物體偵測'},
+        'yolo11x': {'params': '56.9M', 'type': '物體偵測'},
+    }
+    
+    # 預設值
+    model_type = "物體偵測"
+    param_count = "未知"
+    
+    # 解析檔案名稱
+    basename = filename.replace('.pt', '').lower()
+    model_id = filename.replace('.pt', '')
+    
+    # 檢查是否為已知模型
+    for model_key, info in model_params.items():
+        if model_key in basename:
+            param_count = info['params']
+            model_type = info['type']
+            break
+    
+    # 從快取取得狀態，如果沒有則預設為 inactive，除非是 yolo11n
+    if model_id not in model_status_cache:
+        if 'yolo11n' in basename:
+            model_status_cache[model_id] = "active"
+        else:
+            model_status_cache[model_id] = "inactive"
+    
+    status = model_status_cache[model_id]
+    
+    return {
+        'modelType': model_type,
+        'parameterCount': param_count,
+        'fileSize': f"{file_size / (1024 * 1024):.1f} MB",
+        'status': status
+    }
+
+# ===== YOLO 模型清單 API =====
+
+@router.get("/models/list", response_model=List[ModelFileInfo])
+async def list_yolo_models():
+    """列出 yolo_backend/模型 資料夾下所有模型檔案"""
+    try:
+        # 指定模型資料夾路徑
+        model_dir = r"D:\project\system\yolo_backend\模型"
+        
+        # 檢查資料夾是否存在
+        if not os.path.exists(model_dir):
+            api_logger.warning(f"模型資料夾不存在: {model_dir}")
+            return []
+        
+        model_files = []
+        
+        # 掃描 .pt 檔案
+        for file in os.listdir(model_dir):
+            if file.endswith('.pt'):
+                file_path = os.path.join(model_dir, file)
+                if os.path.isfile(file_path):
+                    stat = os.stat(file_path)
+                    
+                    # 根據檔案名稱推斷模型資訊
+                    model_info = get_model_info_from_filename(file, stat.st_size)
+                    
+                    model_files.append(ModelFileInfo(
+                        id=file.replace('.pt', ''),
+                        name=file,
+                        modelType=model_info['modelType'],
+                        parameterCount=model_info['parameterCount'],
+                        fileSize=model_info['fileSize'],
+                        status=model_info['status'],
+                        size=stat.st_size,
+                        created_at=stat.st_ctime,
+                        modified_at=stat.st_mtime,
+                        path=file_path
+                    ))
+        
+        api_logger.info(f"找到 {len(model_files)} 個模型檔案")
+        return model_files
+        
+    except Exception as e:
+        api_logger.error(f"列出模型檔案時發生錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"無法取得模型清單: {str(e)}")
+
+# ===== 模型狀態管理 API =====
+
+# 全域變數來儲存模型狀態（實際專案中應該使用資料庫）
+model_status_cache = {}
+
+@router.post("/models/{model_id}/toggle")
+async def toggle_model_status(model_id: str):
+    """切換模型啟用狀態"""
+    try:
+        # 取得當前狀態
+        current_status = model_status_cache.get(model_id, "inactive")
+        
+        # 切換狀態（允許多個模型同時啟用）
+        new_status = "active" if current_status == "inactive" else "inactive"
+        
+        model_status_cache[model_id] = new_status
+        
+        api_logger.info(f"模型 {model_id} 狀態切換為: {new_status}")
+        
+        return {
+            "success": True,
+            "model_id": model_id,
+            "new_status": new_status,
+            "message": f"模型已{'啟用' if new_status == 'active' else '停用'}"
+        }
+        
+    except Exception as e:
+        api_logger.error(f"切換模型狀態時發生錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"無法切換模型狀態: {str(e)}")
+
+@router.get("/models/active", response_model=List[ModelFileInfo])
+async def get_active_models():
+    """取得已啟用的模型清單（供其他功能使用）"""
+    try:
+        # 先獲取所有模型
+        all_models = await list_yolo_models()
+        
+        # 只回傳已啟用的模型
+        active_models = [model for model in all_models if model.status == "active"]
+        
+        api_logger.info(f"找到 {len(active_models)} 個已啟用的模型")
+        return active_models
+        
+    except Exception as e:
+        api_logger.error(f"取得已啟用模型時發生錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"無法取得已啟用模型: {str(e)}")
 
 # ===== 系統狀態 API =====
 

@@ -4,10 +4,12 @@ import { AppSidebar } from "./components/AppSidebar";
 import { Dashboard } from "./components/Dashboard";
 import { CameraControl } from "./components/CameraControl";
 import { DetectionAnalysis } from "./components/DetectionAnalysis";
+import { DetectionAnalysisOriginal } from "./components/DetectionAnalysisOriginal";
 import { StatisticalAnalysis } from "./components/StatisticalAnalysis";
 import { RecordQuery } from "./components/RecordQuery";
 import { AlertManagement } from "./components/AlertManagement";
 import { SystemSettings } from "./components/SystemSettings";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
@@ -19,7 +21,11 @@ export default function App() {
       case "camera-control":
         return <CameraControl />;
       case "detection-analysis":
-        return <DetectionAnalysis />;
+        return (
+          <ErrorBoundary>
+            <DetectionAnalysisOriginal />
+          </ErrorBoundary>
+        );
       case "statistical-analysis":
         return <StatisticalAnalysis />;
       case "record-query":

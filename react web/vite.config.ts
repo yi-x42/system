@@ -54,7 +54,9 @@
       outDir: 'build',
     },
     server: {
+      host: 'localhost',  // 明確指定主機
       port: 3000,
       open: true,
+      strictPort: true,  // 強制使用指定端口，不自動切換
     },
   });

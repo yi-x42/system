@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -8,170 +8,135 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
-import { Alert, AlertDescription } from "./ui/alert";
-import { useVideoUpload, VideoUploadResponse, useYoloModelList, YoloModelFileInfo, useToggleModelStatus, useActiveModels } from "../hooks/react-query-hooks";
+import { useYoloModelList, useToggleModelStatus, useActiveModels, useVideoUpload, VideoUploadResponse } from "../hooks/react-query-hooks";
 import {
   Brain,
   Upload,
   Play,
-  Download,
-  Settings,
   Eye,
   Activity,
   Target,
   Zap,
   FileVideo,
   Camera,
-  CheckCircle,
-  AlertCircle,
 } from "lucide-react";
 
-export function DetectionAnalysis() {
-  console.log("DetectionAnalysis 組件開始渲染");
+export function DetectionAnalysisOriginal() {
+  console.log("DetectionAnalysisOriginal 開始渲染");
 
-  // ===== 狀態變數定義 =====
+  // 狀態管理
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadResult, setUploadResult] = useState<VideoUploadResponse | null>(null);
-  
-  // ===== Hooks 定義 =====
-  console.log("開始初始化 hooks");
-  
-  // 使用影片上傳 mutation
-  const videoUploadMutation = useVideoUpload();
-  console.log("videoUploadMutation 初始化成功");
 
-  // 取得 YOLO 模型清單
-  const { data: yoloModelList, isLoading: isModelLoading, isError: isModelError, refetch: refetchModels } = useYoloModelList();
-  console.log("yoloModelList hook 初始化成功", { yoloModelList, isModelLoading, isModelError });
-  
-  // 取得已啟用的模型清單（供選擇器使用）
+  // 真實數據獲取
+  const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
   const { data: activeModels, refetch: refetchActiveModels } = useActiveModels();
-  console.log("activeModels hook 初始化成功", { activeModels });
-  
-  // 模型狀態切換 mutation
   const toggleModelMutation = useToggleModelStatus();
-  console.log("toggleModelMutation 初始化成功");
+  const uploadVideoMutation = useVideoUpload();
 
-  // ===== 事件處理函式 =====
-  // 拖曳上傳相關 handler
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  console.log("YOLO 模型數據:", yoloModels);
+  console.log("啟用的模型:", activeModels);
+
+  // 模擬分析結果數據
+  const analysisResults = [
+    {
+      id: "1",
+      videoName: "測試影片.mp4",
+      camera: "攝影機01",
+      timestamp: "2024-01-15 14:30:25",
+      duration: "2:15",
+      fileSize: "15.2MB", 
+      resolution: "1920x1080",
+      detections: [
+        { class: "person", count: 3, confidence: 0.92 },
+        { class: "car", count: 1, confidence: 0.87 }
+      ]
+    }
+  ];
+
+  // 輔助函式
+  const getModelStatusColor = (isActive: boolean) => {
+    return isActive ? "default" : "outline";
+  };
+
+  const getModelStatusText = (isActive: boolean) => {
+    return isActive ? "已啟用" : "未啟用";
+  };
+
+  const handleToggleModelStatus = async (modelId: string) => {
+    console.log("切換模型狀態:", modelId);
+    try {
+      await toggleModelMutation.mutateAsync(modelId);
+      // 重新獲取數據
+      refetchModels();
+      refetchActiveModels();
+      console.log(`模型 ${modelId} 狀態切換成功`);
+    } catch (error) {
+      console.error('切換模型狀態失敗:', error);
+    }
+  };
+
+  // 檢查模型是否已啟用
+  const isModelActive = (modelId: string) => {
+    return activeModels?.some(activeModel => activeModel.id === modelId) || false;
+  };
+
+  // 文件處理函數
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && file.type.startsWith('video/')) {
+      setSelectedFile(file);
+    } else {
+      alert('請選擇影片檔案');
+    }
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragging(false);
+    
+    const files = event.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('video/')) {
+        setSelectedFile(file);
+      } else {
+        alert('請選擇影片檔案');
+      }
+    }
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
     setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFile(e.dataTransfer.files[0]);
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      alert('請選擇影片檔案');
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      
+      const result = await uploadVideoMutation.mutateAsync(formData);
+      setUploadResult(result);
+      console.log('上傳成功:', result);
+    } catch (error) {
+      console.error('上傳失敗:', error);
+      alert('上傳失敗，請稍後重試');
     }
   };
-
-  // 檔案 input 變更 handler
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setSelectedFile(e.target.files[0]);
-    }
-  };
-
-  // 影片上傳 handler
-  const handleVideoUpload = () => {
-    if (!selectedFile) return;
-    const formData = new FormData();
-    formData.append('video', selectedFile);
-    videoUploadMutation.mutate(formData, {
-      onSuccess: (data) => {
-        setUploadResult(data);
-      },
-      onError: (error: any) => {
-        alert(`影片上傳失敗: ${error.message}`);
-      },
-    });
-  };
-
-  // ===== 輔助函式 =====
-  // 模型狀態處理函式
-  const getModelStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-        return "default";
-      case "inactive":
-        return "secondary";
-      case "loading":
-        return "outline";
-      default:
-        return "outline";
-    }
-  };
-
-  const getModelStatusText = (status: string) => {
-    switch (status) {
-      case "active":
-        return "已啟用";
-      case "inactive":
-        return "未啟用";
-      case "loading":
-        return "載入中";
-      default:
-        return "未知";
-    }
-  };
-
-  // 切換模型啟用狀態
-  const toggleModelStatus = (modelId: string) => {
-    toggleModelMutation.mutate(modelId, {
-      onSuccess: () => {
-        // 重新獲取模型清單以更新狀態
-        refetchModels();
-        // 同時更新已啟用模型清單
-        refetchActiveModels();
-      },
-      onError: (error: any) => {
-        alert(`切換模型狀態失敗: ${error.message}`);
-      },
-    });
-  };
-
-  // 模擬分析結果
-  const analysisResults = [
-    {
-      id: 1,
-      camera: "攝影機-01",
-      videoName: "停車場監控_20240115.mp4",
-      timestamp: "2024-01-15 14:30:25",
-      detections: [
-        { class: "person", confidence: 0.95, count: 3 },
-        { class: "car", confidence: 0.88, count: 2 },
-      ],
-      thumbnail: "/api/placeholder/150/100",
-      duration: "未知",
-      fileSize: "未知",
-      resolution: "未知",
-    },
-    {
-      id: 2,
-      camera: "攝影機-05",
-      videoName: "大門入口_20240115_1428.mp4",
-      timestamp: "2024-01-15 14:28:12",
-      detections: [
-        { class: "person", confidence: 0.92, count: 1 },
-        { class: "bicycle", confidence: 0.87, count: 1 },
-      ],
-      thumbnail: "/api/placeholder/150/100",
-      duration: "未知",
-      fileSize: "未知",
-      resolution: "未知",
-    },
-  ];
-
 
   return (
     <div className="space-y-6">
@@ -203,81 +168,77 @@ export function DetectionAnalysis() {
                 <div>
                   <Label htmlFor="video-file">選擇影片檔案</Label>
                   <div 
-                    className={`border-2 border-dashed rounded-lg p-8 text-center mt-2 transition-colors cursor-pointer ${
-                      isDragging 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
+                    className={`border-2 border-dashed rounded-lg p-8 text-center mt-2 transition-colors ${
+                      isDragging ? 'border-primary bg-primary/10' : 'border-border'
                     }`}
+                    onDrop={handleDrop}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    onClick={() => document.getElementById('video-file-input')?.click()}
                   >
-                    <Upload className={`h-8 w-8 mx-auto mb-2 ${
-                      isDragging ? 'text-primary' : 'text-muted-foreground'
-                    }`} />
-                    <p className="text-sm text-muted-foreground">
-                      {selectedFile ? selectedFile.name : '拖拽影片檔案到此處或點擊上傳'}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      支援格式: MP4, AVI, MOV (最大 500MB)
-                    </p>
-                    {selectedFile && (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        檔案大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                    <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                    {selectedFile ? (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-foreground">
+                          已選擇: {selectedFile.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          檔案大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </p>
+                        {uploadResult && (
+                          <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                            上傳成功! 檔案已保存至: {uploadResult.file_path}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm text-muted-foreground">
+                          拖拽影片檔案到此處或點擊上傳
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          支援格式: MP4, AVI, MOV (最大 500MB)
+                        </p>
                       </div>
                     )}
                     <input
-                      id="video-file-input"
                       type="file"
-                      accept="video/mp4,video/avi,video/mov,video/quicktime"
-                      onChange={handleFileInputChange}
+                      id="video-file"
+                      accept="video/*"
+                      onChange={handleFileSelect}
                       className="hidden"
                     />
+                    <Button 
+                      variant="outline" 
+                      className="mt-4"
+                      onClick={() => document.getElementById('video-file')?.click()}
+                    >
+                      選擇檔案
+                    </Button>
                   </div>
                 </div>
 
-                {/* 上傳成功訊息 */}
-                {uploadResult && (
-                  <Alert>
-                    <CheckCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      影片上傳成功！檔案名稱: {uploadResult.original_name}
-                      <br />
-                      時長: {Math.round(uploadResult.video_info.duration)} 秒 | 
-                      解析度: {uploadResult.video_info.resolution} | 
-                      FPS: {uploadResult.video_info.fps.toFixed(1)}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {/* 上傳失敗訊息 */}
-                {videoUploadMutation.isError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      上傳失敗: {videoUploadMutation.error?.message}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
                 <div>
                   <Label htmlFor="detection-model">偵測模型</Label>
-                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <Select 
+                    value={selectedModel} 
+                    onValueChange={(value) => {
+                      if (value !== "no-models") {
+                        setSelectedModel(value);
+                      }
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="選擇偵測模型" />
                     </SelectTrigger>
                     <SelectContent>
                       {activeModels && activeModels.length > 0 ? (
                         activeModels.map((model) => (
-                          <SelectItem key={model.name} value={model.name}>
+                          <SelectItem key={model.id} value={model.id}>
                             {model.name}
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="" disabled>
-                          請先在模型管理中啟用模型
-                        </SelectItem>
+                        <SelectItem value="no-models" disabled>無可用模型</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -298,17 +259,6 @@ export function DetectionAnalysis() {
                   />
                 </div>
 
-                {/* 上傳進度 */}
-                {videoUploadMutation.isPending && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>上傳進度</span>
-                      <span>上傳中...</span>
-                    </div>
-                    <Progress value={undefined} className="animate-pulse" />
-                  </div>
-                )}
-
                 {analysisProgress > 0 && (
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
@@ -319,40 +269,32 @@ export function DetectionAnalysis() {
                   </div>
                 )}
 
-                <div className="flex gap-2">
-                  {selectedFile && !uploadResult && (
-                    <Button 
-                      onClick={handleVideoUpload}
-                      disabled={videoUploadMutation.isPending}
-                      className="flex-1"
-                    >
-                      <Upload className="h-4 w-4 mr-2" />
-                      {videoUploadMutation.isPending ? '上傳中...' : '上傳影片'}
-                    </Button>
-                  )}
-                  
-                  {uploadResult && (
-                    <Button 
-                      className="flex-1" 
-                      disabled={!selectedModel}
-                      onClick={() => {
-                        // 這裡可以添加開始分析的邏輯
-                        console.log('開始分析影片:', uploadResult.file_path);
-                        alert(`開始分析影片: ${uploadResult.original_name}`);
-                      }}
-                    >
-                      <Play className="h-4 w-4 mr-2" />
-                      開始分析
-                    </Button>
-                  )}
-                  
-                  {!selectedFile && !uploadResult && (
-                    <Button className="w-full" disabled>
-                      <Play className="h-4 w-4 mr-2" />
-                      請先上傳影片
-                    </Button>
-                  )}
-                </div>
+                {selectedFile && !uploadResult ? (
+                  <Button 
+                    onClick={handleUpload}
+                    disabled={uploadVideoMutation.isPending || !selectedModel}
+                    className="w-full"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    {uploadVideoMutation.isPending ? '上傳中...' : '上傳影片'}
+                  </Button>
+                ) : uploadResult ? (
+                  <Button 
+                    className="w-full" 
+                    disabled={!selectedModel}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    開始分析
+                  </Button>
+                ) : (
+                  <Button 
+                    className="w-full" 
+                    disabled={true}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    請先選擇影片檔案
+                  </Button>
+                )}
               </CardContent>
             </Card>
 
@@ -437,14 +379,12 @@ export function DetectionAnalysis() {
                       <SelectContent>
                         {activeModels && activeModels.length > 0 ? (
                           activeModels.map((model) => (
-                            <SelectItem key={model.name} value={model.name}>
+                            <SelectItem key={model.id} value={model.id}>
                               {model.name}
                             </SelectItem>
                           ))
                         ) : (
-                          <SelectItem value="" disabled>
-                            請先在模型管理中啟用模型
-                          </SelectItem>
+                          <SelectItem value="no-models" disabled>無可用模型</SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -503,77 +443,85 @@ export function DetectionAnalysis() {
           </Card>
         </TabsContent>
 
-
         <TabsContent value="yolo-models">
           <div className="space-y-6">
-            <div className="grid gap-4">
-              {isModelLoading && <div className="text-muted-foreground">載入中...</div>}
-              {isModelError && <div className="text-destructive">模型清單載入失敗</div>}
-              {yoloModelList && yoloModelList.length === 0 && <div className="text-muted-foreground">目前沒有模型檔案</div>}
-              {yoloModelList && yoloModelList.map((model) => (
-                <Card key={model.id}>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Brain className="h-5 w-5" />
-                        <div>
-                          <CardTitle>{model.name}</CardTitle>
+            {modelsLoading && (
+              <div className="text-center py-8">
+                <p>載入模型中...</p>
+              </div>
+            )}
+            
+            {modelsError && (
+              <div className="text-center py-8 text-red-500">
+                <p>載入錯誤: {modelsError.message}</p>
+                <Button onClick={() => refetchModels()} className="mt-2">
+                  重新載入
+                </Button>
+              </div>
+            )}
+            
+            {yoloModels && (
+              <div className="grid gap-4">
+                {yoloModels.map((model) => {
+                  const isActive = isModelActive(model.id);
+                  return (
+                    <Card key={model.id}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Brain className="h-5 w-5" />
+                            <div>
+                              <CardTitle>{model.name}</CardTitle>
+                            </div>
+                          </div>
+                          <Badge variant={getModelStatusColor(isActive)}>
+                            {getModelStatusText(isActive)}
+                          </Badge>
                         </div>
-                      </div>
-                      <Badge variant={getModelStatusColor(model.status)}>
-                        {getModelStatusText(model.status)}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid gap-4 md:grid-cols-4">
-                      <div>
-                        <p className="text-sm text-muted-foreground">模型類型</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="outline">{model.modelType}</Badge>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid gap-4 md:grid-cols-4">
+                          <div>
+                            <p className="text-sm text-muted-foreground">模型類型</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="outline">{model.modelType}</Badge>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">參數量</p>
+                            <p className="text-xl">{model.parameterCount}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">文件大小</p>
+                            <p className="text-xl">{model.fileSize}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">啟用狀態</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {isActive && (
+                                <Zap className="h-4 w-4 text-green-500" />
+                              )}
+                              <span className="text-sm">{getModelStatusText(isActive)}</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">參數量</p>
-                        <p className="text-xl">{model.parameterCount}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">文件大小</p>
-                        <p className="text-xl">{model.fileSize}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">啟用狀態</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {model.status === "active" && (
-                            <Zap className="h-4 w-4 text-green-500" />
-                          )}
-                          <span className="text-sm">{getModelStatusText(model.status)}</span>
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="flex justify-end gap-2 mt-6">
-                      {model.status !== "loading" && (
-                        <Button 
-                          size="sm" 
-                          variant={model.status === "active" ? "outline" : "default"}
-                          onClick={() => toggleModelStatus(model.id)}
-                          disabled={toggleModelMutation.isPending}
-                        >
-                          {model.status === "active" ? "停用" : "啟用"}
-                        </Button>
-                      )}
-                      {model.status === "loading" && (
-                        <Button size="sm" disabled>
-                          載入中...
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            {/* 模型上傳卡片以下內容... */}
-          </div>
+                        <div className="flex justify-end gap-2 mt-6">
+                          <Button 
+                            size="sm" 
+                            variant={isActive ? "outline" : "default"}
+                            onClick={() => handleToggleModelStatus(model.id)}
+                            disabled={toggleModelMutation.isPending}
+                          >
+                            {toggleModelMutation.isPending ? "處理中..." : (isActive ? "停用" : "啟用")}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
 
             {/* 模型上傳卡片 */}
             <Card>
