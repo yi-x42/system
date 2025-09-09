@@ -74,20 +74,19 @@ class DatabaseService:
             logger.error(f"完成任務失敗: {e}")
             return False
     
-    async def update_task_status(self, task_id: str, status: str, db: AsyncSession) -> bool:
+    async def update_task_status(self, db: AsyncSession, task_id: int, status: str) -> bool:
         """更新任務狀態"""
         try:
-            # 將 task_id 轉換為整數
-            task_id_int = int(task_id)
-            
             # 根據狀態決定是否更新結束時間
             values = {'status': status}
             if status in ['completed', 'failed', 'cancelled']:
                 values['end_time'] = datetime.utcnow()
+            elif status == 'running':
+                values['start_time'] = datetime.utcnow()
             
             result = await db.execute(
                 update(AnalysisTask)
-                .where(AnalysisTask.id == task_id_int)
+                .where(AnalysisTask.id == task_id)
                 .values(**values)
             )
             await db.commit()
@@ -130,6 +129,33 @@ class DatabaseService:
     # ============================================================================
     # 檢測結果相關操作
     # ============================================================================
+    
+    async def save_detection_result(self, session: AsyncSession, detection_data: Dict[str, Any]) -> DetectionResult:
+        """儲存單個檢測結果"""
+        try:
+            detection_obj = DetectionResult(
+                task_id=detection_data['task_id'],
+                frame_number=detection_data['frame_number'],
+                timestamp=detection_data.get('timestamp', datetime.utcnow()),
+                object_type=detection_data['object_type'],
+                confidence=detection_data['confidence'],
+                bbox_x1=detection_data['bbox_x1'],
+                bbox_y1=detection_data['bbox_y1'],
+                bbox_x2=detection_data['bbox_x2'],
+                bbox_y2=detection_data['bbox_y2'],
+                center_x=detection_data['center_x'],
+                center_y=detection_data['center_y']
+            )
+            
+            session.add(detection_obj)
+            await session.commit()
+            await session.refresh(detection_obj)
+            return detection_obj
+            
+        except Exception as e:
+            logger.error(f"儲存檢測結果失敗: {e}")
+            await session.rollback()
+            raise
     
     async def save_detection_results(self, session: AsyncSession, 
                                    task_id: int, 

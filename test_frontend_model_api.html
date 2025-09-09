@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前端模型API測試</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .api-test {
+            border: 1px solid #ddd;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .success {
+            border-left: 4px solid #4CAF50;
+            background: #f1f8e9;
+        }
+        .error {
+            border-left: 4px solid #f44336;
+            background: #ffebee;
+        }
+        .warning {
+            border-left: 4px solid #ff9800;
+            background: #fff3e0;
+        }
+        .model-card {
+            border: 1px solid #ccc;
+            margin: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            background: white;
+            display: inline-block;
+            min-width: 200px;
+        }
+        .model-active {
+            border-color: #4CAF50;
+            background: #e8f5e8;
+        }
+        .debug-section {
+            background: #f0f0f0;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-active { background: #4CAF50; }
+        .status-inactive { background: #f44336; }
+        .status-loading { background: #ff9800; }
+    </style>
+</head>
+<body>
+    <h1>前端模型API測試頁面</h1>
+    
+    <div class="api-test">
+        <h2>🔗 API連接測試</h2>
+        <p>正在測試與後端的連接...</p>
+        <div id="connection-status">檢查中...</div>
+    </div>
+
+    <div class="api-test">
+        <h2>📊 模型API測試</h2>
+        <button onclick="testActiveModelsAPI()">測試活躍模型API</button>
+        <button onclick="testModelListAPI()">測試模型列表API</button>
+        <button onclick="testAllModelsAPI()">測試所有模型API</button>
+        <div id="api-results"></div>
+    </div>
+
+    <div class="api-test">
+        <h2>🎯 模型選擇器模擬</h2>
+        <p>模擬前端模型選擇器的行為:</p>
+        <div>
+            <label for="model-select">選擇模型:</label>
+            <select id="model-select" onchange="updateSelectedModel()">
+                <option value="">請選擇模型...</option>
+            </select>
+        </div>
+        <br>
+        <button id="analysis-button" onclick="startAnalysis()" disabled>開始分析此影片</button>
+        <div id="selection-status"></div>
+    </div>
+
+    <div class="api-test">
+        <h2>🐛 調試信息</h2>
+        <div class="debug-section" id="debug-info">
+            載入中...
+        </div>
+    </div>
+
+    <script>
+        let activeModels = [];
+        let selectedModel = '';
+
+        // 測試連接
+        async function testConnection() {
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/frontend/stats');
+                const statusDiv = document.getElementById('connection-status');
+                if (response.ok) {
+                    statusDiv.innerHTML = '<span class="status-indicator status-active"></span>後端連接正常 ✅';
+                    statusDiv.className = 'success';
+                } else {
+                    statusDiv.innerHTML = '<span class="status-indicator status-inactive"></span>後端連接失敗 ❌';
+                    statusDiv.className = 'error';
+                }
+            } catch (error) {
+                const statusDiv = document.getElementById('connection-status');
+                statusDiv.innerHTML = `<span class="status-indicator status-inactive"></span>連接錯誤: ${error.message}`;
+                statusDiv.className = 'error';
+            }
+        }
+
+        // 測試活躍模型API
+        async function testActiveModelsAPI() {
+            const resultsDiv = document.getElementById('api-results');
+            resultsDiv.innerHTML = '<p>正在獲取活躍模型...</p>';
+
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/frontend/models/active');
+                const data = await response.json();
+                
+                console.log('活躍模型API回應:', data);
+                
+                if (response.ok) {
+                    activeModels = data;
+                    updateModelSelect(data);
+                    
+                    resultsDiv.innerHTML = `
+                        <div class="success">
+                            <h3>✅ 活躍模型API成功</h3>
+                            <p><strong>模型數量:</strong> ${data.length}</p>
+                            <div>
+                                ${data.map(model => `
+                                    <div class="model-card model-active">
+                                        <strong>${model.name}</strong><br>
+                                        ID: ${model.id}<br>
+                                        狀態: ${model.status}<br>
+                                        大小: ${model.fileSize}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="error">
+                            <h3>❌ 活躍模型API失敗</h3>
+                            <p>狀態碼: ${response.status}</p>
+                            <p>錯誤: ${JSON.stringify(data)}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="error">
+                        <h3>❌ 請求失敗</h3>
+                        <p>錯誤: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 更新模型選擇器
+        function updateModelSelect(models) {
+            const select = document.getElementById('model-select');
+            select.innerHTML = '<option value="">請選擇模型...</option>';
+            
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                select.appendChild(option);
+            });
+
+            updateDebugInfo();
+        }
+
+        // 更新選中的模型
+        function updateSelectedModel() {
+            const select = document.getElementById('model-select');
+            selectedModel = select.value;
+            
+            const button = document.getElementById('analysis-button');
+            const statusDiv = document.getElementById('selection-status');
+            
+            if (selectedModel) {
+                button.disabled = false;
+                button.style.background = '#007bff';
+                statusDiv.innerHTML = `<div class="success">已選擇模型: <strong>${selectedModel}</strong> ✅</div>`;
+            } else {
+                button.disabled = true;
+                button.style.background = '#ccc';
+                statusDiv.innerHTML = `<div class="warning">請選擇一個模型 ⚠️</div>`;
+            }
+
+            updateDebugInfo();
+        }
+
+        // 模擬開始分析
+        function startAnalysis() {
+            if (!selectedModel) {
+                alert('請先選擇模型！');
+                return;
+            }
+            alert(`開始使用模型 "${selectedModel}" 進行分析！`);
+        }
+
+        // 更新調試信息
+        function updateDebugInfo() {
+            const debugDiv = document.getElementById('debug-info');
+            debugDiv.innerHTML = `
+當前狀態:
+- 活躍模型數量: ${activeModels.length}
+- 選中模型: "${selectedModel}"
+- 按鈕狀態: ${selectedModel ? '啟用' : '禁用'}
+
+活躍模型列表:
+${activeModels.map(model => `  - ${model.id}: ${model.name} (${model.status})`).join('\n')}
+
+前端邏輯:
+1. useActiveModels() → fetchActiveModels() → GET /api/v1/frontend/models/active
+2. 數據格式: Array<{id, name, status, ...}>
+3. 填充 Select 選項: activeModels.map(model => <SelectItem>)
+4. 按鈕啟用條件: selectedModel !== ""
+
+可能問題:
+- React Query 快取未更新？
+- 網絡請求被攔截？
+- API回應格式不匹配？
+- 組件狀態未正確更新？
+            `;
+        }
+
+        // 頁面載入時執行
+        window.onload = function() {
+            testConnection();
+            testActiveModelsAPI();
+        };
+
+        // 測試其他API
+        async function testModelListAPI() {
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/frontend/models/list');
+                const data = await response.json();
+                console.log('模型列表API:', data);
+                document.getElementById('api-results').innerHTML += `
+                    <div class="success">
+                        <h4>📋 模型列表API</h4>
+                        <p>總數: ${data.length}</p>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('模型列表API錯誤:', error);
+            }
+        }
+
+        async function testAllModelsAPI() {
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/frontend/models');
+                const data = await response.json();
+                console.log('所有模型API:', data);
+                document.getElementById('api-results').innerHTML += `
+                    <div class="success">
+                        <h4>🔧 所有模型API</h4>
+                        <p>格式: {models: [], current_model: "${data.current_model}"}</p>
+                        <p>總數: ${data.models ? data.models.length : 0}</p>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('所有模型API錯誤:', error);
+            }
+        }
+    </script>
+</body>
+</html>

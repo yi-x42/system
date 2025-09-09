@@ -11,6 +11,7 @@ import shutil
 from app.core.database import get_db
 from app.services.new_database_service import DatabaseService
 from app.services.enhanced_video_analysis_service import EnhancedVideoAnalysisService
+from app.services.task_processor import get_task_processor
 from app.models.database import AnalysisTask, DetectionResult, DataSource, SystemConfig
 from app.core.logger import main_logger as logger
 from app.utils.media_info import probe_resolution
@@ -110,6 +111,165 @@ async def create_analysis_task_api(
     except Exception as e:
         logger.error(f"創建分析任務失敗: {str(e)}")
         raise HTTPException(status_code=500, detail=f"創建分析任務失敗: {str(e)}")
+
+
+@router.post("/tasks/create-and-execute", summary="創建並執行分析任務")
+async def create_and_execute_analysis_task(
+    task_data: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    創建分析任務並立即開始執行
+    適合前端「開始分析」按鈕直接調用
+    """
+    try:
+        # 先創建任務
+        task_response = await create_analysis_task_api(task_data, db)
+        
+        if not task_response['success']:
+            return task_response
+        
+        task_id = task_response['task_id']
+        
+        # 獲取任務
+        task = await db_service.get_analysis_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="剛創建的分析任務不存在")
+        
+        # 獲取任務處理器並開始執行
+        processor = get_task_processor()
+        
+        if task.task_type == "video_file":
+            background_tasks.add_task(processor.process_video_file_task, db, task)
+        else:
+            raise HTTPException(status_code=400, detail=f"不支援的任務類型: {task.task_type}")
+        
+        logger.info(f"🚀 分析任務 {task_id} 已創建並開始執行")
+        
+        return {
+            'success': True,
+            'task_id': task_id,
+            'message': '分析任務已創建並開始執行',
+            'status': 'scheduled',
+            'task': task_response['task']
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"創建並執行分析任務失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"創建並執行分析任務失敗: {str(e)}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"創建分析任務失敗: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"創建分析任務失敗: {str(e)}")
+
+
+@router.post("/tasks/{task_id}/execute", summary="執行分析任務")
+async def execute_analysis_task(
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    執行指定的分析任務
+    這個API會在背景執行實際的YOLO分析並保存結果到資料庫
+    """
+    try:
+        # 獲取任務
+        task = await db_service.get_analysis_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="分析任務不存在")
+        
+        # 檢查任務狀態
+        if task.status != "pending":
+            raise HTTPException(status_code=400, detail=f"任務狀態不正確: {task.status}")
+        
+        # 獲取任務處理器
+        processor = get_task_processor()
+        
+        # 在背景執行分析
+        if task.task_type == "video_file":
+            background_tasks.add_task(processor.process_video_file_task, db, task)
+        else:
+            raise HTTPException(status_code=400, detail=f"不支援的任務類型: {task.task_type}")
+        
+        logger.info(f"🚀 分析任務 {task_id} 已排程執行")
+        
+        return {
+            'success': True,
+            'task_id': task_id,
+            'message': '分析任務已開始執行',
+            'status': 'scheduled'
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"執行分析任務失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"執行分析任務失敗: {str(e)}")
+
+
+@router.get("/tasks/{task_id}", summary="獲取分析任務狀態")
+async def get_analysis_task_status(
+    task_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """獲取分析任務的詳細狀態"""
+    try:
+        task = await db_service.get_analysis_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="分析任務不存在")
+        
+        return task.to_dict()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"獲取任務狀態失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取任務狀態失敗: {str(e)}")
+
+
+@router.get("/tasks/{task_id}/results", summary="獲取分析任務的檢測結果")
+async def get_analysis_task_results(
+    task_id: int,
+    limit: int = 1000,
+    frame_start: Optional[int] = None,
+    frame_end: Optional[int] = None,
+    object_type: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """獲取分析任務的檢測結果"""
+    try:
+        # 檢查任務是否存在
+        task = await db_service.get_analysis_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="分析任務不存在")
+        
+        # 獲取檢測結果
+        detections = await db_service.get_detection_results(
+            db, task_id, frame_start, frame_end, object_type, limit
+        )
+        
+        # 獲取統計資訊
+        statistics = await db_service.get_detection_statistics(db, task_id)
+        
+        return {
+            'task_id': task_id,
+            'task_status': task.status,
+            'detections': [detection.to_dict() for detection in detections],
+            'statistics': statistics,
+            'total_detections': len(detections)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"獲取檢測結果失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取檢測結果失敗: {str(e)}")
 
 @router.post("/analysis/video", summary="開始影片檔案分析")
 async def start_video_analysis(

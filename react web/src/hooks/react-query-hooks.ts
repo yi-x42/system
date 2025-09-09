@@ -131,7 +131,8 @@ export interface YoloModelFileInfo {
 // 取得 YOLO 模型清單
 const fetchYoloModelList = async (): Promise<YoloModelFileInfo[]> => {
   const { data } = await apiClient.get('/frontend/models/list');
-  return data;
+  // 後端返回的格式是 {value: [], Count: number}，需要提取 value 字段
+  return data.value || data || [];
 };
 
 export const useYoloModelList = () => {
@@ -157,7 +158,8 @@ export const useToggleModelStatus = () => {
 // 取得已啟用的模型清單（供其他功能使用）
 const fetchActiveModels = async (): Promise<YoloModelFileInfo[]> => {
   const { data } = await apiClient.get('/frontend/models/active');
-  return data;
+  // 後端返回的格式是 {value: [], Count: number}，需要提取 value 字段
+  return data.value || data || [];
 };
 
 export const useActiveModels = () => {
@@ -200,11 +202,18 @@ export interface CreateAnalysisTaskResponse {
   task_id: number;
   message: string;
   task: AnalysisTask;
+  status?: string;  // 對於 create-and-execute API 的額外狀態欄位
 }
 
 // 創建分析任務的非同步函式
 const createAnalysisTask = async (taskData: AnalysisTaskRequest): Promise<CreateAnalysisTaskResponse> => {
   const { data } = await apiClient.post('/tasks/create', taskData);
+  return data;
+};
+
+// 創建並執行分析任務的非同步函式
+const createAndExecuteAnalysisTask = async (taskData: AnalysisTaskRequest): Promise<CreateAnalysisTaskResponse> => {
+  const { data } = await apiClient.post('/tasks/create-and-execute', taskData);
   return data;
 };
 
@@ -273,6 +282,13 @@ const fetchVideoList = async (): Promise<VideoListResponse> => {
 export const useCreateAnalysisTask = () => {
   return useMutation<CreateAnalysisTaskResponse, Error, AnalysisTaskRequest>({
     mutationFn: createAnalysisTask,
+  });
+};
+
+// 創建並執行分析任務的 mutation hook
+export const useCreateAndExecuteAnalysisTask = () => {
+  return useMutation<CreateAnalysisTaskResponse, Error, AnalysisTaskRequest>({
+    mutationFn: createAndExecuteAnalysisTask,
   });
 };
 

@@ -15,6 +15,7 @@ import {
   useVideoUpload, 
   VideoUploadResponse,
   useCreateAnalysisTask,
+  useCreateAndExecuteAnalysisTask,
   AnalysisTaskRequest,
   CreateAnalysisTaskResponse,
   useVideoList,
@@ -42,7 +43,8 @@ export function DetectionAnalysisOriginal() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadResult, setUploadResult] = useState<VideoUploadResponse | null>(null);
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.8);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.5);
+  const [selectedVideo, setSelectedVideo] = useState<VideoFileInfo | null>(null);
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
@@ -51,6 +53,7 @@ export function DetectionAnalysisOriginal() {
   const toggleModelMutation = useToggleModelStatus();
   const uploadVideoMutation = useVideoUpload();
   const createTaskMutation = useCreateAnalysisTask();
+  const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -156,9 +159,12 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
-  const handleStartAnalysis = async () => {
-    if (!uploadResult) {
-      alert('請先上傳影片檔案');
+  const handleStartAnalysis = async (video?: VideoFileInfo) => {
+    // 優先使用傳入的video參數，其次使用selectedVideo，最後使用uploadResult
+    const targetVideo = video || selectedVideo;
+    
+    if (!targetVideo && !uploadResult) {
+      alert('請先選擇或上傳影片檔案');
       return;
     }
 
@@ -168,29 +174,60 @@ export function DetectionAnalysisOriginal() {
     }
 
     try {
-      // 準備分析任務資料
-      const taskData: AnalysisTaskRequest = {
-        task_type: 'video_file',
-        source_info: {
-          file_path: uploadResult.file_path,
-          original_filename: uploadResult.original_name,
-          confidence_threshold: confidenceThreshold,
-        },
-        source_width: parseInt(uploadResult.video_info.resolution.split('x')[0]) || 1920,
-        source_height: parseInt(uploadResult.video_info.resolution.split('x')[1]) || 1080,
-        source_fps: uploadResult.video_info.fps || 25.0,
-      };
+      let taskData: AnalysisTaskRequest;
+      
+      if (targetVideo) {
+        // 從影片列表中選擇的影片
+        const [width, height] = targetVideo.resolution 
+          ? targetVideo.resolution.split('x').map(Number)
+          : [1920, 1080];
 
-      console.log('創建分析任務:', taskData);
+        taskData = {
+          task_type: 'video_file',
+          source_info: {
+            file_path: targetVideo.file_path,
+            original_filename: targetVideo.name,
+            confidence_threshold: confidenceThreshold,
+          },
+          source_width: width || 1920,
+          source_height: height || 1080,
+          source_fps: 30.0, // 預設值，因為VideoFileInfo沒有fps欄位
+        };
+      } else if (uploadResult) {
+        // 新上傳的影片
+        const [width, height] = uploadResult.video_info.resolution 
+          ? uploadResult.video_info.resolution.split('x').map(Number)
+          : [1920, 1080];
+
+        taskData = {
+          task_type: 'video_file',
+          source_info: {
+            file_path: uploadResult.file_path,
+            original_filename: uploadResult.original_name,
+            confidence_threshold: confidenceThreshold,
+          },
+          source_width: width || 1920,
+          source_height: height || 1080,
+          source_fps: uploadResult.video_info.fps || 30.0,
+        };
+      } else {
+        throw new Error('無效的影片資料');
+      }
+
+      console.log('創建並執行分析任務:', taskData);
       
-      const result = await createTaskMutation.mutateAsync(taskData);
-      console.log('分析任務創建成功:', result);
+      // 使用新的 create-and-execute API
+      const result = await createAndExecuteTaskMutation.mutateAsync(taskData);
+      console.log('分析任務已創建並開始執行:', result);
       
-      alert(`分析任務已創建！任務 ID: ${result.task_id}\n狀態: ${result.task.status}`);
+      alert(`分析任務已開始執行！\n任務 ID: ${result.task_id}\n狀態: ${result.status}\n${result.message}`);
+      
+      // 重新載入影片列表以更新狀態
+      refetchVideoList();
       
     } catch (error) {
-      console.error('創建分析任務失敗:', error);
-      alert('創建分析任務失敗，請稍後重試');
+      console.error('創建並執行分析任務失敗:', error);
+      alert('創建並執行分析任務失敗，請稍後重試');
     }
   };
 
@@ -432,6 +469,7 @@ export function DetectionAnalysisOriginal() {
                             size="sm" 
                             className="w-full"
                             disabled={!selectedModel}
+                            onClick={() => handleStartAnalysis(video)}
                           >
                             <Play className="h-4 w-4 mr-2" />
                             開始分析此影片
