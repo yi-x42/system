@@ -511,9 +511,19 @@ class Camera:
 class CameraService:
     """攝影機管理服務"""
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(CameraService, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
-        self.cameras: Dict[str, Camera] = {}
-        self._initialize_default_cameras()
+        if not self._initialized:
+            self.cameras: Dict[str, Camera] = {}
+            self._initialize_default_cameras()
+            CameraService._initialized = True
     
     def _initialize_default_cameras(self):
         """初始化預設攝影機"""

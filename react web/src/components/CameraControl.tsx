@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { useScanCameras, CameraDevice } from "../hooks/react-query-hooks";
+import { useScanCameras, CameraDevice, useDeleteCamera } from "../hooks/react-query-hooks";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -122,6 +122,9 @@ export function CameraControl() {
 
   // 使用真實的攝影機掃描 API
   const scanCamerasMutation = useScanCameras();
+  
+  // 刪除攝影機的 mutation
+  const deleteCameraMutation = useDeleteCamera();
 
   const startScan = async () => {
     setIsScanning(true);
@@ -263,6 +266,26 @@ export function CameraControl() {
     setSelectedCamera(cameraId);
     setActiveTab("live-view");
     setIsStreaming(true);
+  };
+
+  // 刪除攝影機
+  const handleDeleteCamera = async (cameraId: string) => {
+    if (window.confirm('確定要刪除這個攝影機配置嗎？')) {
+      try {
+        await deleteCameraMutation.mutateAsync(cameraId);
+        // 從本地狀態中移除攝影機
+        setCameras(prevCameras => 
+          prevCameras.filter(camera => camera.id !== cameraId)
+        );
+        // 如果刪除的是當前選中的攝影機，清除選擇
+        if (selectedCamera === cameraId) {
+          setSelectedCamera(null);
+        }
+      } catch (error) {
+        console.error('刪除攝影機失敗:', error);
+        alert('刪除攝影機失敗，請稍後再試');
+      }
+    }
   };
 
   // 取得選中的攝影機資料
@@ -484,6 +507,16 @@ export function CameraControl() {
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditDialog(camera)}>
                         <Edit className="h-4 w-4" />
+                      </Button>
+                      
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleDeleteCamera(camera.id)}
+                        disabled={deleteCameraMutation.isPending}
+                        className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     
                       <Button variant="outline" size="sm" onClick={() => startLivePreview(camera.id)}>

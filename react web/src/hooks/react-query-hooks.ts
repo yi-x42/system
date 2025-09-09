@@ -319,3 +319,42 @@ export const useVideoList = () => {
     refetchInterval: 10000,
   });
 };
+
+// 刪除影片的回應介面
+export interface DeleteVideoResponse {
+  success: boolean;
+  message: string;
+  deleted_file: string;
+}
+
+// 刪除影片的函式
+const deleteVideo = async (videoId: string): Promise<DeleteVideoResponse> => {
+  const { data } = await apiClient.delete(`/frontend/videos/${videoId}`);
+  return data;
+};
+
+// 刪除影片的 hook
+export const useDeleteVideo = () => {
+  return useMutation<DeleteVideoResponse, Error, string>({
+    mutationFn: deleteVideo,
+  });
+};
+
+// 刪除攝影機回應型別
+interface DeleteCameraResponse {
+  message: string;
+  camera_id: string;
+}
+
+// 刪除攝影機的函式
+const deleteCamera = async (cameraId: string): Promise<DeleteCameraResponse> => {
+  const { data } = await apiClient.delete(`/frontend/cameras/${cameraId}`);
+  return data;
+};
+
+// 刪除攝影機的 hook
+export const useDeleteCamera = () => {
+  return useMutation<DeleteCameraResponse, Error, string>({
+    mutationFn: deleteCamera,
+  });
+};

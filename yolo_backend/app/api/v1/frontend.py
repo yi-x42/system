@@ -621,6 +621,22 @@ async def scan_cameras():
         api_logger.error(f"掃描攝影機失敗: {e}")
         raise HTTPException(status_code=500, detail=f"攝影機掃描失敗: {str(e)}")
 
+@router.delete("/cameras/{camera_id}")
+async def remove_camera(camera_id: str):
+    """刪除攝影機配置"""
+    try:
+        camera_service = CameraService()
+        await camera_service.remove_camera(camera_id)
+        
+        return {
+            "message": f"攝影機 {camera_id} 已成功刪除",
+            "camera_id": camera_id
+        }
+        
+    except Exception as e:
+        api_logger.error(f"刪除攝影機失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"攝影機刪除失敗: {str(e)}")
+
 @router.get("/cameras/{camera_index}/preview")
 async def get_camera_preview(camera_index: int):
     """獲取攝影機即時預覽影像（JPEG格式）"""
@@ -2243,3 +2259,43 @@ async def get_videos_simple():
     except Exception as e:
         api_logger.error(f"獲取影片列表失敗: {e}")
         raise HTTPException(status_code=500, detail=f"獲取影片列表失敗: {str(e)}")
+
+
+@router.delete("/videos/{video_id}")
+async def delete_video(video_id: str):
+    """
+    刪除影片檔案
+    """
+    try:
+        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        video_path = os.path.join(videos_dir, video_id)
+        
+        # 檢查檔案是否存在
+        if not os.path.exists(video_path):
+            raise HTTPException(status_code=404, detail="影片檔案不存在")
+        
+        # 檢查是否為檔案
+        if not os.path.isfile(video_path):
+            raise HTTPException(status_code=400, detail="指定的路徑不是檔案")
+        
+        # 檢查檔案副檔名是否為支援的影片格式
+        supported_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+        if not any(video_id.lower().endswith(ext) for ext in supported_extensions):
+            raise HTTPException(status_code=400, detail="不是有效的影片檔案")
+        
+        # 刪除檔案
+        os.remove(video_path)
+        
+        api_logger.info(f"成功刪除影片檔案: {video_id}")
+        
+        return {
+            "success": True,
+            "message": f"成功刪除影片: {video_id}",
+            "deleted_file": video_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"刪除影片失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"刪除影片失敗: {str(e)}")

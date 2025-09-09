@@ -19,7 +19,8 @@ import {
   AnalysisTaskRequest,
   CreateAnalysisTaskResponse,
   useVideoList,
-  VideoFileInfo
+  VideoFileInfo,
+  useDeleteVideo
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -32,6 +33,7 @@ import {
   FileVideo,
   Camera,
   Plus,
+  Trash2,
 } from "lucide-react";
 
 export function DetectionAnalysisOriginal() {
@@ -54,6 +56,7 @@ export function DetectionAnalysisOriginal() {
   const uploadVideoMutation = useVideoUpload();
   const createTaskMutation = useCreateAnalysisTask();
   const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
+  const deleteVideoMutation = useDeleteVideo();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -228,6 +231,31 @@ export function DetectionAnalysisOriginal() {
     } catch (error) {
       console.error('創建並執行分析任務失敗:', error);
       alert('創建並執行分析任務失敗，請稍後重試');
+    }
+  };
+
+  // 刪除影片的處理函式
+  const handleDeleteVideo = async (video: VideoFileInfo) => {
+    // 確認刪除
+    const confirmDelete = window.confirm(`確定要刪除影片「${video.name}」嗎？此操作無法復原。`);
+    if (!confirmDelete) {
+      return;
+    }
+
+    try {
+      console.log('刪除影片:', video.id);
+      
+      const result = await deleteVideoMutation.mutateAsync(video.id);
+      console.log('影片刪除成功:', result);
+      
+      alert(`影片「${video.name}」已成功刪除`);
+      
+      // 重新載入影片列表
+      refetchVideoList();
+      
+    } catch (error) {
+      console.error('刪除影片失敗:', error);
+      alert('刪除影片失敗，請稍後重試');
     }
   };
 
@@ -465,15 +493,25 @@ export function DetectionAnalysisOriginal() {
                         </div>
 
                         {video.status === 'ready' && (
-                          <Button 
-                            size="sm" 
-                            className="w-full"
-                            disabled={!selectedModel}
-                            onClick={() => handleStartAnalysis(video)}
-                          >
-                            <Play className="h-4 w-4 mr-2" />
-                            開始分析此影片
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              className="flex-1"
+                              disabled={!selectedModel}
+                              onClick={() => handleStartAnalysis(video)}
+                            >
+                              <Play className="h-4 w-4 mr-2" />
+                              開始分析此影片
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={deleteVideoMutation.isPending}
+                              onClick={() => handleDeleteVideo(video)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         )}
                         
                         {video.status === 'analyzing' && (
@@ -483,14 +521,36 @@ export function DetectionAnalysisOriginal() {
                               <span>65%</span>
                             </div>
                             <Progress value={65} className="h-2" />
+                            <div className="flex justify-end">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={deleteVideoMutation.isPending}
+                                onClick={() => handleDeleteVideo(video)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         )}
                         
                         {video.status === 'completed' && (
-                          <div className="text-center py-2">
-                            <Badge variant="secondary" className="text-xs">
-                              分析已完成
-                            </Badge>
+                          <div className="space-y-2">
+                            <div className="text-center py-2">
+                              <Badge variant="secondary" className="text-xs">
+                                分析已完成
+                              </Badge>
+                            </div>
+                            <div className="flex justify-end">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={deleteVideoMutation.isPending}
+                                onClick={() => handleDeleteVideo(video)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
