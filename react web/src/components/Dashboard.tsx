@@ -14,17 +14,30 @@ import {
   XCircle,
   Clock,
 } from "lucide-react";
+import { useSystemStats } from "../hooks/react-query-hooks";
+import { Skeleton } from "./ui/skeleton";
 
 export function Dashboard() {
-  // 模擬數據
-  const systemStats = {
-    totalCameras: 24,
-    onlineCameras: 22,
-    totalAlerts: 15,
-    activeUsers: 8,
-    storageUsed: 75,
-    systemUptime: 99.8,
+  const { data: systemStats, isLoading, isError, error } = useSystemStats();
+
+  // 格式化運行時間
+  const formatUptime = (seconds: number | undefined) => {
+    if (seconds === undefined) {
+      return "0 分鐘";
+    }
+    if (seconds < 86400) {
+      // 少於一天，顯示分鐘
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes} 分鐘`;
+    } else {
+      // 超過一天，顯示天和分鐘
+      const days = Math.floor(seconds / 86400);
+      const remainingSeconds = seconds % 86400;
+      const minutes = Math.floor(remainingSeconds / 60);
+      return `${days} 天 ${minutes} 分鐘`;
+    }
   };
+
 
   const recentAlerts = [
     {
@@ -76,10 +89,16 @@ export function Dashboard() {
             <Camera className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{systemStats.totalCameras}</div>
-            <p className="text-xs text-muted-foreground">
-              線上: {systemStats.onlineCameras}
-            </p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <>
+                <div className="text-2xl">{systemStats?.total_cameras}</div>
+                <p className="text-xs text-muted-foreground">
+                  線上: {systemStats?.online_cameras}
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -89,12 +108,18 @@ export function Dashboard() {
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">{systemStats.totalAlerts}</div>
-            <p className="text-xs text-muted-foreground">較昨日 +3</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <>
+                <div className="text-2xl">{systemStats?.total_alerts_today}</div>
+                <p className="text-xs text-muted-foreground">
+                  較昨日 {systemStats?.alerts_vs_yesterday}%
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
-
-
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -102,8 +127,14 @@ export function Dashboard() {
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">8</div>
-            <p className="text-xs text-muted-foreground">處理中的檢測任務</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <>
+                <div className="text-2xl">{systemStats?.active_tasks}</div>
+                <p className="text-xs text-muted-foreground">處理中的檢測任務</p>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -113,8 +144,14 @@ export function Dashboard() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl">15天</div>
-            <p className="text-xs text-muted-foreground">持續穩定運行</p>
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <>
+                <div className="text-2xl">{formatUptime(systemStats?.system_uptime_seconds)}</div>
+                <p className="text-xs text-muted-foreground">持續穩定運行</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { useScanCameras, CameraDevice } from "../hooks/react-query-hooks";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -119,72 +120,117 @@ export function CameraControl() {
     }
   };
 
-  // 模擬掃描功能
+  // 使用真實的攝影機掃描 API
+  const scanCamerasMutation = useScanCameras();
+
   const startScan = async () => {
     setIsScanning(true);
     setScanProgress(0);
     setShowScanResults(false);
     setScanResults([]);
 
-    // 模擬掃描進度
-    for (let i = 0; i <= 100; i += 10) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setScanProgress(i);
-    }
+    // 模擬掃描進度動畫（保持 UI 效果）
+    const progressAnimation = async () => {
+      const steps = [0, 15, 30, 45, 60, 75, 90];
+      for (const progress of steps) {
+        setScanProgress(progress);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    };
 
-    // 模擬掃描結果
-    const mockResults = [
-      {
-        id: "scan_001",
-        ip: "192.168.1.105",
-        manufacturer: "Hikvision",
-        model: "DS-2CD2432F-IW",
-        onvifSupport: true,
-        rtspUrl: "rtsp://192.168.1.105:554/h264",
-        status: "detected",
-        description: "2MP Cube Network Camera"
-      },
-      {
-        id: "scan_002",
-        ip: "192.168.1.106",
-        manufacturer: "Dahua",
-        model: "IPC-HFW4431R-Z",
-        onvifSupport: true,
-        rtspUrl: "rtsp://192.168.1.106:554/cam/realmonitor",
-        status: "detected",
-        description: "4MP WDR IR Bullet Network Camera"
-      },
-      {
-        id: "scan_003",
-        ip: "192.168.1.107",
-        manufacturer: "Axis",
-        model: "M3046-V",
-        onvifSupport: true,
-        rtspUrl: "rtsp://192.168.1.107:554/axis-media/media.amp",
-        status: "detected",
-        description: "Mini Dome Network Camera"
-      },
-      {
-        id: "scan_004",
-        ip: "192.168.1.108",
-        manufacturer: "Unknown",
-        model: "Generic Camera",
+    // 同時執行進度動畫和真實掃描
+    const progressPromise = progressAnimation();
+    
+    try {
+      // 呼叫真實的攝影機掃描 API
+      const scanResult = await scanCamerasMutation.mutateAsync({
+        max_index: 6,        // 掃描 0-5 號攝影機
+        warmup_frames: 3,    // 快速模式
+        force_probe: false,
+        retries: 1
+      });
+
+      // 將後端回傳的資料轉換為前端需要的格式
+      const formattedResults = scanResult.devices
+        .filter(device => device.frame_ok) // 只顯示能正常工作的攝影機
+        .map((device: CameraDevice, index: number) => ({
+          id: `camera_${device.index}`,
+          ip: `本機攝影機 #${device.index}`,
+          manufacturer: "本機設備",
+          model: `攝影機 ${device.index}`,
+          onvifSupport: true,
+          rtspUrl: `/camera/${device.index}`,
+          status: "detected",
+          description: `解析度: ${device.width}x${device.height}, 後端: ${device.backend}`,
+          cameraIndex: device.index,
+          width: device.width,
+          height: device.height,
+          backend: device.backend
+        }));
+
+      // 等待進度動畫完成
+      await progressPromise;
+      setScanProgress(100);
+
+      // 顯示掃描結果
+      setScanResults(formattedResults);
+      setShowScanResults(true);
+      
+    } catch (error) {
+      console.error('攝影機掃描失敗:', error);
+      
+      // 即使失敗也要完成進度動畫
+      await progressPromise;
+      setScanProgress(100);
+      
+      // 顯示錯誤訊息
+      setScanResults([{
+        id: "error",
+        ip: "掃描失敗",
+        manufacturer: "系統錯誤",
+        model: "無法掃描攝影機",
         onvifSupport: false,
         rtspUrl: null,
-        status: "partial",
-        description: "Device found but limited information available"
-      }
-    ];
-
-    setScanResults(mockResults);
-    setShowScanResults(true);
-    setIsScanning(false);
+        status: "error",
+        description: `錯誤訊息: ${error instanceof Error ? error.message : '未知錯誤'}`
+      }]);
+      setShowScanResults(true);
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   const addCameraToSystem = (device: any) => {
-    // 這裡會將掃描到的設備添加到系統中
+    // 將掃描到的設備添加到系統中
     console.log("Adding camera to system:", device);
-    // 可以在這裡觸發實際的添加邏輯
+    
+    if (device.cameraIndex !== undefined) {
+      // 對於本機攝影機，使用攝影機 index
+      const newCamera = {
+        id: `cam_${Date.now()}`,
+        name: `攝影機 ${device.cameraIndex}`,
+        location: `本機攝影機 #${device.cameraIndex}`,
+        status: "online",
+        resolution: device.width && device.height ? `${device.width}x${device.height}` : "未知",
+        fps: 30,
+        recording: false,
+        nightVision: false,
+        motionDetection: false,
+        ip: `本機設備 #${device.cameraIndex}`,
+        model: device.model || "本機攝影機",
+        cameraIndex: device.cameraIndex,
+        backend: device.backend
+      };
+      
+      setCameras(prevCameras => [...prevCameras, newCamera]);
+      
+      // 關閉掃描結果對話框
+      setShowScanResults(false);
+      
+      console.log("已新增攝影機:", newCamera);
+    } else {
+      console.log("設備資料不完整，無法新增");
+    }
   };
 
   // 開啟編輯對話框
@@ -256,7 +302,11 @@ export function CameraControl() {
                   </p>
                   <Button 
                     variant="outline" 
-                    onClick={() => setIsAddDialogOpen(false)}
+                    onClick={() => {
+                      setIsScanning(false);
+                      setScanProgress(0);
+                      setShowScanResults(false);
+                    }}
                     className="mt-4"
                   >
                     取消

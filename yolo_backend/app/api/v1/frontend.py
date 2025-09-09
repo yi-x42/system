@@ -35,6 +35,7 @@ class SystemStats(BaseModel):
     gpu_usage: float = Field(..., description="GPU使用率")
     active_tasks: int = Field(..., description="活躍任務數")
     total_detections: int = Field(..., description="總檢測數")
+    system_uptime_seconds: int = Field(..., description="系統運行總秒數")
     last_updated: datetime = Field(..., description="最後更新時間")
 
 class TaskCreate(BaseModel):
@@ -199,6 +200,10 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             
         except Exception as db_error:
             api_logger.warning(f"無法從資料庫獲取統計數據: {db_error}")
+
+        # 獲取系統運行時間
+        from app.core.uptime import get_system_uptime
+        uptime_seconds = get_system_uptime()
         
         stats = SystemStats(
             cpu_usage=round(cpu_usage, 1),
@@ -206,6 +211,7 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             gpu_usage=round(gpu_usage, 1),
             active_tasks=active_tasks,
             total_detections=total_detections,
+            system_uptime_seconds=int(uptime_seconds),
             last_updated=datetime.now()
         )
         
