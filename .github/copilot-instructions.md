@@ -63,9 +63,7 @@ python simple_api_test.py
 ### 3. Unity 座標系統
 
 與 Unity 引擎整合時，座標系統有特殊規範。
--   **原點**: 螢幕左下角為 `(0, 0)`。
--   **格式**: 邊界框使用像素單位的 `(x1, y1)` 到 `(x2, y2)`。
--   **參考**: `test_unity_coordinates.py` 和 `UNITY_SCREEN_COORDINATE_GUIDE.md`。
+-   **原點**: 螢幕左上為 `(0, 0)`。
 
 ## 💡 開發建議
 
