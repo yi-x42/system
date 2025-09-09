@@ -26,6 +26,7 @@ from app.api.v1.database_query import db_query_router  # 新增資料庫查詢�
 from app.api.v1.frontend import router as frontend_router  # 新增前端API
 from app.api.v1.camera_routes import router as camera_router  # 攝影機管理API 新增
 from app.api.v1.realtime_routes import router as realtime_router  # 實時檢測API
+from app.api.v1.video_list import router as video_list_router  # 影片列表API 新增
 # WebSocket 路由
 from app.websocket.routes import router as websocket_router
 
@@ -206,6 +207,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(frontend_router, prefix="/api/v1")  # 新增前端API路由
 app.include_router(camera_router)  # 新增攝影機管理API 路由
+app.include_router(video_list_router, prefix="/api/v1")  # 新增影片列表API路由
 
 # 相容舊前端: /admin/api/cameras/scan -> 導向新邏輯
 legacy_router = APIRouter()

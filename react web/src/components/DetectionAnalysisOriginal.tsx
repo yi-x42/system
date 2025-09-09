@@ -16,7 +16,9 @@ import {
   VideoUploadResponse,
   useCreateAnalysisTask,
   AnalysisTaskRequest,
-  CreateAnalysisTaskResponse
+  CreateAnalysisTaskResponse,
+  useVideoList,
+  VideoFileInfo
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -45,6 +47,7 @@ export function DetectionAnalysisOriginal() {
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
   const { data: activeModels, refetch: refetchActiveModels } = useActiveModels();
+  const { data: videoListData, isLoading: videoListLoading, refetch: refetchVideoList } = useVideoList();
   const toggleModelMutation = useToggleModelStatus();
   const uploadVideoMutation = useVideoUpload();
   const createTaskMutation = useCreateAnalysisTask();
@@ -144,6 +147,9 @@ export function DetectionAnalysisOriginal() {
       const result = await uploadVideoMutation.mutateAsync(formData);
       setUploadResult(result);
       console.log('上傳成功:', result);
+      
+      // 重新載入影片列表
+      refetchVideoList();
     } catch (error) {
       console.error('上傳失敗:', error);
       alert('上傳失敗，請稍後重試');
@@ -325,8 +331,7 @@ export function DetectionAnalysisOriginal() {
                     影片列表與分析
                   </div>
                   <Badge variant="secondary">
-                    {/* 這裡之後會顯示影片數量 */}
-                    3 個影片
+                    {videoListData?.total || 0} 個影片
                   </Badge>
                 </CardTitle>
               </CardHeader>
@@ -380,110 +385,85 @@ export function DetectionAnalysisOriginal() {
 
                 {/* 影片列表 */}
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {/* 示範影片項目 - 之後會從 API 獲取 */}
-                  {[
-                    {
-                      id: 1,
-                      name: "測試影片_001.mp4",
-                      uploadTime: "2025-09-09 14:30:25",
-                      size: "15.2MB",
-                      duration: "2:15",
-                      resolution: "1920x1080",
-                      status: "ready"
-                    },
-                    {
-                      id: 2,
-                      name: "安全監控_002.mp4",
-                      uploadTime: "2025-09-09 14:28:10",
-                      size: "23.8MB",
-                      duration: "3:42",
-                      resolution: "1920x1080",
-                      status: "analyzing"
-                    },
-                    {
-                      id: 3,
-                      name: "車流監測_003.mp4",
-                      uploadTime: "2025-09-09 14:25:33",
-                      size: "18.5MB",
-                      duration: "2:58",
-                      resolution: "1920x1080",
-                      status: "completed"
-                    }
-                  ].map((video) => (
-                    <div 
-                      key={video.id} 
-                      className="border rounded-lg p-3 hover:bg-muted/30 transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{video.name}</p>
-                          <p className="text-xs text-muted-foreground">{video.uploadTime}</p>
-                        </div>
-                        <div className="flex items-center gap-2 ml-2">
-                          {video.status === 'ready' && (
-                            <Badge variant="outline" className="text-xs">
-                              待分析
-                            </Badge>
-                          )}
-                          {video.status === 'analyzing' && (
-                            <Badge variant="default" className="text-xs">
-                              分析中
-                            </Badge>
-                          )}
-                          {video.status === 'completed' && (
-                            <Badge variant="secondary" className="text-xs">
-                              已完成
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
-                        <div className="flex gap-3">
-                          <span>時長: {video.duration}</span>
-                          <span>大小: {video.size}</span>
-                          <span>解析度: {video.resolution}</span>
-                        </div>
-                      </div>
-
-                      {video.status === 'ready' && (
-                        <Button 
-                          size="sm" 
-                          className="w-full"
-                          disabled={!selectedModel}
-                        >
-                          <Play className="h-4 w-4 mr-2" />
-                          開始分析此影片
-                        </Button>
-                      )}
-                      
-                      {video.status === 'analyzing' && (
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-xs">
-                            <span>分析進度</span>
-                            <span>65%</span>
-                          </div>
-                          <Progress value={65} className="h-2" />
-                        </div>
-                      )}
-                      
-                      {video.status === 'completed' && (
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-muted-foreground">檢測物件:</span>
-                            <div className="flex gap-1">
-                              <Badge variant="outline" className="text-xs">person: 3</Badge>
-                              <Badge variant="outline" className="text-xs">car: 1</Badge>
-                            </div>
-                          </div>
-                          <Button variant="outline" size="sm" className="w-full">
-                            <Eye className="h-4 w-4 mr-2" />
-                            查看分析結果
-                          </Button>
-                        </div>
-                      )}
+                  {videoListLoading ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      載入影片列表中...
                     </div>
-                  ))}
+                  ) : videoListData && videoListData.videos.length > 0 ? (
+                    videoListData.videos.map((video: VideoFileInfo) => (
+                      <div 
+                        key={video.id} 
+                        className="border rounded-lg p-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{video.name}</p>
+                            <p className="text-xs text-muted-foreground">{video.upload_time}</p>
+                          </div>
+                          <div className="flex items-center gap-2 ml-2">
+                            {video.status === 'ready' && (
+                              <Badge variant="outline" className="text-xs">
+                                待分析
+                              </Badge>
+                            )}
+                            {video.status === 'analyzing' && (
+                              <Badge variant="default" className="text-xs">
+                                分析中
+                              </Badge>
+                            )}
+                            {video.status === 'completed' && (
+                              <Badge variant="secondary" className="text-xs">
+                                已完成
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
+                          <div className="flex gap-3">
+                            <span>時長: {video.duration || '未知'}</span>
+                            <span>大小: {video.size}</span>
+                            <span>解析度: {video.resolution || '未知'}</span>
+                          </div>
+                        </div>
+
+                        {video.status === 'ready' && (
+                          <Button 
+                            size="sm" 
+                            className="w-full"
+                            disabled={!selectedModel}
+                          >
+                            <Play className="h-4 w-4 mr-2" />
+                            開始分析此影片
+                          </Button>
+                        )}
+                        
+                        {video.status === 'analyzing' && (
+                          <div className="space-y-2">
+                            <div className="flex justify-between text-xs">
+                              <span>分析進度</span>
+                              <span>65%</span>
+                            </div>
+                            <Progress value={65} className="h-2" />
+                          </div>
+                        )}
+                        
+                        {video.status === 'completed' && (
+                          <div className="text-center py-2">
+                            <Badge variant="secondary" className="text-xs">
+                              分析已完成
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileVideo className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>暫無影片檔案</p>
+                      <p className="text-xs mt-1">請先上傳影片檔案</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

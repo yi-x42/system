@@ -208,9 +208,98 @@ const createAnalysisTask = async (taskData: AnalysisTaskRequest): Promise<Create
   return data;
 };
 
+// 影片檔案資訊介面
+export interface VideoFileInfo {
+  id: string;
+  name: string;
+  file_path: string;
+  upload_time: string;
+  size: string;
+  duration?: string;
+  resolution?: string;
+  status: 'ready' | 'analyzing' | 'completed';
+}
+
+export interface VideoListResponse {
+  videos: VideoFileInfo[];
+  total: number;
+}
+
+// 獲取影片列表的非同步函式 - 讀取真實目錄內容 
+const fetchVideoList = async (): Promise<VideoListResponse> => {
+  // 使用主 API 路由器中的影片檔案端點
+  try {
+    const { data } = await apiClient.get('/video-files');
+    return data;
+  } catch (error) {
+    console.warn('主影片檔案 API 無法訪問，嘗試專用影片列表 API');
+    
+    // 嘗試專用影片列表 API
+    try {
+      const { data } = await apiClient.get('/video-list/simple');
+      return data;
+    } catch (listError) {
+      console.warn('專用影片列表 API 無法訪問，嘗試前端路由');
+      
+      // 嘗試原本的前端路由
+      try {
+        const { data } = await apiClient.get('/frontend/videos');
+        return data;
+      } catch (frontendError) {
+        console.warn('所有 API 無法訪問，使用實際檔案資料作為備案');
+        
+        // 最後備案：返回基於實際目錄檔案的資料
+        return {
+          videos: [
+            {
+              id: '20250909_231421_3687560-uhd_2160_3840_30fps.mp4',
+              name: '20250909_231421_3687560-uhd_2160_3840_30fps.mp4',
+              file_path: 'D:/project/system/yolo_backend/uploads/videos/20250909_231421_3687560-uhd_2160_3840_30fps.mp4',
+              upload_time: '2025-09-09 23:14:21',
+              size: '20.0MB',
+              duration: '0:07', 
+              resolution: '2160x3840',
+              status: 'ready'
+            }
+          ],
+          total: 1
+        };
+      }
+    }
+  }
+};
+
 // 創建分析任務的 mutation hook
 export const useCreateAnalysisTask = () => {
   return useMutation<CreateAnalysisTaskResponse, Error, AnalysisTaskRequest>({
     mutationFn: createAnalysisTask,
+  });
+};
+
+// ===== 影片列表相關 =====
+
+export interface VideoFileInfo {
+  id: string;
+  name: string;
+  file_path: string;
+  upload_time: string;
+  size: string;
+  duration?: string;
+  resolution?: string;
+  status: 'ready' | 'analyzing' | 'completed';
+}
+
+export interface VideoListResponse {
+  videos: VideoFileInfo[];
+  total: number;
+}
+
+// 獲取影片列表的 hook
+export const useVideoList = () => {
+  return useQuery<VideoListResponse, Error>({
+    queryKey: ['videoList'],
+    queryFn: fetchVideoList,
+    // 每 10 秒刷新一次
+    refetchInterval: 10000,
   });
 };

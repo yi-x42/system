@@ -201,3 +201,64 @@ def format_uptime(seconds):
             return f"{secs}秒"
     except:
         return f"{seconds:.1f}秒"
+
+
+@router.get("/videos")
+async def get_videos_list():
+    """
+    獲取影片列表 - 讀取實際目錄內容
+    """
+    import os
+    from datetime import datetime
+    
+    try:
+        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        
+        if not os.path.exists(videos_dir):
+            return {"videos": [], "total": 0}
+        
+        video_list = []
+        supported_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+        
+        for filename in os.listdir(videos_dir):
+            if any(filename.lower().endswith(ext) for ext in supported_extensions):
+                file_path = os.path.join(videos_dir, filename)
+                
+                if os.path.isfile(file_path):
+                    # 獲取檔案基本資訊
+                    stat_info = os.stat(file_path)
+                    file_size = stat_info.st_size
+                    upload_time = datetime.fromtimestamp(stat_info.st_mtime)
+                    
+                    # 格式化檔案大小
+                    if file_size < 1024 * 1024:
+                        size_str = f"{file_size / 1024:.1f}KB"
+                    elif file_size < 1024 * 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024):.1f}MB"
+                    else:
+                        size_str = f"{file_size / (1024 * 1024 * 1024):.1f}GB"
+                    
+                    video_info = {
+                        "id": filename,
+                        "name": filename,
+                        "file_path": file_path,
+                        "upload_time": upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "size": size_str,
+                        "duration": "unknown",  
+                        "resolution": "unknown",  
+                        "status": "ready"
+                    }
+                    
+                    video_list.append(video_info)
+        
+        # 按上傳時間降序排列
+        video_list.sort(key=lambda x: x['upload_time'], reverse=True)
+        
+        return {
+            "videos": video_list,
+            "total": len(video_list)
+        }
+        
+    except Exception as e:
+        api_logger.error(f"獲取影片列表失敗: {e}")
+        return {"error": str(e), "videos": [], "total": 0}

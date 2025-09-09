@@ -2084,3 +2084,162 @@ async def get_video_file(path: str):
     except Exception as e:
         api_logger.error(f"讀取影片檔案失敗: {e}")
         raise HTTPException(status_code=500, detail=f"讀取影片檔案失敗: {str(e)}")
+
+# ===== 影片列表相關 =====
+
+class VideoFileInfo(BaseModel):
+    """影片檔案資訊"""
+    id: str
+    name: str
+    file_path: str
+    upload_time: str
+    size: str
+    duration: Optional[str] = None
+    resolution: Optional[str] = None
+    status: str  # 'ready', 'analyzing', 'completed'
+
+@router.get("/video-list")
+async def get_video_list():
+    """
+    獲取上傳影片資料夾中的影片列表
+    """
+    try:
+        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        
+        if not os.path.exists(videos_dir):
+            return JSONResponse(content={"videos": []})
+        
+        video_list = []
+        supported_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+        
+        for filename in os.listdir(videos_dir):
+            if any(filename.lower().endswith(ext) for ext in supported_extensions):
+                file_path = os.path.join(videos_dir, filename)
+                
+                if os.path.isfile(file_path):
+                    # 獲取檔案資訊
+                    stat_info = os.stat(file_path)
+                    file_size = stat_info.st_size
+                    upload_time = datetime.fromtimestamp(stat_info.st_mtime)
+                    
+                    # 格式化檔案大小
+                    if file_size < 1024 * 1024:
+                        size_str = f"{file_size / 1024:.1f}KB"
+                    elif file_size < 1024 * 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024):.1f}MB"
+                    else:
+                        size_str = f"{file_size / (1024 * 1024 * 1024):.1f}GB"
+                    
+                    # 嘗試獲取影片資訊
+                    duration = None
+                    resolution = None
+                    try:
+                        import cv2
+                        cap = cv2.VideoCapture(file_path)
+                        if cap.isOpened():
+                            # 獲取影片時長
+                            fps = cap.get(cv2.CAP_PROP_FPS)
+                            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                            if fps > 0:
+                                duration_seconds = frame_count / fps
+                                minutes = int(duration_seconds // 60)
+                                seconds = int(duration_seconds % 60)
+                                duration = f"{minutes}:{seconds:02d}"
+                            
+                            # 獲取解析度
+                            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            if width > 0 and height > 0:
+                                resolution = f"{width}x{height}"
+                        
+                        cap.release()
+                    except:
+                        # 如果無法讀取影片資訊，使用預設值
+                        duration = "未知"
+                        resolution = "未知"
+                    
+                    # 預設狀態為 ready
+                    status = "ready"
+                    
+                    video_info = VideoFileInfo(
+                        id=filename,  # 使用檔名作為 ID
+                        name=filename,
+                        file_path=file_path,
+                        upload_time=upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        size=size_str,
+                        duration=duration,
+                        resolution=resolution,
+                        status=status
+                    )
+                    
+                    video_list.append(video_info.dict())
+        
+        # 按上傳時間降序排列
+        video_list.sort(key=lambda x: x['upload_time'], reverse=True)
+        
+        return JSONResponse(content={
+            "videos": video_list,
+            "total": len(video_list)
+        })
+        
+    except Exception as e:
+        api_logger.error(f"獲取影片列表失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取影片列表失敗: {str(e)}")
+
+
+@router.get("/videos")
+async def get_videos_simple():
+    """
+    簡化版獲取影片列表 - 用於測試
+    """
+    try:
+        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        
+        if not os.path.exists(videos_dir):
+            return {"videos": [], "total": 0}
+        
+        video_list = []
+        supported_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+        
+        for filename in os.listdir(videos_dir):
+            if any(filename.lower().endswith(ext) for ext in supported_extensions):
+                file_path = os.path.join(videos_dir, filename)
+                
+                if os.path.isfile(file_path):
+                    # 獲取檔案基本資訊
+                    stat_info = os.stat(file_path)
+                    file_size = stat_info.st_size
+                    upload_time = datetime.fromtimestamp(stat_info.st_mtime)
+                    
+                    # 格式化檔案大小
+                    if file_size < 1024 * 1024:
+                        size_str = f"{file_size / 1024:.1f}KB"
+                    elif file_size < 1024 * 1024 * 1024:
+                        size_str = f"{file_size / (1024 * 1024):.1f}MB"
+                    else:
+                        size_str = f"{file_size / (1024 * 1024 * 1024):.1f}GB"
+                    
+                    video_info = {
+                        "id": filename,
+                        "name": filename,
+                        "file_path": file_path,
+                        "upload_time": upload_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "size": size_str,
+                        "duration": "2:30",  # 預設值
+                        "resolution": "1920x1080",  # 預設值  
+                        "status": "ready"
+                    }
+                    
+                    video_list.append(video_info)
+        
+        # 按上傳時間降序排列
+        video_list.sort(key=lambda x: x['upload_time'], reverse=True)
+        
+        return {
+            "videos": video_list,
+            "total": len(video_list)
+        }
+        
+    except Exception as e:
+        api_logger.error(f"獲取影片列表失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取影片列表失敗: {str(e)}")
