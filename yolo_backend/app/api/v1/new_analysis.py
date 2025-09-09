@@ -18,9 +18,98 @@ from app.utils.media_info import probe_resolution
 router = APIRouter()
 db_service = DatabaseService()
 
+# 觸發重載
+
 # ============================================================================
 # 分析任務相關 API
 # ============================================================================
+
+@router.post("/tasks/create", summary="創建分析任務（前端專用）")
+async def create_analysis_task_api(
+    task_data: Dict[str, Any],
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    創建分析任務並保存到 analysis_tasks 表
+    專為前端「開始分析」按鈕設計
+    
+    請求格式:
+    {
+        "task_type": "video_file",
+        "source_info": {
+            "file_path": "/path/to/video.mp4",
+            "original_filename": "test.mp4",
+            "confidence_threshold": 0.8
+        },
+        "source_width": 1920,
+        "source_height": 1080,
+        "source_fps": 30.0
+    }
+    """
+    try:
+        # 驗證必要欄位
+        if not task_data.get('task_type'):
+            raise HTTPException(status_code=400, detail="task_type 是必要欄位")
+        
+        if not task_data.get('source_info'):
+            raise HTTPException(status_code=400, detail="source_info 是必要欄位")
+        
+        # 如果是 video_file 類型，檢查檔案路徑
+        if task_data['task_type'] == 'video_file':
+            file_path = task_data['source_info'].get('file_path')
+            if not file_path:
+                raise HTTPException(status_code=400, detail="影片檔案分析需要提供 file_path")
+            
+            # 檢查檔案是否存在
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail=f"檔案不存在: {file_path}")
+            
+            # 如果沒有提供解析度資訊，嘗試獲取
+            if not task_data.get('source_width') or not task_data.get('source_height'):
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(file_path)
+                    if cap.isOpened():
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                        cap.release()
+                        
+                        if not task_data.get('source_width'):
+                            task_data['source_width'] = width
+                        if not task_data.get('source_height'):
+                            task_data['source_height'] = height
+                        if not task_data.get('source_fps'):
+                            task_data['source_fps'] = fps
+                    else:
+                        # 無法讀取影片時使用預設值
+                        task_data.setdefault('source_width', 1920)
+                        task_data.setdefault('source_height', 1080)
+                        task_data.setdefault('source_fps', 25.0)
+                except Exception as e:
+                    logger.warning(f"無法獲取影片資訊: {e}")
+                    # 使用預設值
+                    task_data.setdefault('source_width', 1920)
+                    task_data.setdefault('source_height', 1080)
+                    task_data.setdefault('source_fps', 25.0)
+        
+        # 創建分析任務
+        task = await db_service.create_analysis_task(db, task_data)
+        
+        logger.info(f"✅ 分析任務已創建: {task.id}")
+        
+        return {
+            'success': True,
+            'task_id': task.id,
+            'message': '分析任務已創建成功',
+            'task': task.to_dict()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"創建分析任務失敗: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"創建分析任務失敗: {str(e)}")
 
 @router.post("/analysis/video", summary="開始影片檔案分析")
 async def start_video_analysis(

@@ -226,10 +226,8 @@ app.include_router(websocket_router)  # 新增WebSocket路由
 # 包含實時檢測 API 路由
 app.include_router(realtime_router, prefix="/api/v1", tags=["實時檢測"])
 
-# 包含新的分析 API 路由
-app.include_router(new_analysis_router, prefix="/api/v2", tags=["新版分析功能"])
-# 同時將資料庫查看功能添加到 v1 路由
-app.include_router(new_analysis_router, prefix="/api/v1", tags=["資料庫查看"])
+# 包含新的分析 API 路由 (僅使用 v1 避免衝突)
+app.include_router(new_analysis_router, prefix="/api/v1", tags=["分析功能與資料庫查看"])
 
 # 包含資料查詢 API 路由
 app.include_router(data_router, prefix="/api/v1/data", tags=["資料查詢"])

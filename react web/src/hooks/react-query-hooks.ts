@@ -167,3 +167,50 @@ export const useActiveModels = () => {
     refetchOnWindowFocus: false,
   });
 };
+
+// 分析任務相關介面
+export interface AnalysisTaskRequest {
+  task_type: 'video_file' | 'realtime_camera';
+  source_info: {
+    file_path?: string;
+    original_filename?: string;
+    confidence_threshold?: number;
+    camera_index?: number;
+  };
+  source_width?: number;
+  source_height?: number;
+  source_fps?: number;
+}
+
+export interface AnalysisTask {
+  id: number;
+  task_type: string;
+  status: string;
+  source_info: any;
+  source_width?: number;
+  source_height?: number;
+  source_fps?: number;
+  start_time?: string;
+  end_time?: string;
+  created_at: string;
+}
+
+export interface CreateAnalysisTaskResponse {
+  success: boolean;
+  task_id: number;
+  message: string;
+  task: AnalysisTask;
+}
+
+// 創建分析任務的非同步函式
+const createAnalysisTask = async (taskData: AnalysisTaskRequest): Promise<CreateAnalysisTaskResponse> => {
+  const { data } = await apiClient.post('/tasks/create', taskData);
+  return data;
+};
+
+// 創建分析任務的 mutation hook
+export const useCreateAnalysisTask = () => {
+  return useMutation<CreateAnalysisTaskResponse, Error, AnalysisTaskRequest>({
+    mutationFn: createAnalysisTask,
+  });
+};

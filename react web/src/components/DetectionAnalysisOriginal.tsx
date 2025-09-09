@@ -8,7 +8,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
-import { useYoloModelList, useToggleModelStatus, useActiveModels, useVideoUpload, VideoUploadResponse } from "../hooks/react-query-hooks";
+import { 
+  useYoloModelList, 
+  useToggleModelStatus, 
+  useActiveModels, 
+  useVideoUpload, 
+  VideoUploadResponse,
+  useCreateAnalysisTask,
+  AnalysisTaskRequest,
+  CreateAnalysisTaskResponse
+} from "../hooks/react-query-hooks";
 import {
   Brain,
   Upload,
@@ -30,12 +39,14 @@ export function DetectionAnalysisOriginal() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadResult, setUploadResult] = useState<VideoUploadResponse | null>(null);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.8);
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
   const { data: activeModels, refetch: refetchActiveModels } = useActiveModels();
   const toggleModelMutation = useToggleModelStatus();
   const uploadVideoMutation = useVideoUpload();
+  const createTaskMutation = useCreateAnalysisTask();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -135,6 +146,44 @@ export function DetectionAnalysisOriginal() {
     } catch (error) {
       console.error('上傳失敗:', error);
       alert('上傳失敗，請稍後重試');
+    }
+  };
+
+  const handleStartAnalysis = async () => {
+    if (!uploadResult) {
+      alert('請先上傳影片檔案');
+      return;
+    }
+
+    if (!selectedModel) {
+      alert('請選擇要使用的模型');
+      return;
+    }
+
+    try {
+      // 準備分析任務資料
+      const taskData: AnalysisTaskRequest = {
+        task_type: 'video_file',
+        source_info: {
+          file_path: uploadResult.file_path,
+          original_filename: uploadResult.original_name,
+          confidence_threshold: confidenceThreshold,
+        },
+        source_width: parseInt(uploadResult.video_info.resolution.split('x')[0]) || 1920,
+        source_height: parseInt(uploadResult.video_info.resolution.split('x')[1]) || 1080,
+        source_fps: uploadResult.video_info.fps || 25.0,
+      };
+
+      console.log('創建分析任務:', taskData);
+      
+      const result = await createTaskMutation.mutateAsync(taskData);
+      console.log('分析任務創建成功:', result);
+      
+      alert(`分析任務已創建！任務 ID: ${result.task_id}\n狀態: ${result.task.status}`);
+      
+    } catch (error) {
+      console.error('創建分析任務失敗:', error);
+      alert('創建分析任務失敗，請稍後重試');
     }
   };
 
@@ -247,14 +296,16 @@ export function DetectionAnalysisOriginal() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="confidence-threshold">信心度閾值</Label>
-                    <span className="text-sm text-muted-foreground">0.8</span>
+                    <span className="text-sm text-muted-foreground">{confidenceThreshold.toFixed(1)}</span>
                   </div>
                   <input
+                    id="confidence-threshold"
                     type="range"
                     min="0.1"
                     max="1"
                     step="0.1"
-                    defaultValue="0.8"
+                    value={confidenceThreshold}
+                    onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
                     className="w-full"
                   />
                 </div>
@@ -272,7 +323,7 @@ export function DetectionAnalysisOriginal() {
                 {selectedFile && !uploadResult ? (
                   <Button 
                     onClick={handleUpload}
-                    disabled={uploadVideoMutation.isPending || !selectedModel}
+                    disabled={uploadVideoMutation.isPending}
                     className="w-full"
                   >
                     <Upload className="h-4 w-4 mr-2" />
@@ -281,10 +332,11 @@ export function DetectionAnalysisOriginal() {
                 ) : uploadResult ? (
                   <Button 
                     className="w-full" 
-                    disabled={!selectedModel}
+                    disabled={!selectedModel || createTaskMutation.isPending}
+                    onClick={handleStartAnalysis}
                   >
                     <Play className="h-4 w-4 mr-2" />
-                    開始分析
+                    {createTaskMutation.isPending ? '創建任務中...' : '開始分析'}
                   </Button>
                 ) : (
                   <Button 
