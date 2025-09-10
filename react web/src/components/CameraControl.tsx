@@ -598,9 +598,17 @@ export function CameraControl() {
                           <SelectValue placeholder="選擇要串流的攝影機" />
                         </SelectTrigger>
                         <SelectContent>
-                          {cameras.filter(cam => cam.status === "online").map((camera) => (
+                          {cameras.map((camera) => (
                             <SelectItem key={camera.id} value={camera.id}>
-                              {camera.name}
+                              <div className="flex items-center gap-2">
+                                <div 
+                                  className={`w-2 h-2 rounded-full ${
+                                    camera.status === 'active' ? 'bg-green-500' : 
+                                    camera.status === 'inactive' ? 'bg-gray-400' : 'bg-red-500'
+                                  }`}
+                                />
+                                {camera.name}
+                              </div>
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -609,19 +617,67 @@ export function CameraControl() {
                     {selectedCameraData && (
                       <div className="pt-4 border-t space-y-2">
                         <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">IP地址</span>
-                          <span>{selectedCameraData.ip}</span>
+                          <span className="text-muted-foreground">攝影機ID</span>
+                          <span>{selectedCameraData.id}</span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">型號</span>
-                          <span>{selectedCameraData.model}</span>
+                          <span className="text-muted-foreground">名稱</span>
+                          <span>{selectedCameraData.name}</span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">錄影狀態</span>
-                          <Badge variant={selectedCameraData.recording ? "default" : "secondary"}>
-                            {selectedCameraData.recording ? "錄影中" : "未錄影"}
+                          <span className="text-muted-foreground">狀態</span>
+                          <Badge variant={
+                            selectedCameraData.status === 'active' ? "default" : 
+                            selectedCameraData.status === 'inactive' ? "secondary" : "destructive"
+                          }>
+                            {selectedCameraData.status === 'active' ? "啟用" : 
+                             selectedCameraData.status === 'inactive' ? "停用" : "錯誤"}
                           </Badge>
                         </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">攝影機類型</span>
+                          <span>{selectedCameraData.camera_type}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">解析度</span>
+                          <span>{selectedCameraData.resolution}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">幀率</span>
+                          <span>{selectedCameraData.fps} FPS</span>
+                        </div>
+                        {selectedCameraData.ip && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">IP地址</span>
+                            <span>{selectedCameraData.ip}</span>
+                          </div>
+                        )}
+                        {selectedCameraData.model && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">型號</span>
+                            <span>{selectedCameraData.model}</span>
+                          </div>
+                        )}
+                        {selectedCameraData.location && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">位置</span>
+                            <span>{selectedCameraData.location}</span>
+                          </div>
+                        )}
+                        {selectedCameraData.rtsp_url && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">RTSP URL</span>
+                            <span className="text-xs break-all">{selectedCameraData.rtsp_url}</span>
+                          </div>
+                        )}
+                        {selectedCameraData.recording !== undefined && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">錄影狀態</span>
+                            <Badge variant={selectedCameraData.recording ? "default" : "secondary"}>
+                              {selectedCameraData.recording ? "錄影中" : "未錄影"}
+                            </Badge>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
