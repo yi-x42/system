@@ -718,12 +718,8 @@ export function CameraControl() {
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">狀態</span>
-                          <Badge variant={
-                            selectedCameraData.status === 'active' ? "default" : 
-                            selectedCameraData.status === 'inactive' ? "secondary" : "destructive"
-                          }>
-                            {selectedCameraData.status === 'active' ? "啟用" : 
-                             selectedCameraData.status === 'inactive' ? "停用" : "錯誤"}
+                          <Badge variant={getStatusColor(selectedCameraData.status)}>
+                            {getStatusText(selectedCameraData.status)}
                           </Badge>
                         </div>
                         <div className="flex justify-between text-sm">
