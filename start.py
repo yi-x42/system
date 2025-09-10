@@ -41,7 +41,7 @@ def check_critical_packages():
     """檢查關鍵套件"""
     critical_packages = {
         'fastapi': 'FastAPI 框架',
-        'uvicorn': 'ASGI 伺服器',
+        'uvicorn': 'ASGI 伺服器',   
         'jinja2': '模板引擎',
         'psutil': '系統監控',
         'cv2': 'OpenCV 電腦視覺 (攝影機支援)'
