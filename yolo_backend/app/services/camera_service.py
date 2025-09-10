@@ -12,6 +12,10 @@ import threading
 import time
 from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass, field
+from sqlalchemy.orm import Session
+from app.models.database import DataSource
+from app.core.database import SyncSessionLocal
+from datetime import datetime
 
 
 @dataclass
@@ -509,7 +513,7 @@ class Camera:
     rtsp_url: Optional[str] = None
 
 class CameraService:
-    """攝影機管理服務"""
+    """攝影機管理服務 - 使用資料庫持久化存儲"""
     
     _instance = None
     _initialized = False
@@ -522,72 +526,184 @@ class CameraService:
     def __init__(self):
         if not self._initialized:
             self.cameras: Dict[str, Camera] = {}
-            self._initialize_default_cameras()
+            self._load_cameras_from_database()
             CameraService._initialized = True
     
-    def _initialize_default_cameras(self):
-        """初始化預設攝影機"""
-        default_cameras = [
-            Camera(
-                id="cam_001",
-                name="前門攝影機",
-                status="online",
-                camera_type="USB",
-                resolution="1920x1080",
-                fps=30,
-                device_index=0
-            ),
-            Camera(
-                id="cam_002",
-                name="後門攝影機",
-                status="offline",
-                camera_type="Network",
-                resolution="1280x720",
-                fps=25,
-                rtsp_url="rtsp://admin:password@192.168.1.100/stream1"
-            ),
-            Camera(
-                id="cam_003",
-                name="停車場東側",
-                status="online",
-                camera_type="Network",
-                resolution="1920x1080",
-                fps=30,
-                rtsp_url="rtsp://admin:password@192.168.1.101/stream1"
-            ),
-            Camera(
-                id="cam_004",
-                name="停車場西側",
-                status="online",
-                camera_type="Network",
-                resolution="1920x1080",
-                fps=30,
-                rtsp_url="rtsp://admin:password@192.168.1.102/stream1"
-            ),
-            Camera(
-                id="cam_005",
-                name="停車場南側",
-                status="online",
-                camera_type="Network",
-                resolution="1280x720",
-                fps=25,
-                rtsp_url="rtsp://admin:password@192.168.1.103/stream1"
-            ),
-            Camera(
-                id="cam_006",
-                name="大廳攝影機",
-                status="online",
-                camera_type="USB",
-                resolution="1920x1080",
-                fps=30,
-                device_index=1
+    def _get_db_session(self) -> Session:
+        """獲取資料庫會話"""
+        return SyncSessionLocal()
+    
+    def _load_cameras_from_database(self):
+        """從資料庫載入攝影機配置"""
+        try:
+            with self._get_db_session() as db:
+                camera_sources = db.query(DataSource).filter(
+                    DataSource.source_type == 'camera'
+                ).all()
+                
+                api_logger.info(f"從資料庫載入 {len(camera_sources)} 個攝影機配置")
+                
+                for source in camera_sources:
+                    camera = self._convert_datasource_to_camera(source)
+                    if camera:
+                        self.cameras[camera.id] = camera
+                
+                # 如果資料庫中沒有攝影機，初始化一些預設值
+                if not camera_sources:
+                    self._initialize_default_cameras()
+                    
+        except Exception as e:
+            api_logger.error(f"載入攝影機配置失敗: {e}")
+            # 如果資料庫載入失敗，使用預設配置
+            self._initialize_default_cameras()
+    
+    def _convert_datasource_to_camera(self, source: DataSource) -> Optional[Camera]:
+        """將 DataSource 轉換為 Camera 對象"""
+        try:
+            config = source.config or {}
+            
+            # 判斷攝影機類型
+            camera_type = "USB"
+            device_index = None
+            rtsp_url = None
+            
+            if 'device_index' in config:
+                camera_type = "USB"
+                device_index = config['device_index']
+            elif 'rtsp_url' in config or 'ip' in config:
+                camera_type = "Network"
+                rtsp_url = config.get('rtsp_url') or f"rtsp://{config.get('ip')}:{config.get('port', 554)}/stream"
+            
+            return Camera(
+                id=str(source.id),
+                name=source.name,
+                status=source.status,
+                camera_type=camera_type,
+                resolution=config.get('resolution', '1920x1080'),
+                fps=config.get('fps', 30),
+                device_index=device_index,
+                rtsp_url=rtsp_url,
+                group_id=config.get('group_id')
             )
+        except Exception as e:
+            api_logger.error(f"轉換攝影機配置失敗: {e}")
+            return None
+    
+    def _initialize_default_cameras(self):
+        """初始化預設攝影機並保存到資料庫"""
+        default_cameras_data = [
+            {
+                "name": "前門攝影機",
+                "status": "active",
+                "camera_type": "USB",
+                "resolution": "1920x1080",
+                "fps": 30,
+                "device_index": 0
+            },
+            {
+                "name": "後門攝影機",
+                "status": "inactive",
+                "camera_type": "Network",
+                "resolution": "1280x720",
+                "fps": 25,
+                "rtsp_url": "rtsp://admin:password@192.168.1.100/stream1"
+            },
+            {
+                "name": "停車場東側",
+                "status": "active",
+                "camera_type": "Network",
+                "resolution": "1920x1080",
+                "fps": 30,
+                "rtsp_url": "rtsp://admin:password@192.168.1.101/stream1"
+            },
+            {
+                "name": "停車場西側",
+                "status": "active",
+                "camera_type": "Network",
+                "resolution": "1920x1080",
+                "fps": 30,
+                "rtsp_url": "rtsp://admin:password@192.168.1.102/stream1"
+            },
+            {
+                "name": "停車場南側",
+                "status": "active",
+                "camera_type": "Network",
+                "resolution": "1280x720",
+                "fps": 25,
+                "rtsp_url": "rtsp://admin:password@192.168.1.103/stream1"
+            },
+            {
+                "name": "大廳攝影機",
+                "status": "active",
+                "camera_type": "USB",
+                "resolution": "1920x1080",
+                "fps": 30,
+                "device_index": 1
+            }
         ]
         
-        for camera in default_cameras:
-            self.cameras[camera.id] = camera
-        
-        api_logger.info(f"初始化了 {len(default_cameras)} 個預設攝影機")
+        try:
+            with self._get_db_session() as db:
+                for camera_data in default_cameras_data:
+                    # 準備配置數據
+                    config = {
+                        'resolution': camera_data['resolution'],
+                        'fps': camera_data['fps']
+                    }
+                    
+                    if camera_data['camera_type'] == 'USB':
+                        config['device_index'] = camera_data['device_index']
+                    else:  # Network
+                        config['rtsp_url'] = camera_data['rtsp_url']
+                        # 從 RTSP URL 中提取 IP 和端口
+                        if 'rtsp_url' in camera_data:
+                            import re
+                            match = re.search(r'rtsp://.*@([^:/]+)(?::(\d+))?/', camera_data['rtsp_url'])
+                            if match:
+                                config['ip'] = match.group(1)
+                                config['port'] = int(match.group(2)) if match.group(2) else 554
+                    
+                    # 創建 DataSource 記錄
+                    source = DataSource(
+                        source_type='camera',
+                        name=camera_data['name'],
+                        config=config,
+                        status=camera_data['status']
+                    )
+                    db.add(source)
+                    db.flush()  # 刷新以獲取 ID
+                    
+                    # 創建 Camera 對象並添加到內存
+                    camera = Camera(
+                        id=str(source.id),
+                        name=camera_data['name'],
+                        status=camera_data['status'],
+                        camera_type=camera_data['camera_type'],
+                        resolution=camera_data['resolution'],
+                        fps=camera_data['fps'],
+                        device_index=camera_data.get('device_index'),
+                        rtsp_url=camera_data.get('rtsp_url')
+                    )
+                    self.cameras[camera.id] = camera
+                
+                db.commit()
+                api_logger.info(f"初始化並保存了 {len(default_cameras_data)} 個預設攝影機到資料庫")
+                
+        except Exception as e:
+            api_logger.error(f"初始化預設攝影機失敗: {e}")
+            # 如果資料庫操作失敗，至少在內存中創建攝影機
+            for i, camera_data in enumerate(default_cameras_data, 1):
+                camera = Camera(
+                    id=f"cam_{i:03d}",
+                    name=camera_data['name'],
+                    status=camera_data['status'],
+                    camera_type=camera_data['camera_type'],
+                    resolution=camera_data['resolution'],
+                    fps=camera_data['fps'],
+                    device_index=camera_data.get('device_index'),
+                    rtsp_url=camera_data.get('rtsp_url')
+                )
+                self.cameras[camera.id] = camera
     
     async def get_cameras(self) -> List[Camera]:
         """獲取所有攝影機"""
@@ -711,40 +827,83 @@ class CameraService:
         device_index: Optional[int] = None,
         rtsp_url: Optional[str] = None
     ) -> str:
-        """添加新攝影機"""
+        """添加新攝影機並保存到資料庫"""
         try:
-            import uuid
-            camera_id = f"cam_{uuid.uuid4().hex[:8]}"
+            # 準備配置數據
+            config = {
+                'resolution': resolution,
+                'fps': fps
+            }
             
-            camera = Camera(
-                id=camera_id,
-                name=name,
-                status="offline",
-                camera_type=camera_type,
-                resolution=resolution,
-                fps=fps,
-                device_index=device_index,
-                rtsp_url=rtsp_url
-            )
+            if camera_type == 'USB' and device_index is not None:
+                config['device_index'] = device_index
+            elif camera_type == 'Network' and rtsp_url:
+                config['rtsp_url'] = rtsp_url
+                # 從 RTSP URL 中提取 IP 和端口
+                import re
+                match = re.search(r'rtsp://.*@([^:/]+)(?::(\d+))?/', rtsp_url)
+                if match:
+                    config['ip'] = match.group(1)
+                    config['port'] = int(match.group(2)) if match.group(2) else 554
             
-            self.cameras[camera_id] = camera
-            api_logger.info(f"新增攝影機: {name} (ID: {camera_id})")
-            
-            return camera_id
+            # 保存到資料庫
+            with self._get_db_session() as db:
+                source = DataSource(
+                    source_type='camera',
+                    name=name,
+                    config=config,
+                    status='inactive'
+                )
+                db.add(source)
+                db.commit()
+                db.refresh(source)
+                
+                camera_id = str(source.id)
+                
+                # 創建 Camera 對象並添加到內存
+                camera = Camera(
+                    id=camera_id,
+                    name=name,
+                    status="inactive",
+                    camera_type=camera_type,
+                    resolution=resolution,
+                    fps=fps,
+                    device_index=device_index,
+                    rtsp_url=rtsp_url
+                )
+                
+                self.cameras[camera_id] = camera
+                api_logger.info(f"新增攝影機到資料庫: {name} (ID: {camera_id})")
+                
+                return camera_id
             
         except Exception as e:
             api_logger.error(f"添加攝影機失敗: {e}")
             raise
     
     async def remove_camera(self, camera_id: str):
-        """移除攝影機"""
+        """從資料庫和內存中移除攝影機"""
         try:
-            if camera_id in self.cameras:
-                camera_name = self.cameras[camera_id].name
-                del self.cameras[camera_id]
-                api_logger.info(f"移除攝影機: {camera_name} (ID: {camera_id})")
-            else:
+            if camera_id not in self.cameras:
                 raise ValueError(f"攝影機不存在: {camera_id}")
+            
+            camera_name = self.cameras[camera_id].name
+            
+            # 從資料庫中刪除
+            with self._get_db_session() as db:
+                source = db.query(DataSource).filter_by(
+                    id=int(camera_id),
+                    source_type='camera'
+                ).first()
+                
+                if source:
+                    db.delete(source)
+                    db.commit()
+                    api_logger.info(f"從資料庫刪除攝影機: {camera_name} (ID: {camera_id})")
+            
+            # 從內存中刪除
+            del self.cameras[camera_id]
+            api_logger.info(f"從內存移除攝影機: {camera_name} (ID: {camera_id})")
                 
         except Exception as e:
             api_logger.error(f"移除攝影機失敗: {e}")
@@ -787,3 +946,5 @@ class CameraService:
             return camera.rtsp_url
         
         return None
+    
+

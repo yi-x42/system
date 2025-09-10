@@ -588,6 +588,62 @@ async def get_cameras():
         api_logger.error(f"獲取攝影機列表失敗: {e}")
         raise HTTPException(status_code=500, detail=f"攝影機列表獲取失敗: {str(e)}")
 
+@router.post("/cameras")
+async def add_camera(camera_data: dict):
+    """添加新攝影機"""
+    try:
+        camera_service = CameraService()
+        
+        # 提取攝影機數據
+        name = camera_data.get("name")
+        camera_type = camera_data.get("camera_type")
+        resolution = camera_data.get("resolution", "1920x1080")
+        fps = camera_data.get("fps", 30)
+        device_index = camera_data.get("device_index")
+        rtsp_url = camera_data.get("rtsp_url")
+        
+        if not name or not camera_type:
+            raise HTTPException(status_code=400, detail="攝影機名稱和類型為必填項")
+        
+        camera_id = await camera_service.add_camera(
+            name=name,
+            camera_type=camera_type,
+            resolution=resolution,
+            fps=fps,
+            device_index=device_index,
+            rtsp_url=rtsp_url
+        )
+        
+        return {
+            "success": True,
+            "camera_id": camera_id,
+            "message": "攝影機添加成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"添加攝影機失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"攝影機添加失敗: {str(e)}")
+
+@router.delete("/cameras/{camera_id}")
+async def remove_camera(camera_id: str):
+    """刪除攝影機"""
+    try:
+        camera_service = CameraService()
+        await camera_service.remove_camera(camera_id)
+        
+        return {
+            "success": True,
+            "message": "攝影機刪除成功"
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        api_logger.error(f"刪除攝影機失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"攝影機刪除失敗: {str(e)}")
+
 @router.put("/cameras/{camera_id}/toggle")
 async def toggle_camera(camera_id: str):
     """切換攝影機狀態"""
