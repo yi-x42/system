@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>直接串流測試</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px;
+            background: #1f2937;
+            color: white;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .stream-box {
+            border: 2px solid #4f46e5;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            background: #374151;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #6b7280;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #1f2937;
+        }
+        .success { border-left: 4px solid #10b981; }
+        .error { border-left: 4px solid #ef4444; }
+        .info { border-left: 4px solid #3b82f6; }
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #4338ca; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YOLOv11 攝影機串流測試</h1>
+        
+        <div class="status info">
+            <h3>測試說明</h3>
+            <p>此頁面將測試後端攝影機串流API是否正常工作</p>
+            <p>後端地址: <code>http://localhost:8001</code></p>
+            <p>前端地址: <code>http://localhost:3000</code></p>
+        </div>
+
+        <div class="stream-box">
+            <h2>攝影機 0 - 直接串流</h2>
+            <div id="status0" class="status info">正在嘗試連接...</div>
+            <img 
+                id="stream0" 
+                src="http://localhost:8001/api/v1/frontend/cameras/0/stream"
+                alt="攝影機0串流"
+                style="width: 640px; height: 480px; background: #000;"
+            />
+            <div>
+                <button onclick="refreshStream(0)">重新整理串流</button>
+                <button onclick="checkAPI()">檢查API</button>
+                <button onclick="testCameraList()">檢查攝影機列表</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 檢查API狀態
+        async function checkAPI() {
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/health');
+                const data = await response.json();
+                updateStatus(0, 'API狀態: ' + data.status, 'info');
+                console.log('API Health:', data);
+            } catch (error) {
+                updateStatus(0, 'API連接失敗: ' + error.message, 'error');
+            }
+        }
+
+        // 檢查攝影機列表
+        async function testCameraList() {
+            try {
+                const response = await fetch('http://localhost:8001/api/v1/frontend/cameras');
+                const cameras = await response.json();
+                updateStatus(0, `找到 ${cameras.length} 個攝影機`, 'success');
+                console.log('Cameras:', cameras);
+            } catch (error) {
+                updateStatus(0, '攝影機列表獲取失敗: ' + error.message, 'error');
+            }
+        }
+
+        // 重新整理串流
+        function refreshStream(index) {
+            const img = document.getElementById('stream' + index);
+            const timestamp = new Date().getTime();
+            img.src = `http://localhost:8001/api/v1/frontend/cameras/${index}/stream?t=${timestamp}`;
+            updateStatus(index, '重新整理串流...', 'info');
+        }
+
+        // 更新狀態顯示
+        function updateStatus(index, message, type) {
+            const status = document.getElementById('status' + index);
+            status.textContent = message;
+            status.className = 'status ' + type;
+            console.log(`攝影機${index}: ${message}`);
+        }
+
+        // 設置串流事件監聽
+        document.addEventListener('DOMContentLoaded', function() {
+            const img = document.getElementById('stream0');
+            
+            img.onload = function() {
+                updateStatus(0, '串流載入成功！', 'success');
+            };
+            
+            img.onerror = function() {
+                updateStatus(0, '串流載入失敗 - 可能攝影機未連接或後端問題', 'error');
+            };
+            
+            // 自動檢查API
+            setTimeout(checkAPI, 1000);
+            setTimeout(testCameraList, 2000);
+        });
+    </script>
+</body>
+</html>

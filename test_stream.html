@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>攝影機串流測試</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px;
+            background: #1f2937;
+            color: white;
+        }
+        .stream-container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        img {
+            border: 2px solid #4f46e5;
+            border-radius: 8px;
+            max-width: 100%;
+            height: auto;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background: #374151;
+        }
+    </style>
+</head>
+<body>
+    <div class="stream-container">
+        <h1>攝影機串流測試</h1>
+        <div class="status">
+            <p>正在嘗試連接攝影機串流...</p>
+            <p>串流地址: <code>http://localhost:8001/api/v1/frontend/cameras/0/stream</code></p>
+        </div>
+        <img 
+            id="stream" 
+            src="http://localhost:8001/api/v1/frontend/cameras/0/stream"
+            alt="攝影機串流"
+            onload="updateStatus('串流連接成功！', 'green')"
+            onerror="updateStatus('串流連接失敗', 'red')"
+        />
+    </div>
+
+    <script>
+        function updateStatus(message, color) {
+            const status = document.querySelector('.status p');
+            status.textContent = message;
+            status.style.color = color;
+        }
+        
+        // 定期檢查串流狀態
+        setInterval(() => {
+            const img = document.getElementById('stream');
+            const now = new Date().getTime();
+            img.src = `http://localhost:8001/api/v1/frontend/cameras/0/stream?t=${now}`;
+        }, 5000);
+    </script>
+</body>
+</html>

@@ -6,6 +6,8 @@ import {
   useDeleteCamera,
   useCameras,
   useAddCamera,
+  useCameraStreamInfo,
+  useToggleCamera,
   CameraInfo,
   AddCameraRequest
 } from "../hooks/react-query-hooks";
@@ -38,6 +40,104 @@ import {
   AlertCircle,
 } from "lucide-react";
 
+// 視頻串流組件
+interface VideoStreamProps {
+  camera: any | null; // 使用映射後的攝影機數據型別
+  streamInfo: any | null;
+  isLoading: boolean;
+  error: Error | null;
+  onCameraToggle?: (cameraId: string) => void;
+}
+
+function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: VideoStreamProps) {
+  // 如果沒有選擇攝影機
+  if (!camera) {
+    return (
+      <div className="text-center text-white h-full flex items-center justify-center">
+        <div>
+          <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
+          <p>選擇攝影機以檢視即時影像</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 如果正在載入串流資訊
+  if (isLoading) {
+    return (
+      <div className="text-center text-white h-full flex items-center justify-center">
+        <div>
+          <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+          <p>載入串流資訊中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 如果有錯誤或攝影機離線
+  if (error || !streamInfo) {
+    return (
+      <div className="text-center text-white h-full flex items-center justify-center">
+        <div>
+          <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
+          <h3 className="text-lg font-medium mb-2">{camera.name}</h3>
+          <p className="text-sm text-gray-300 mb-2">
+            {error ? "串流載入失敗" : "攝影機離線"}
+          </p>
+          {error && (
+            <p className="text-xs text-red-400 mb-4">{error.message}</p>
+          )}
+          <Badge variant="secondary" className="mb-4">
+            {camera.resolution} • {camera.fps} FPS
+          </Badge>
+          <p className="text-xs text-gray-400 mb-4">
+            狀態: {(camera.status === 'active' || camera.status === 'online') ? '啟用' : '停用'}
+          </p>
+          
+          {/* 啟用攝影機按鈕 */}
+          {(camera.status !== 'active' && camera.status !== 'online') && onCameraToggle && (
+            <Button
+              onClick={() => onCameraToggle(camera.id)}
+              className="bg-blue-500 hover:bg-blue-600 text-white"
+            >
+              啟用攝影機
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 如果有串流，顯示即時影像
+  return (
+    <div className="relative h-full">
+      <img
+        src={`http://localhost:8001${streamInfo.stream_url}`}
+        alt={`${camera.name} 即時串流`}
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          console.error('串流載入失敗:', e);
+          e.currentTarget.style.display = 'none';
+        }}
+        onLoad={() => {
+          console.log('串流載入成功');
+        }}
+      />
+      
+      {/* 串流資訊覆蓋層 */}
+      <div className="absolute top-2 left-2 bg-black/70 text-white px-3 py-1 rounded-md text-sm flex items-center gap-2">
+        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+        <span>{camera.name} • {streamInfo.resolution} • {streamInfo.fps}fps</span>
+      </div>
+      
+      {/* 串流狀態指示器 */}
+      <div className="absolute top-2 right-2 bg-green-500/80 text-white px-2 py-1 rounded-md text-xs">
+        LIVE
+      </div>
+    </div>
+  );
+}
+
 export function CameraControl() {
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -62,6 +162,7 @@ export function CameraControl() {
   // 使用真實的攝影機數據從後端API
   const { data: rawCameras = [], isLoading: camerasLoading, refetch: refetchCameras } = useCameras();
   const addCameraMutation = useAddCamera();
+  const toggleCameraMutation = useToggleCamera();
 
   // 映射後端數據到前端UI格式
   const cameras = rawCameras.map(camera => ({
@@ -91,8 +192,10 @@ export function CameraControl() {
   const getStatusText = (status: string) => {
     switch (status) {
       case "online":
+      case "active":
         return "線上";
       case "offline":
+      case "inactive":
         return "離線";
       case "warning":
         return "警告";
@@ -232,6 +335,22 @@ export function CameraControl() {
     }
   };
 
+  // 切換攝影機狀態
+  const handleCameraToggle = async (cameraId: string) => {
+    try {
+      await toggleCameraMutation.mutateAsync(cameraId);
+      // 重新取得攝影機列表以更新狀態
+      refetchCameras();
+      // 如果是當前選中的攝影機，也重新載入串流資訊
+      if (cameraId === selectedCamera) {
+        // 串流資訊會自動重新載入，因為我們有dependency在攝影機狀態上
+      }
+    } catch (error) {
+      console.error('切換攝影機狀態失敗:', error);
+      alert('切換攝影機狀態失敗，請稍後再試');
+    }
+  };
+
   // 開啟編輯對話框
   const openEditDialog = (camera: any) => {
     setEditingCamera(camera);
@@ -281,6 +400,9 @@ export function CameraControl() {
   const selectedCameraData = selectedCamera 
     ? cameras.find(cam => cam.id === selectedCamera) 
     : null;
+
+  // 取得攝影機串流資訊
+  const { data: streamInfo, isLoading: streamLoading, error: streamError } = useCameraStreamInfo(selectedCamera);
 
   return (
     <div className="space-y-6">
@@ -538,43 +660,13 @@ export function CameraControl() {
               </CardHeader>
               <CardContent>
                 <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
-                  {selectedCameraData && selectedCameraData.status === "online" ? (
-                    <div className="relative h-full">
-                      {/* 模擬影像串流 */}
-                      <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
-                        <div className="text-center text-white space-y-4">
-                          <div className="relative">
-                            <Camera className="h-16 w-16 mx-auto mb-4 opacity-80" />
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                          </div>
-                          <div>
-                            <h3>{selectedCameraData.name}</h3>
-                            <p className="text-sm text-gray-300">{selectedCameraData.location}</p>
-                            <p className="text-xs text-gray-400 mt-2">
-                              {selectedCameraData.resolution} • {selectedCameraData.fps} FPS
-                            </p>
-                          </div>
-                          {isStreaming && (
-                            <div className="flex items-center justify-center gap-2 text-sm">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                              <span>實況串流中</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {/* 模擬影像噪點效果 */}
-                      <div className="absolute inset-0 opacity-10 pointer-events-none">
-                        <div className="w-full h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZGVmcz4KICAgIDxwYXR0ZXJuIGlkPSJub2lzZSIgd2lkdGg9IjQiIGhlaWdodD0iNCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxyZWN0IHdpZHRoPSI0IiBoZWlnaHQ9IjQiIGZpbGw9IiNmZmYiLz4KICAgICAgPGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjAuNSIgZmlsbD0iIzAwMCIvPgogICAgICA8Y2lyY2xlIGN4PSIzIiBjeT0iMyIgcj0iMC41IiBmaWxsPSIjMDAwIi8+CiAgICA8L3BhdHRlcm4+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSJ1cmwoI25vaXNlKSIvPgo8L3N2Zz4=')]"></div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center text-white h-full flex items-center justify-center">
-                      <div>
-                        <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                        <p>{selectedCameraData ? "攝影機離線" : "選擇攝影機以檢視即時影像"}</p>
-                      </div>
-                    </div>
-                  )}
+                  <VideoStream
+                    camera={selectedCameraData}
+                    streamInfo={streamInfo}
+                    isLoading={streamLoading}
+                    error={streamError}
+                    onCameraToggle={handleCameraToggle}
+                  />
                 </div>
                 
               </CardContent>

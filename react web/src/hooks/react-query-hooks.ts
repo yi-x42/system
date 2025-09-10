@@ -423,3 +423,67 @@ export const useDeleteCamera = () => {
     mutationFn: deleteCamera,
   });
 };
+
+// 攝影機串流相關介面和Hook
+export interface CameraStreamInfo {
+  camera_id: string;
+  stream_url: string;
+  is_active: boolean;
+  resolution: string;
+  fps: number;
+}
+
+// 檢查攝影機是否有可用串流
+export const useCameraStreamInfo = (cameraId: string | null) => {
+  return useQuery<CameraStreamInfo, Error>({
+    queryKey: ['camera-stream', cameraId],
+    queryFn: async (): Promise<CameraStreamInfo> => {
+      if (!cameraId) throw new Error('Camera ID is required');
+      
+      // 檢查攝影機是否存在
+      const cameras = await fetchCameras();
+      const camera = cameras.find(c => c.id === cameraId);
+      
+      if (!camera) {
+        throw new Error('Camera not found');
+      }
+      
+      // 對於USB攝影機，不管狀態如何都嘗試串流
+      // 因為資料庫狀態可能不準確，物理設備可能仍然可用
+
+      // 對於本地USB攝影機，使用索引0進行串流測試
+      if (camera.camera_type === 'USB' || camera.device_index !== undefined) {
+        // 使用攝影機的 device_index 或預設為 0
+        const cameraIndex = camera.device_index !== undefined ? camera.device_index : 0;
+        return {
+          camera_id: cameraId,
+          stream_url: `/api/v1/frontend/cameras/${cameraIndex}/stream`,
+          is_active: true,
+          resolution: camera.resolution,
+          fps: camera.fps
+        };
+      } else {
+        throw new Error('僅支援本地USB攝影機串流');
+      }
+    },
+    enabled: !!cameraId,
+    retry: false,
+    staleTime: 5000, // 5 seconds
+  });
+};
+
+// 切換攝影機狀態的Hook
+export interface ToggleCameraResponse {
+  camera_id: string;
+  status: string;
+  message: string;
+}
+
+export const useToggleCamera = () => {
+  return useMutation<ToggleCameraResponse, Error, string>({
+    mutationFn: async (cameraId: string): Promise<ToggleCameraResponse> => {
+      const { data } = await apiClient.put(`/frontend/cameras/${cameraId}/toggle`);
+      return data;
+    },
+  });
+};
