@@ -37,6 +37,71 @@ export const useSystemStats = () => {
   });
 };
 
+// 攝影機資料介面
+export interface CameraInfo {
+  id: string;
+  name: string;
+  status: string;
+  camera_type: string;
+  resolution: string;
+  fps: number;
+  group_id?: string;
+  device_index?: number;
+  rtsp_url?: string;
+  // 為了與現有組件兼容，添加額外欄位
+  location?: string;
+  recording?: boolean;
+  nightVision?: boolean;
+  motionDetection?: boolean;
+  ip?: string;
+  model?: string;
+}
+
+// 獲取攝影機列表的非同步函式
+const fetchCameras = async (): Promise<CameraInfo[]> => {
+  const { data } = await apiClient.get('/frontend/cameras');
+  return data;
+};
+
+// 攝影機列表的 hook
+export const useCameras = () => {
+  return useQuery<CameraInfo[], Error>({
+    queryKey: ['cameras'],
+    queryFn: fetchCameras,
+    refetchOnWindowFocus: false,
+    staleTime: 30000, // 30 seconds
+  });
+};
+
+// 添加攝影機的介面
+export interface AddCameraRequest {
+  name: string;
+  camera_type: string;
+  resolution: string;
+  fps: number;
+  device_index?: number;
+  rtsp_url?: string;
+}
+
+export interface AddCameraResponse {
+  success: boolean;
+  camera_id: string;
+  message: string;
+}
+
+// 添加攝影機的非同步函式
+const addCamera = async (cameraData: AddCameraRequest): Promise<AddCameraResponse> => {
+  const { data } = await apiClient.post('/frontend/cameras', cameraData);
+  return data;
+};
+
+// 添加攝影機的 hook
+export const useAddCamera = () => {
+  return useMutation<AddCameraResponse, Error, AddCameraRequest>({
+    mutationFn: addCamera,
+  });
+};
+
 // 定義攝影機掃描結果的結構
 export interface CameraDevice {
   index: number;

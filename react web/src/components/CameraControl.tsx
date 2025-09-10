@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { useScanCameras, CameraDevice, useDeleteCamera } from "../hooks/react-query-hooks";
+import { 
+  useScanCameras, 
+  CameraDevice, 
+  useDeleteCamera,
+  useCameras,
+  useAddCamera,
+  CameraInfo,
+  AddCameraRequest
+} from "../hooks/react-query-hooks";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -51,48 +59,21 @@ export function CameraControl() {
   const [activeTab, setActiveTab] = useState("device-list");
   const [isStreaming, setIsStreaming] = useState(false);
 
-  // 模擬攝影機數據
-  const [cameras, setCameras] = useState([
-    {
-      id: "cam_001",
-      name: "大門入口",
-      location: "1樓大廳",
-      status: "online",
-      resolution: "1920x1080",
-      fps: 30,
-      recording: true,
-      nightVision: true,
-      motionDetection: true,
-      ip: "192.168.1.101",
-      model: "HC-IPC-D221H",
-    },
-    {
-      id: "cam_002",
-      name: "停車場",
-      location: "戶外停車區",
-      status: "online",
-      resolution: "2560x1440",
-      fps: 25,
-      recording: true,
-      nightVision: true,
-      motionDetection: false,
-      ip: "192.168.1.102",
-      model: "HC-IPC-B621H",
-    },
-    {
-      id: "cam_003",
-      name: "後門出口",
-      location: "1樓後門",
-      status: "offline",
-      resolution: "1920x1080",
-      fps: 30,
-      recording: false,
-      nightVision: false,
-      motionDetection: true,
-      ip: "192.168.1.103",
-      model: "HC-IPC-D221H",
-    },
-  ]);
+  // 使用真實的攝影機數據從後端API
+  const { data: rawCameras = [], isLoading: camerasLoading, refetch: refetchCameras } = useCameras();
+  const addCameraMutation = useAddCamera();
+
+  // 映射後端數據到前端UI格式
+  const cameras = rawCameras.map(camera => ({
+    ...camera,
+    // 添加前端UI需要的欄位，如果後端沒有則提供預設值
+    location: camera.group_id || "未指定位置",
+    ip: camera.device_index !== undefined ? `本機設備 #${camera.device_index}` : camera.rtsp_url || "未知",
+    model: camera.camera_type === "USB" ? "本機攝影機" : "網路攝影機",
+    recording: false, // 預設值，可以從其他API獲取
+    nightVision: false, // 預設值
+    motionDetection: false, // 預設值
+  }));
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -203,7 +184,7 @@ export function CameraControl() {
     }
   };
 
-  const addCameraToSystem = (device: any) => {
+  const addCameraToSystem = async (device: any) => {
     // 將掃描到的設備添加到系統中
     console.log("Adding camera to system:", device);
     
@@ -225,12 +206,27 @@ export function CameraControl() {
         backend: device.backend
       };
       
-      setCameras(prevCameras => [...prevCameras, newCamera]);
+      // 使用API新增攝影機
+      try {
+        const cameraData: AddCameraRequest = {
+          name: newCamera.name,
+          camera_type: "USB",
+          resolution: newCamera.resolution,
+          fps: newCamera.fps,
+          device_index: device.cameraIndex
+        };
+        
+        await addCameraMutation.mutateAsync(cameraData);
+        // 重新取得攝影機列表
+        refetchCameras();
+        
+        // 關閉掃描結果對話框
+        setShowScanResults(false);
       
-      // 關閉掃描結果對話框
-      setShowScanResults(false);
-      
-      console.log("已新增攝影機:", newCamera);
+        console.log("已新增攝影機:", newCamera);
+      } catch (error) {
+        console.error("新增攝影機失敗:", error);
+      }
     } else {
       console.log("設備資料不完整，無法新增");
     }
@@ -245,15 +241,10 @@ export function CameraControl() {
   };
 
   // 儲存攝影機編輯
-  const saveEditCamera = () => {
+  const saveEditCamera = async () => {
     if (editingCamera) {
-      setCameras(prevCameras => 
-        prevCameras.map(camera => 
-          camera.id === editingCamera.id 
-            ? { ...camera, name: editCameraName, location: editCameraLocation }
-            : camera
-        )
-      );
+      // TODO: 實現攝影機編輯API調用
+      console.log("編輯攝影機功能待實現");
       setIsEditDialogOpen(false);
       setEditingCamera(null);
       setEditCameraName("");
@@ -273,10 +264,8 @@ export function CameraControl() {
     if (window.confirm('確定要刪除這個攝影機配置嗎？')) {
       try {
         await deleteCameraMutation.mutateAsync(cameraId);
-        // 從本地狀態中移除攝影機
-        setCameras(prevCameras => 
-          prevCameras.filter(camera => camera.id !== cameraId)
-        );
+        // 重新取得攝影機列表
+        refetchCameras();
         // 如果刪除的是當前選中的攝影機，清除選擇
         if (selectedCamera === cameraId) {
           setSelectedCamera(null);
