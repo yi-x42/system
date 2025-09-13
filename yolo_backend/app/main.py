@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     main_logger.info(f"啟動 {settings.app_name} v{settings.app_version}")
     
+    # 抑制 ultralytics 的詳細輸出
+    import logging
+    ultralytics_logger = logging.getLogger('ultralytics')
+    ultralytics_logger.setLevel(logging.WARNING)  # 只顯示警告和錯誤
+    main_logger.info("✅ 已設置 ultralytics 日誌級別為 WARNING")
+    
     # 初始化全域異步隊列管理器
     app.state.queue_manager = AsyncQueueManager()
     app.state.queue_manager.start()

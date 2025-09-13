@@ -59,6 +59,17 @@ class YOLOService:
         self._device: str = settings.device
         self._initialized = True
         
+        # 抑制 ultralytics 輸出
+        import logging
+        import os
+        
+        # 設置 ultralytics 日誌級別
+        ultralytics_logger = logging.getLogger('ultralytics')
+        ultralytics_logger.setLevel(logging.WARNING)
+        
+        # 設置環境變量來抑制 YOLO 輸出
+        os.environ['YOLO_VERBOSE'] = 'False'
+        
         # 線程池執行器，用於同步推論操作
         self.executor = ThreadPoolExecutor(max_workers=settings.workers)
         
@@ -127,7 +138,15 @@ class YOLOService:
             
             # 預熱模型（執行一次虛擬推論）
             dummy_input = np.zeros((640, 640, 3), dtype=np.uint8)
-            model.predict(dummy_input, verbose=False, save=False, show=False)
+            model.predict(
+                dummy_input, 
+                verbose=False, 
+                save=False, 
+                show=False,
+                stream=False,
+                plots=False,
+                visualize=False
+            )
             
             return model
     
@@ -244,6 +263,9 @@ class YOLOService:
                 verbose=False,
                 save=False,
                 show=False,
+                stream=False,
+                plots=False,
+                visualize=False,
                 max_det=max_detections
             )
             

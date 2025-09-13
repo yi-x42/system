@@ -625,14 +625,28 @@ async def start_realtime_analysis(
         
         # 2. 驗證模型
         model_files = []
-        models_dir = "yolo_backend"
-        for file in os.listdir(models_dir):
-            if file.endswith(('.pt', '.onnx')):
+        # 使用正確的模型目錄路徑
+        import os
+        from pathlib import Path
+        
+        # 獲取 yolo_backend 根目錄路徑
+        current_dir = Path(__file__).parent.parent.parent.parent  # 從 app/api/v1/ 回到 yolo_backend/
+        models_dir = current_dir
+        
+        api_logger.info(f"查找模型目錄: {models_dir}")
+        
+        if not models_dir.exists():
+            raise HTTPException(status_code=500, detail=f"模型目錄不存在: {models_dir}")
+            
+        for file in models_dir.iterdir():
+            if file.is_file() and file.suffix in ['.pt', '.onnx']:
                 model_files.append({
-                    "id": file.replace('.pt', '').replace('.onnx', ''),
-                    "filename": file,
-                    "path": os.path.join(models_dir, file)
+                    "id": file.stem,  # 檔案名稱不含副檔名
+                    "filename": file.name,
+                    "path": str(file)
                 })
+                
+        api_logger.info(f"找到 {len(model_files)} 個模型檔案: {[m['filename'] for m in model_files]}")
         
         model_info = None
         for model in model_files:

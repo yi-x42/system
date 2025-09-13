@@ -487,3 +487,35 @@ export const useToggleCamera = () => {
     },
   });
 };
+
+// 即時分析相關介面
+export interface RealtimeAnalysisRequest {
+  task_name: string;
+  camera_id: string;
+  model_id: string;
+  confidence?: number;
+  iou_threshold?: number;
+  description?: string;
+}
+
+export interface RealtimeAnalysisResponse {
+  task_id: string;
+  status: string;
+  message: string;
+  camera_info: any;
+  model_info: any;
+  created_at: string;
+}
+
+// 開始即時分析的非同步函式
+const startRealtimeAnalysis = async (requestData: RealtimeAnalysisRequest): Promise<RealtimeAnalysisResponse> => {
+  const { data } = await apiClient.post('/frontend/analysis/start-realtime', requestData);
+  return data;
+};
+
+// 開始即時分析的Hook
+export const useStartRealtimeAnalysis = () => {
+  return useMutation<RealtimeAnalysisResponse, Error, RealtimeAnalysisRequest>({
+    mutationFn: startRealtimeAnalysis,
+  });
+};

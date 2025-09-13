@@ -21,7 +21,9 @@ import {
   useVideoList,
   VideoFileInfo,
   useDeleteVideo,
-  useCameras
+  useCameras,
+  useStartRealtimeAnalysis,
+  RealtimeAnalysisRequest
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -48,6 +50,11 @@ export function DetectionAnalysisOriginal() {
   const [uploadResult, setUploadResult] = useState<VideoUploadResponse | null>(null);
   const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.5);
   const [selectedVideo, setSelectedVideo] = useState<VideoFileInfo | null>(null);
+  
+  // 即時分析相關狀態
+  const [selectedCamera, setSelectedCamera] = useState<string>("");
+  const [realtimeModel, setRealtimeModel] = useState<string>("");
+  const [isRealtimeAnalysisRunning, setIsRealtimeAnalysisRunning] = useState(false);
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
@@ -59,6 +66,7 @@ export function DetectionAnalysisOriginal() {
   const createTaskMutation = useCreateAnalysisTask();
   const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
   const deleteVideoMutation = useDeleteVideo();
+  const startRealtimeAnalysisMutation = useStartRealtimeAnalysis();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -259,6 +267,44 @@ export function DetectionAnalysisOriginal() {
     } catch (error) {
       console.error('刪除影片失敗:', error);
       alert('刪除影片失敗，請稍後重試');
+    }
+  };
+
+  // 開始即時分析的處理函數
+  const handleStartRealtimeAnalysis = async () => {
+    if (!selectedCamera) {
+      alert('請選擇攝影機');
+      return;
+    }
+
+    if (!realtimeModel) {
+      alert('請選擇YOLO模型');
+      return;
+    }
+
+    try {
+      setIsRealtimeAnalysisRunning(true);
+      
+      const requestData: RealtimeAnalysisRequest = {
+        task_name: `即時分析_${new Date().toLocaleString()}`,
+        camera_id: selectedCamera,
+        model_id: realtimeModel,
+        confidence: confidenceThreshold,
+        iou_threshold: 0.45,
+        description: "前端發起的即時分析任務"
+      };
+
+      console.log('開始即時分析:', requestData);
+      
+      const result = await startRealtimeAnalysisMutation.mutateAsync(requestData);
+      console.log('即時分析已開始:', result);
+      
+      alert(`即時分析已開始！\n任務 ID: ${result.task_id}\n狀態: ${result.status}\n${result.message}`);
+      
+    } catch (error) {
+      console.error('開始即時分析失敗:', error);
+      alert('開始即時分析失敗，請稍後重試');
+      setIsRealtimeAnalysisRunning(false);
     }
   };
 
@@ -584,7 +630,7 @@ export function DetectionAnalysisOriginal() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="camera-select">選擇攝影機</Label>
-                    <Select>
+                    <Select value={selectedCamera} onValueChange={setSelectedCamera}>
                       <SelectTrigger>
                         <SelectValue placeholder={isCamerasLoading ? "載入攝影機列表中..." : "選擇要分析的攝影機"} />
                       </SelectTrigger>
@@ -613,7 +659,7 @@ export function DetectionAnalysisOriginal() {
 
                   <div>
                     <Label htmlFor="analysis-model">分析模型</Label>
-                    <Select>
+                    <Select value={realtimeModel} onValueChange={setRealtimeModel}>
                       <SelectTrigger>
                         <SelectValue placeholder="選擇分析模型" />
                       </SelectTrigger>
@@ -642,9 +688,13 @@ export function DetectionAnalysisOriginal() {
                     
                   </div>
 
-                  <Button className="w-full">
+                  <Button 
+                    className="w-full" 
+                    onClick={handleStartRealtimeAnalysis}
+                    disabled={isRealtimeAnalysisRunning || startRealtimeAnalysisMutation.isPending}
+                  >
                     <Activity className="h-4 w-4 mr-2" />
-                    開始即時分析
+                    {isRealtimeAnalysisRunning || startRealtimeAnalysisMutation.isPending ? '分析中...' : '開始即時分析'}
                   </Button>
                 </div>
 
