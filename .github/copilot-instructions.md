@@ -181,3 +181,5 @@ python simple_api_test.py
 再把react網站的模擬數據替換為真實功能的時後 不要去改變整體排版 希望照著原有的架構下去做變更
 
 當我在使用Copilot Ask時請回答我文字內容而不是程式碼
+
+目前使用的前端網頁是 React 前端網站 :http://localhost:3000/

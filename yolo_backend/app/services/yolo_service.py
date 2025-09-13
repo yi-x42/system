@@ -227,6 +227,41 @@ class YOLOService:
             })
             raise InferenceException(f"推論失敗: {str(e)}")
     
+    def predict_frame(self, frame: np.ndarray, conf_threshold: float = None, iou_threshold: float = None) -> List[Dict[str, Any]]:
+        """
+        同步預測單一幀（適用於即時檢測）
+        
+        Args:
+            frame: OpenCV 圖像幀（numpy array）
+            conf_threshold: 信心值閾值
+            iou_threshold: IOU 閾值
+            
+        Returns:
+            List[Dict]: 檢測結果列表
+        """
+        try:
+            if self._model is None:
+                raise ModelNotLoadedException("模型尚未載入")
+                
+            # 使用預設值
+            conf = conf_threshold if conf_threshold is not None else 0.5
+            iou = iou_threshold if iou_threshold is not None else 0.45
+            
+            # 調用同步預測
+            results = self._predict_sync(
+                image_data=frame,
+                conf_threshold=conf,
+                iou_threshold=iou,
+                max_detections=100  # 預設最大檢測數量
+            )
+            
+            # 返回檢測結果
+            return results.get("detections", [])
+            
+        except Exception as e:
+            print(f"❌ 幀預測失敗: {e}")
+            return []
+    
     def _predict_sync(self, 
                      image_data: Union[bytes, np.ndarray, str],
                      conf_threshold: float,

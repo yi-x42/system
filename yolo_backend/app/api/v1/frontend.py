@@ -660,21 +660,21 @@ async def start_realtime_analysis(
         if not os.path.exists(model_info["path"]):
             raise HTTPException(status_code=400, detail=f"模型檔案不存在: {model_info['path']}")
         
-        # 3. 獲取攝影機解析度資訊
+        # 3. 獲取攝影機解析度資訊 (使用共享攝影機流管理器)
         camera_width = 640
         camera_height = 480
         camera_fps = 30.0
         
         try:
-            import cv2
+            from app.services.camera_stream_manager import camera_stream_manager
             if camera_info["camera_type"] == "USB":
                 device_index = camera_info.get("device_index", 0)
-                cap = cv2.VideoCapture(device_index)
-                if cap.isOpened():
-                    camera_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    camera_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    camera_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-                    cap.release()
+                # 使用共享攝影機流管理器獲取解析度
+                resolution_info = camera_stream_manager.get_camera_resolution(device_index)
+                if resolution_info:
+                    camera_width = resolution_info.get("width", 640)
+                    camera_height = resolution_info.get("height", 480)
+                    camera_fps = resolution_info.get("fps", 30.0)
                     api_logger.info(f"攝影機解析度: {camera_width}x{camera_height}@{camera_fps}fps")
         except Exception as e:
             api_logger.warning(f"獲取攝影機解析度失敗，使用預設值: {e}")
@@ -760,19 +760,7 @@ async def get_cameras():
     try:
         camera_service = CameraService()
         cameras = await camera_service.get_cameras()
-        
-        return [
-            CameraInfo(
-                id=camera.id,
-                name=camera.name,
-                status=camera.status,
-                camera_type=camera.camera_type,
-                resolution=camera.resolution,
-                fps=camera.fps,
-                group_id=camera.group_id
-            )
-            for camera in cameras
-        ]
+        return cameras
         
     except Exception as e:
         api_logger.error(f"獲取攝影機列表失敗: {e}")
@@ -853,10 +841,10 @@ async def toggle_camera(camera_id: str):
 
 @router.post("/cameras/scan")
 async def scan_cameras():
-    """超快速掃描可用攝影機"""
+    """超快速掃描可用攝影機 (使用攝影機流管理器避免衝突)"""
     try:
-        camera_service = CameraService()
-        cameras = await camera_service.scan_cameras()
+        from app.services.camera_stream_manager import camera_stream_manager
+        cameras = camera_stream_manager.detect_available_cameras()
         
         return {
             "message": f"掃描完成，發現 {len(cameras)} 個攝影機",
@@ -867,57 +855,40 @@ async def scan_cameras():
         api_logger.error(f"掃描攝影機失敗: {e}")
         raise HTTPException(status_code=500, detail=f"攝影機掃描失敗: {str(e)}")
 
-@router.delete("/cameras/{camera_id}")
-async def remove_camera(camera_id: str):
-    """刪除攝影機配置"""
-    try:
-        camera_service = CameraService()
-        await camera_service.remove_camera(camera_id)
-        
-        return {
-            "message": f"攝影機 {camera_id} 已成功刪除",
-            "camera_id": camera_id
-        }
-        
-    except Exception as e:
-        api_logger.error(f"刪除攝影機失敗: {e}")
-        raise HTTPException(status_code=500, detail=f"攝影機刪除失敗: {str(e)}")
-
 @router.get("/cameras/{camera_index}/preview")
 async def get_camera_preview(camera_index: int):
-    """獲取攝影機即時預覽影像（JPEG格式）"""
+    """獲取攝影機即時預覽影像（JPEG格式）- 使用共享視訊流"""
     try:
         from fastapi.responses import Response
-        import io
+        from app.services.camera_stream_manager import camera_stream_manager
         import cv2
         
-        # 直接創建攝影機連接進行即時預覽
-        cap = cv2.VideoCapture(camera_index)
+        camera_id = f"camera_{camera_index}"
         
-        if not cap.isOpened():
-            raise HTTPException(status_code=404, detail=f"攝影機 {camera_index} 無法開啟")
+        # 確保攝影機流正在運行
+        if not camera_stream_manager.is_stream_running(camera_id):
+            # 嘗試啟動流
+            success = camera_stream_manager.start_stream(camera_id, camera_index)
+            if not success:
+                raise HTTPException(status_code=404, detail=f"攝影機 {camera_index} 無法開啟")
         
-        try:
-            # 讀取當前影格
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                raise HTTPException(status_code=500, detail=f"攝影機 {camera_index} 無法讀取影格")
-            
-            # 轉換為JPEG
-            _, jpeg_buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            
-            return Response(
-                content=jpeg_buffer.tobytes(),
-                media_type="image/jpeg",
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0"
-                }
-            )
-            
-        finally:
-            cap.release()
+        # 獲取最新幀
+        latest_frame = camera_stream_manager.get_latest_frame(camera_id)
+        if latest_frame is None:
+            raise HTTPException(status_code=500, detail=f"攝影機 {camera_index} 無法讀取影格")
+        
+        # 轉換為JPEG
+        _, jpeg_buffer = cv2.imencode('.jpg', latest_frame.frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        
+        return Response(
+            content=jpeg_buffer.tobytes(),
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
         
     except HTTPException:
         raise
@@ -927,36 +898,86 @@ async def get_camera_preview(camera_index: int):
 
 @router.get("/cameras/{camera_index}/stream")
 async def camera_stream(camera_index: int):
-    """攝影機即時串流（MJPEG格式）"""
+    """攝影機即時串流（MJPEG格式）- 使用共享視訊流"""
     try:
         from fastapi.responses import StreamingResponse
+        from app.services.camera_stream_manager import camera_stream_manager, StreamConsumer, FrameData
         import cv2
-        import time
+        import asyncio
+        import threading
+        import queue
         
-        def generate_frames():
-            cap = cv2.VideoCapture(camera_index)
-            if not cap.isOpened():
-                return
-            
+        camera_id = f"camera_{camera_index}"
+        
+        # 檢查攝影機流狀態並記錄調試信息
+        is_running = camera_stream_manager.is_stream_running(camera_id)
+        api_logger.info(f"攝影機串流請求: {camera_id}, 當前是否運行: {is_running}")
+        
+        # 如果攝影機流未運行，嘗試啟動
+        if not is_running:
+            api_logger.info(f"嘗試啟動攝影機流: {camera_id} (設備索引: {camera_index})")
+            success = camera_stream_manager.start_stream(camera_id, camera_index)
+            if not success:
+                api_logger.error(f"攝影機流啟動失敗: {camera_id}")
+                raise HTTPException(status_code=404, detail=f"攝影機 {camera_index} 無法開啟，可能正被其他應用使用")
+        else:
+            api_logger.info(f"使用現有攝影機流: {camera_id}")
+        
+        # 使用同步佇列來避免事件循環問題
+        import queue
+        frame_queue = queue.Queue(maxsize=5)
+        
+        def frame_callback(frame_data: FrameData):
+            """接收新幀的回調函數"""
+            try:
+                # 使用同步佇列，非阻塞方式放入
+                if not frame_queue.full():
+                    frame_queue.put_nowait(frame_data)
+            except queue.Full:
+                # 如果佇列滿了，移除最舊的幀再放入新的
+                try:
+                    frame_queue.get_nowait()
+                    frame_queue.put_nowait(frame_data)
+                except queue.Empty:
+                    pass
+            except Exception as e:
+                api_logger.error(f"幀回調錯誤: {e}")
+        
+        # 建立消費者
+        consumer_id = f"stream_{camera_index}_{id(frame_callback)}"
+        consumer = StreamConsumer(consumer_id, frame_callback)
+        
+        # 註冊消費者
+        camera_stream_manager.add_consumer(camera_id, consumer)
+        
+        async def generate_frames():
             try:
                 while True:
-                    ret, frame = cap.read()
-                    if not ret:
+                    try:
+                        # 從同步佇列獲取幀，使用短超時避免阻塞
+                        try:
+                            frame_data = frame_queue.get(timeout=0.1)
+                        except queue.Empty:
+                            # 如果沒有新幀，等待一小段時間再繼續
+                            await asyncio.sleep(0.03)  # 約30FPS
+                            continue
+                        
+                        # 編碼為JPEG
+                        _, jpeg_buffer = cv2.imencode('.jpg', frame_data.frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        
+                        # MJPEG串流格式
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' +
+                               jpeg_buffer.tobytes() + b'\r\n')
+                        
+                    except Exception as e:
+                        api_logger.error(f"幀生成錯誤: {e}")
                         break
-                    
-                    # 編碼為JPEG
-                    _, jpeg_buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    
-                    # MJPEG串流格式
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' +
-                           jpeg_buffer.tobytes() + b'\r\n')
-                    
-                    # 控制幀率（約30fps）
-                    time.sleep(0.033)
-                    
+                        
             finally:
-                cap.release()
+                # 清理：移除消費者
+                camera_stream_manager.remove_consumer(camera_id, consumer_id)
+                api_logger.info(f"攝影機串流 {camera_index} 已清理")
         
         return StreamingResponse(
             generate_frames(),
@@ -964,12 +985,17 @@ async def camera_stream(camera_index: int):
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
-                "Expires": "0"
+                "Expires": "0",
+                "Connection": "keep-alive"
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        api_logger.error(f"掃描攝影機失敗: {e}")
+        api_logger.error(f"攝影機串流失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"串流失敗: {str(e)}")
+
         raise HTTPException(status_code=500, detail=f"攝影機掃描失敗: {str(e)}")
 
 # ===== 分析統計 API =====
@@ -1608,30 +1634,24 @@ async def test_data_source(
         test_result = {"source_id": source_id, "status": "success", "message": ""}
         
         if source.source_type == "camera":
-            # 測試攝影機連接
+            # 測試攝影機連接 (使用攝影機流管理器)
             config = source.config or {}
             if "device_id" in config:
                 # USB 攝影機測試
-                import cv2
                 try:
-                    cap = cv2.VideoCapture(config["device_id"])
-                    if cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret:
-                            test_result["message"] = f"USB攝影機 {config['device_id']} 連接正常"
-                        else:
-                            test_result["status"] = "error"
-                            test_result["message"] = f"USB攝影機 {config['device_id']} 無法讀取幀"
+                    from app.services.camera_stream_manager import camera_stream_manager
+                    resolution_info = camera_stream_manager.get_camera_resolution(config["device_id"])
+                    if resolution_info:
+                        test_result["message"] = f"USB攝影機 {config['device_id']} 連接正常 ({resolution_info['width']}x{resolution_info['height']})"
                     else:
                         test_result["status"] = "error"
                         test_result["message"] = f"無法開啟USB攝影機 {config['device_id']}"
-                    cap.release()
                 except Exception as e:
                     test_result["status"] = "error"
                     test_result["message"] = f"USB攝影機測試失敗: {str(e)}"
             
             elif "url" in config:
-                # 網路攝影機測試
+                # 網路攝影機測試 (暫時仍使用直接存取，因為流管理器主要處理USB攝影機)
                 import cv2
                 try:
                     cap = cv2.VideoCapture(config["url"])
@@ -1722,23 +1742,10 @@ async def test_data_source(
 
 @router.get("/data-sources/types/camera/devices")
 async def get_available_cameras():
-    """獲取可用的攝影機設備"""
+    """獲取可用的攝影機設備 (使用攝影機流管理器避免資源衝突)"""
     try:
-        import cv2
-        available_cameras = []
-        
-        # 檢測USB攝影機
-        for i in range(10):  # 檢查前10個設備
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret:
-                    available_cameras.append({
-                        "device_id": i,
-                        "name": f"USB Camera {i}",
-                        "type": "usb"
-                    })
-                cap.release()
+        from app.services.camera_stream_manager import camera_stream_manager
+        available_cameras = camera_stream_manager.detect_available_cameras()
         
         return {
             "cameras": available_cameras,
@@ -2555,9 +2562,9 @@ async def run_realtime_detection(
     request: RealtimeAnalysisRequest,
     db_session_factory
 ):
-    """執行即時檢測的背景任務"""
-    import cv2
-    from ultralytics import YOLO
+    """執行即時檢測的背景任務 - 使用共享視訊流"""
+    from app.services.realtime_detection_service import realtime_detection_service
+    from app.services.new_database_service import DatabaseService
     
     api_logger.info(f"開始執行即時檢測任務: {task_id}")
     
@@ -2581,118 +2588,32 @@ async def run_realtime_detection(
         except Exception as e:
             api_logger.error(f"更新任務狀態失敗: {e}")
     
-    async def save_detection_result(frame_number: int, detections: list):
-        """儲存檢測結果到資料庫"""
-        try:
-            async with db_session_factory() as db:
-                for detection in detections:
-                    # 獲取邊界框座標
-                    x1, y1, x2, y2 = detection['bbox']
-                    center_x = (x1 + x2) / 2
-                    center_y = (y1 + y2) / 2
-                    
-                    detection_result = DetectionResult(
-                        task_id=task_id,
-                        frame_number=frame_number,
-                        timestamp=datetime.utcnow(),
-                        object_type=detection['class_name'],
-                        confidence=detection['confidence'],
-                        bbox_x1=float(x1),
-                        bbox_y1=float(y1),
-                        bbox_x2=float(x2),
-                        bbox_y2=float(y2),
-                        center_x=float(center_x),
-                        center_y=float(center_y)
-                    )
-                    
-                    db.add(detection_result)
-                
-                await db.commit()
-                
-        except Exception as e:
-            api_logger.error(f"儲存檢測結果失敗: {e}")
-    
-    cap = None
-    model = None
-    frame_number = 0
-    
     try:
         # 1. 更新任務狀態為執行中
         await update_task_status("running")
         
-        # 2. 初始化攝影機
+        # 2. 準備參數
+        camera_id = str(camera_info.get("id", "camera_0"))
         device_index = camera_info.get("device_index", 0)
-        api_logger.info(f"初始化攝影機: {device_index}")
         
-        cap = cv2.VideoCapture(device_index)
-        if not cap.isOpened():
-            raise Exception(f"無法開啟攝影機: {device_index}")
+        # 3. 建立資料庫服務實例
+        db_service = DatabaseService()
         
-        # 設定攝影機解析度
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, 30)
+        # 4. 使用共享視訊流開始實時檢測
+        api_logger.info(f"使用共享視訊流啟動實時檢測: {camera_id}, 裝置索引: {device_index}")
         
-        # 3. 載入 YOLO 模型
-        api_logger.info(f"載入YOLO模型: {model_info['path']}")
-        model = YOLO(model_info['path'])
+        success = await realtime_detection_service.start_realtime_detection(
+            task_id=str(task_id),
+            camera_id=camera_id,
+            device_index=device_index,
+            db_service=db_service
+        )
         
-        # 4. 開始即時檢測迴圈
-        api_logger.info("開始即時檢測迴圈")
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                api_logger.warning("無法從攝影機讀取影像")
-                await asyncio.sleep(0.1)
-                continue
-            
-            frame_number += 1
-            
-            try:
-                # 執行 YOLO 檢測
-                results = model(frame, conf=request.confidence, iou=request.iou_threshold)
-                
-                # 處理檢測結果
-                detections = []
-                for result in results:
-                    boxes = result.boxes
-                    if boxes is not None:
-                        for box in boxes:
-                            # 獲取邊界框座標
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            confidence = float(box.conf[0].cpu().numpy())
-                            class_id = int(box.cls[0].cpu().numpy())
-                            class_name = model.names[class_id]
-                            
-                            detections.append({
-                                'bbox': [x1, y1, x2, y2],
-                                'confidence': confidence,
-                                'class_name': class_name,
-                                'class_id': class_id
-                            })
-                
-                # 每10幀或有檢測結果時儲存
-                if detections or frame_number % 10 == 0:
-                    await save_detection_result(frame_number, detections)
-                
-                # 記錄處理進度
-                if frame_number % 100 == 0:
-                    api_logger.info(f"任務 {task_id} 已處理 {frame_number} 幀，檢測到 {len(detections)} 個物件")
-                
-            except Exception as e:
-                api_logger.error(f"檢測處理失敗 (幀 {frame_number}): {e}")
-            
-            # 控制處理速度，避免過載
-            await asyncio.sleep(0.033)  # 約30 FPS
+        if success:
+            api_logger.info(f"即時檢測任務 {task_id} 啟動成功")
+        else:
+            raise Exception("實時檢測服務啟動失敗")
             
     except Exception as e:
         api_logger.error(f"即時檢測任務失敗: {e}")
         await update_task_status("failed", str(e))
-        
-    finally:
-        # 清理資源
-        if cap:
-            cap.release()
-        
-        api_logger.info(f"即時檢測任務 {task_id} 已結束，共處理 {frame_number} 幀")

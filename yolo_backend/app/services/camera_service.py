@@ -590,7 +590,7 @@ class CameraService:
             return None
     
     def _initialize_default_cameras(self):
-        """初始化預設攝影機並保存到資料庫"""
+        """初始化預設攝影機並保存到資料庫（僅保留真實的USB攝影機）"""
         default_cameras_data = [
             {
                 "name": "前門攝影機",
@@ -601,45 +601,15 @@ class CameraService:
                 "device_index": 0
             },
             {
-                "name": "後門攝影機",
-                "status": "inactive",
-                "camera_type": "Network",
-                "resolution": "1280x720",
-                "fps": 25,
-                "rtsp_url": "rtsp://admin:password@192.168.1.100/stream1"
-            },
-            {
-                "name": "停車場東側",
-                "status": "active",
-                "camera_type": "Network",
-                "resolution": "1920x1080",
-                "fps": 30,
-                "rtsp_url": "rtsp://admin:password@192.168.1.101/stream1"
-            },
-            {
-                "name": "停車場西側",
-                "status": "active",
-                "camera_type": "Network",
-                "resolution": "1920x1080",
-                "fps": 30,
-                "rtsp_url": "rtsp://admin:password@192.168.1.102/stream1"
-            },
-            {
-                "name": "停車場南側",
-                "status": "active",
-                "camera_type": "Network",
-                "resolution": "1280x720",
-                "fps": 25,
-                "rtsp_url": "rtsp://admin:password@192.168.1.103/stream1"
-            },
-            {
                 "name": "大廳攝影機",
-                "status": "active",
+                "status": "inactive", 
                 "camera_type": "USB",
                 "resolution": "1920x1080",
                 "fps": 30,
                 "device_index": 1
             }
+            # 移除模擬的網路攝影機，避免混淆
+            # 用戶可以手動添加真實的網路攝影機
         ]
         
         try:
@@ -741,10 +711,10 @@ class CameraService:
             usb_cameras = await self._scan_usb_cameras()
             discovered_cameras.extend(usb_cameras)
             
-            # 掃描網路攝影機（簡化版，實際應該掃描網段）
-            api_logger.info("開始掃描網路攝影機...")
-            network_cameras = await self._scan_network_cameras()
-            discovered_cameras.extend(network_cameras)
+            # 移除模擬網路攝影機掃描 - 實際環境中不需要
+            # api_logger.info("開始掃描網路攝影機...")
+            # network_cameras = await self._scan_network_cameras()
+            # discovered_cameras.extend(network_cameras)
             
             api_logger.info(f"掃描完成，發現 {len(discovered_cameras)} 個攝影機")
             return discovered_cameras
@@ -754,69 +724,32 @@ class CameraService:
             raise
     
     async def _scan_usb_cameras(self) -> List[Dict[str, Any]]:
-        """掃描USB攝影機"""
-        usb_cameras = []
-        
+        """掃描USB攝影機 (使用共享攝影機管理器避免資源衝突)"""
         try:
-            # 嘗試打開攝影機設備 0-4
-            for index in range(5):
-                try:
-                    cap = cv2.VideoCapture(index)
-                    if cap.isOpened():
-                        # 獲取攝影機資訊
-                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        fps = int(cap.get(cv2.CAP_PROP_FPS))
-                        
-                        camera_info = {
-                            "device_index": index,
-                            "name": f"USB Camera {index}",
-                            "type": "USB",
-                            "resolution": f"{width}x{height}",
-                            "fps": fps if fps > 0 else 30,
-                            "status": "available"
-                        }
-                        
-                        usb_cameras.append(camera_info)
-                        api_logger.info(f"發現USB攝影機: {camera_info}")
-                        
-                    cap.release()
-                    
-                except Exception as e:
-                    # 無法打開此設備，繼續下一個
-                    continue
-                    
+            from app.services.camera_stream_manager import camera_stream_manager
+            
+            # 使用共享攝影機管理器檢測攝影機，避免資源衝突
+            detected_cameras = camera_stream_manager.detect_available_cameras()
+            
+            # 轉換為CameraService需要的格式
+            usb_cameras = []
+            for camera_data in detected_cameras:
+                camera_info = {
+                    "device_index": camera_data.get("device_id", 0),
+                    "name": camera_data.get("name", f"USB Camera {camera_data.get('device_id', 0)}"),
+                    "type": "USB",
+                    "resolution": camera_data.get("resolution", "640x480"),
+                    "fps": int(camera_data.get("fps", 30)),
+                    "status": "available"
+                }
+                usb_cameras.append(camera_info)
+                api_logger.info(f"發現USB攝影機: {camera_info}")
+            
+            return usb_cameras
+            
         except Exception as e:
             api_logger.error(f"掃描USB攝影機時發生錯誤: {e}")
-        
-        return usb_cameras
-    
-    async def _scan_network_cameras(self) -> List[Dict[str, Any]]:
-        """掃描網路攝影機（簡化版）"""
-        # 實際應用中應該掃描網段或使用ONVIF發現協議
-        # 這裡返回模擬的網路攝影機
-        network_cameras = [
-            {
-                "ip": "192.168.1.100",
-                "name": "Network Camera 1",
-                "type": "Network",
-                "resolution": "1920x1080",
-                "fps": 30,
-                "rtsp_url": "rtsp://admin:password@192.168.1.100/stream1",
-                "status": "available"
-            },
-            {
-                "ip": "192.168.1.101",
-                "name": "Network Camera 2",
-                "type": "Network",
-                "resolution": "1280x720",
-                "fps": 25,
-                "rtsp_url": "rtsp://admin:password@192.168.1.101/stream1",
-                "status": "available"
-            }
-        ]
-        
-        return network_cameras
+            return []
     
     async def add_camera(
         self,
@@ -910,18 +843,35 @@ class CameraService:
             raise
     
     async def test_camera_connection(self, camera_id: str) -> bool:
-        """測試攝影機連接"""
+        """測試攝影機連接 (使用共享攝影機管理器避免資源衝突)"""
         try:
             camera = self.cameras.get(camera_id)
             if not camera:
                 return False
             
             if camera.camera_type == "USB" and camera.device_index is not None:
-                # 測試USB攝影機
-                cap = cv2.VideoCapture(camera.device_index)
-                is_connected = cap.isOpened()
-                cap.release()
-                return is_connected
+                # 使用共享攝影機管理器測試USB攝影機，避免資源衝突
+                from app.services.camera_stream_manager import camera_stream_manager
+                
+                # 檢查是否已經有流在運行
+                test_camera_id = f"camera_{camera.device_index}"
+                if camera_stream_manager.is_stream_running(test_camera_id):
+                    # 流正在運行，表示攝影機可用
+                    return True
+                    
+                # 嘗試短暫啟動流來測試連接
+                try:
+                    success = camera_stream_manager.start_stream(test_camera_id, camera.device_index)
+                    if success:
+                        # 測試成功，立即停止流（如果沒有其他消費者）
+                        if not camera_stream_manager.has_consumers(test_camera_id):
+                            camera_stream_manager.stop_stream(test_camera_id)
+                        return True
+                    else:
+                        return False
+                except Exception as e:
+                    api_logger.warning(f"測試攝影機 {camera_id} 連接時發生錯誤: {e}")
+                    return False
                 
             elif camera.camera_type == "Network" and camera.rtsp_url:
                 # 測試網路攝影機（簡化版）

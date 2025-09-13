@@ -30,18 +30,16 @@ async def start_realtime_detection(
         import uuid
         task_id = str(uuid.uuid4())
         
-        # 獲取攝影機實際解析度
-        import cv2
-        cap = cv2.VideoCapture(camera_index)
-        if cap.isOpened():
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0:  # 如果無法獲取 FPS
-                fps = 30.0  # 預設值
-            cap.release()
+        # 獲取攝影機實際解析度 (使用攝影機流管理器)
+        from app.services.camera_stream_manager import camera_stream_manager
+        import cv2  # 仍需要用於其他地方
+        resolution_info = camera_stream_manager.get_camera_resolution(camera_index)
+        if resolution_info:
+            width = resolution_info['width']
+            height = resolution_info['height']
+            fps = resolution_info['fps']
         else:
-            # 如果無法開啟攝影機，使用預設值
+            # 如果無法獲取攝影機解析度，使用預設值
             width, height, fps = 640, 480, 30.0
         
         # 在資料庫中創建任務記錄
@@ -64,17 +62,18 @@ async def start_realtime_detection(
         # 啟動實時檢測
         success = await realtime_service.start_realtime_detection(
             task_id=str(db_task_id),
-            camera_index=camera_index,
+            camera_id=f"camera_{camera_index}",
+            device_index=camera_index,
             db_service=db_service
         )
         
         if not success:
             # 如果啟動失敗，更新資料庫狀態
-            await db_service.update_task_status(str(db_task_id), "failed", db=db)
+            await db_service.update_task_status(db, db_task_id, "failed")
             raise HTTPException(status_code=500, detail="實時檢測啟動失敗")
         
         # 更新任務狀態為運行中
-        await db_service.update_task_status(str(db_task_id), "running", db=db)
+        await db_service.update_task_status(db, db_task_id, "running")
         
         api_logger.info(f"實時檢測啟動成功: 任務 {db_task_id}, 攝影機 {camera_index}")
         
@@ -120,7 +119,7 @@ async def stop_realtime_detection(
         
         if success:
             # 更新資料庫任務狀態
-            await db_service.update_task_status(target_task_id, "completed", db=db)
+            await db_service.update_task_status(db, target_task_id, "completed")
             
             api_logger.info(f"實時檢測停止成功: 攝影機 {camera_index}, 任務 {target_task_id}")
             

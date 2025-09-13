@@ -3,16 +3,17 @@
 支援即時攝影機分析和影片檔案分析兩種模式
 """
 
+import threading
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, update, delete, func, and_, or_
-from sqlalchemy.orm import selectinload
 
 from app.models.database import AnalysisTask, DetectionResult, DataSource, SystemConfig
+from app.core.database import AsyncSessionLocal
 import logging
 
-logger = logging.getLogger(__name__)
+db_logger = logging.getLogger(__name__)
 
 class DatabaseService:
     """資料庫服務類別 - 提供所有資料庫操作的封裝"""
@@ -54,7 +55,7 @@ class DatabaseService:
             await session.commit()
             return result.rowcount > 0
         except Exception as e:
-            logger.error(f"開始任務失敗: {e}")
+            db_logger.error(f"開始任務失敗: {e}")
             return False
     
     async def complete_analysis_task(self, session: AsyncSession, task_id: int, status: str = 'completed') -> bool:
@@ -71,7 +72,7 @@ class DatabaseService:
             await session.commit()
             return result.rowcount > 0
         except Exception as e:
-            logger.error(f"完成任務失敗: {e}")
+            db_logger.error(f"完成任務失敗: {e}")
             return False
     
     async def update_task_status(self, db: AsyncSession, task_id: int, status: str) -> bool:
@@ -92,7 +93,7 @@ class DatabaseService:
             await db.commit()
             return result.rowcount > 0
         except Exception as e:
-            logger.error(f"更新任務狀態失敗: {e}")
+            db_logger.error(f"更新任務狀態失敗: {e}")
             return False
     
     async def get_analysis_task(self, session: AsyncSession, task_id: int) -> Optional[AnalysisTask]:
@@ -153,7 +154,7 @@ class DatabaseService:
             return detection_obj
             
         except Exception as e:
-            logger.error(f"儲存檢測結果失敗: {e}")
+            db_logger.error(f"儲存檢測結果失敗: {e}")
             await session.rollback()
             raise
     
@@ -184,7 +185,7 @@ class DatabaseService:
             return True
             
         except Exception as e:
-            logger.error(f"儲存檢測結果失敗: {e}")
+            db_logger.error(f"儲存檢測結果失敗: {e}")
             await session.rollback()
             return False
     
@@ -322,7 +323,7 @@ class DatabaseService:
             await session.commit()
             return result.rowcount > 0
         except Exception as e:
-            logger.error(f"更新資料來源狀態失敗: {e}")
+            db_logger.error(f"更新資料來源狀態失敗: {e}")
             return False
     
     # ============================================================================
@@ -374,7 +375,7 @@ class DatabaseService:
             return True
             
         except Exception as e:
-            logger.error(f"設定配置失敗: {e}")
+            db_logger.error(f"設定配置失敗: {e}")
             await session.rollback()
             return False
     
@@ -436,6 +437,53 @@ class DatabaseService:
             ],
             'recent_detections_24h': recent_detections.scalar() or 0
         }
+
+    # 同步檢測結果儲存（用於即時檢測）
+    # ============================================================================
+    
+    def create_detection_result_sync(self, detection_data: Dict[str, Any]) -> bool:
+        """同步儲存檢測結果（用於即時檢測）- 使用同步資料庫連接"""
+        try:
+            # 使用同步資料庫連接，避免 asyncio 衝突
+            from app.core.database import sync_engine
+            from sqlalchemy.orm import sessionmaker
+            from sqlalchemy import text
+            
+            # 建立同步 session
+            SyncSessionLocal = sessionmaker(bind=sync_engine)
+            
+            with SyncSessionLocal() as session:
+                # 使用原始 SQL 插入，避免 ORM 的 async 問題
+                sql = text("""
+                    INSERT INTO detection_results 
+                    (task_id, frame_number, timestamp, object_type, confidence, 
+                     bbox_x1, bbox_y1, bbox_x2, bbox_y2, center_x, center_y)
+                    VALUES 
+                    (:task_id, :frame_number, :timestamp, :object_type, :confidence, 
+                     :bbox_x1, :bbox_y1, :bbox_x2, :bbox_y2, :center_x, :center_y)
+                """)
+                
+                session.execute(sql, {
+                    'task_id': int(detection_data['task_id']),
+                    'frame_number': detection_data['frame_number'],
+                    'timestamp': detection_data['timestamp'],
+                    'object_type': detection_data['object_type'],
+                    'confidence': detection_data['confidence'],
+                    'bbox_x1': detection_data['bbox_x1'],
+                    'bbox_y1': detection_data['bbox_y1'],
+                    'bbox_x2': detection_data['bbox_x2'],
+                    'bbox_y2': detection_data['bbox_y2'],
+                    'center_x': detection_data['center_x'],
+                    'center_y': detection_data['center_y']
+                })
+                
+                session.commit()
+                db_logger.debug(f"成功同步儲存檢測結果到任務 {detection_data.get('task_id')}")
+                return True
+                
+        except Exception as e:
+            db_logger.error(f"同步儲存檢測結果失敗: {e}")
+            return False
 
 # 建立服務實例
 db_service = DatabaseService()
