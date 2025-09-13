@@ -548,14 +548,16 @@ class CameraService:
                     if camera:
                         self.cameras[camera.id] = camera
                 
-                # 如果資料庫中沒有攝影機，初始化一些預設值
+                # 不自動初始化預設攝影機，讓用戶手動添加真實設備
                 if not camera_sources:
-                    self._initialize_default_cameras()
+                    api_logger.info("資料庫中沒有攝影機資料，等待用戶手動添加真實設備")
+                    # self._initialize_default_cameras()  # 註釋掉自動初始化
                     
         except Exception as e:
             api_logger.error(f"載入攝影機配置失敗: {e}")
-            # 如果資料庫載入失敗，使用預設配置
-            self._initialize_default_cameras()
+            # 如果資料庫載入失敗，也不要創建虛擬資料
+            api_logger.info("資料庫載入失敗，請檢查資料庫連接或手動添加攝影機")
+            # self._initialize_default_cameras()  # 註釋掉錯誤時的初始化
     
     def _convert_datasource_to_camera(self, source: DataSource) -> Optional[Camera]:
         """將 DataSource 轉換為 Camera 對象"""
