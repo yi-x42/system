@@ -179,3 +179,5 @@ python simple_api_test.py
 -   **啟動方式**: **請務必使用 `python start.py`** 來啟動開發環境，不要單獨執行 `uvicorn` 或 `npm run dev`，否則會導致跨來源 (CORS) 或連線問題。
 
 再把react網站的模擬數據替換為真實功能的時後 不要去改變整體排版 希望照著原有的架構下去做變更
+
+當我在使用Copilot Ask時請回答我文字內容而不是程式碼

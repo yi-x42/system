@@ -20,7 +20,8 @@ import {
   CreateAnalysisTaskResponse,
   useVideoList,
   VideoFileInfo,
-  useDeleteVideo
+  useDeleteVideo,
+  useCameras
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -52,6 +53,7 @@ export function DetectionAnalysisOriginal() {
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
   const { data: activeModels, refetch: refetchActiveModels } = useActiveModels();
   const { data: videoListData, isLoading: videoListLoading, refetch: refetchVideoList } = useVideoList();
+  const { data: cameras, isLoading: isCamerasLoading, isError: isCamerasError } = useCameras();
   const toggleModelMutation = useToggleModelStatus();
   const uploadVideoMutation = useVideoUpload();
   const createTaskMutation = useCreateAnalysisTask();
@@ -60,6 +62,7 @@ export function DetectionAnalysisOriginal() {
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
+  console.log("攝影機數據:", cameras);
 
   // 模擬分析結果數據
   const analysisResults = [
@@ -583,12 +586,27 @@ export function DetectionAnalysisOriginal() {
                     <Label htmlFor="camera-select">選擇攝影機</Label>
                     <Select>
                       <SelectTrigger>
-                        <SelectValue placeholder="選擇要分析的攝影機" />
+                        <SelectValue placeholder={isCamerasLoading ? "載入攝影機列表中..." : "選擇要分析的攝影機"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="cam_001">大門入口</SelectItem>
-                        <SelectItem value="cam_002">停車場</SelectItem>
-                        <SelectItem value="cam_004">走廊A</SelectItem>
+                        {isCamerasLoading ? (
+                          <SelectItem value="loading" disabled>載入中...</SelectItem>
+                        ) : isCamerasError ? (
+                          <SelectItem value="error" disabled>載入攝影機列表失敗</SelectItem>
+                        ) : cameras && cameras.length > 0 ? (
+                          cameras.map((camera) => (
+                            <SelectItem 
+                              key={camera.id} 
+                              value={camera.id?.toString() || `camera-${camera.name}`}
+                            >
+                              {camera.name} ({camera.status})
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="no-cameras" disabled>
+                            沒有可用的攝影機設備
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

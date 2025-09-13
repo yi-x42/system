@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
 import { Alert, AlertDescription } from "./ui/alert";
-import { useVideoUpload, VideoUploadResponse, useYoloModelList, YoloModelFileInfo, useToggleModelStatus, useActiveModels } from "../hooks/react-query-hooks";
+import { useVideoUpload, VideoUploadResponse, useYoloModelList, YoloModelFileInfo, useToggleModelStatus, useActiveModels, useCameras } from "../hooks/react-query-hooks";
 import {
   Brain,
   Upload,
@@ -26,7 +26,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-export function DetectionAnalysis() {
+export function 
+DetectionAnalysis() {
   console.log("DetectionAnalysis 組件開始渲染");
 
   // ===== 狀態變數定義 =====
@@ -50,6 +51,10 @@ export function DetectionAnalysis() {
   // 取得已啟用的模型清單（供選擇器使用）
   const { data: activeModels, refetch: refetchActiveModels } = useActiveModels();
   console.log("activeModels hook 初始化成功", { activeModels });
+  
+  // 取得攝影機列表
+  const { data: cameras, isLoading: isCamerasLoading, isError: isCamerasError } = useCameras();
+  console.log("cameras hook 初始化成功", { cameras, isCamerasLoading, isCamerasError });
   
   // 模型狀態切換 mutation
   const toggleModelMutation = useToggleModelStatus();
@@ -418,12 +423,24 @@ export function DetectionAnalysis() {
                     <Label htmlFor="camera-select">選擇攝影機</Label>
                     <Select>
                       <SelectTrigger>
-                        <SelectValue placeholder="選擇要分析的攝影機" />
+                        <SelectValue placeholder={isCamerasLoading ? "載入攝影機列表中..." : "選擇要分析的攝影機"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="cam_001">大門入口</SelectItem>
-                        <SelectItem value="cam_002">停車場</SelectItem>
-                        <SelectItem value="cam_004">走廊A</SelectItem>
+                        {isCamerasLoading ? (
+                          <SelectItem value="" disabled>載入中...</SelectItem>
+                        ) : isCamerasError ? (
+                          <SelectItem value="" disabled>載入攝影機列表失敗</SelectItem>
+                        ) : cameras && cameras.length > 0 ? (
+                          cameras.map((camera) => (
+                            <SelectItem key={camera.id} value={camera.id.toString()}>
+                              {camera.name} ({camera.status})
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="" disabled>
+                            沒有可用的攝影機設備
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

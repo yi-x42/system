@@ -287,6 +287,17 @@ class TaskService:
         
         return stats
     
+    async def start_realtime_task(self, task_id: str, db: AsyncSession = None):
+        """公共方法：啟動即時分析任務"""
+        try:
+            if task_id in self.active_tasks:
+                await self.start_task(task_id, db)
+            else:
+                api_logger.error(f"任務不存在: {task_id}")
+                
+        except Exception as e:
+            api_logger.error(f"啟動即時任務失敗 {task_id}: {e}")
+
     async def _start_realtime_task(self, task_id: str):
         """啟動即時監控任務"""
         try:

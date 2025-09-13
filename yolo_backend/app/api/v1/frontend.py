@@ -65,6 +65,24 @@ class TaskCreate(BaseModel):
     schedule_time: Optional[datetime] = Field(None, description="排程時間")
     description: str = Field("", description="任務描述")
 
+class RealtimeAnalysisRequest(BaseModel):
+    """即時分析請求模型"""
+    task_name: str = Field(..., description="任務名稱")
+    camera_id: str = Field(..., description="選中的攝影機ID")
+    model_id: str = Field(..., description="選中的YOLO模型ID")
+    confidence: float = Field(0.5, description="信心度閾值", ge=0.0, le=1.0)
+    iou_threshold: float = Field(0.45, description="IoU閾值", ge=0.0, le=1.0)
+    description: str = Field("", description="任務描述")
+
+class RealtimeAnalysisResponse(BaseModel):
+    """即時分析回應模型"""
+    task_id: str = Field(..., description="任務ID")
+    status: str = Field(..., description="任務狀態")
+    message: str = Field(..., description="回應訊息")
+    camera_info: Dict[str, Any] = Field(..., description="攝影機資訊")
+    model_info: Dict[str, Any] = Field(..., description="模型資訊")
+    created_at: datetime = Field(..., description="創建時間")
+
 class TaskInfo(BaseModel):
     """任務資訊模型"""
     id: str
@@ -525,11 +543,11 @@ async def get_tasks(
                 task_type=task["type"],
                 status=task["status"],
                 progress=task["progress"],
-                camera_id=task.camera_id,
-                model_name=task.model_name,
-                start_time=task.start_time,
-                end_time=task.end_time,
-                created_at=task.created_at
+                camera_id=task.get("camera_id"),
+                model_name=task.get("model_name", "yolo11n"),
+                start_time=task.get("start_time") or task.get("created_at"),
+                end_time=task.get("end_time"),
+                created_at=task.get("created_at")
             )
             for task in tasks
         ]
@@ -561,6 +579,164 @@ async def get_task_stats(db: AsyncSession = Depends(get_db), task_service: TaskS
     except Exception as e:
         api_logger.error(f"獲取任務統計失敗: {e}")
         raise HTTPException(status_code=500, detail=f"任務統計獲取失敗: {str(e)}")
+
+@router.post("/analysis/start-realtime", response_model=RealtimeAnalysisResponse)
+async def start_realtime_analysis(
+    request: RealtimeAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    """開始即時分析任務"""
+    try:
+        api_logger.info(f"收到即時分析請求: {request}")
+        
+        # 1. 驗證攝影機
+        camera_service = CameraService()
+        cameras = await camera_service.get_cameras()
+        camera_info = None
+        for cam in cameras:
+            if str(cam.id) == str(request.camera_id):
+                # 轉換 Camera dataclass 為字典
+                camera_info = {
+                    "id": cam.id,
+                    "name": cam.name,
+                    "status": cam.status,
+                    "camera_type": cam.camera_type,
+                    "resolution": cam.resolution,
+                    "fps": cam.fps,
+                    "group_id": cam.group_id,
+                    "device_index": cam.device_index,
+                    "rtsp_url": cam.rtsp_url
+                }
+                break
+        
+        if not camera_info:
+            raise HTTPException(status_code=404, detail=f"攝影機 {request.camera_id} 未找到")
+        
+        # 臨時允許所有狀態的攝影機進行測試
+        # if camera_info["status"] not in ["online", "active", "inactive"]:
+        #     raise HTTPException(status_code=400, detail=f"攝影機 {request.camera_id} 不可用，狀態: {camera_info['status']}")
+        
+        # # 如果攝影機為 offline 狀態，則拒絕請求
+        # if camera_info["status"] == "offline":
+        #     raise HTTPException(status_code=400, detail=f"攝影機 {request.camera_id} 離線，無法啟動即時分析")
+        
+        api_logger.info(f"使用攝影機: {camera_info['name']} (狀態: {camera_info['status']})")
+        
+        # 2. 驗證模型
+        model_files = []
+        models_dir = "yolo_backend"
+        for file in os.listdir(models_dir):
+            if file.endswith(('.pt', '.onnx')):
+                model_files.append({
+                    "id": file.replace('.pt', '').replace('.onnx', ''),
+                    "filename": file,
+                    "path": os.path.join(models_dir, file)
+                })
+        
+        model_info = None
+        for model in model_files:
+            if model["id"] == request.model_id:
+                model_info = model
+                break
+        
+        if not model_info:
+            raise HTTPException(status_code=404, detail=f"YOLO模型 {request.model_id} 未找到")
+        
+        if not os.path.exists(model_info["path"]):
+            raise HTTPException(status_code=400, detail=f"模型檔案不存在: {model_info['path']}")
+        
+        # 3. 獲取攝影機解析度資訊
+        camera_width = 640
+        camera_height = 480
+        camera_fps = 30.0
+        
+        try:
+            import cv2
+            if camera_info["camera_type"] == "USB":
+                device_index = camera_info.get("device_index", 0)
+                cap = cv2.VideoCapture(device_index)
+                if cap.isOpened():
+                    camera_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    camera_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    camera_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                    cap.release()
+                    api_logger.info(f"攝影機解析度: {camera_width}x{camera_height}@{camera_fps}fps")
+        except Exception as e:
+            api_logger.warning(f"獲取攝影機解析度失敗，使用預設值: {e}")
+        
+        # 4. 創建 analysis_tasks 記錄
+        task_id = None
+        try:
+            source_info = {
+                "camera_id": request.camera_id,
+                "camera_name": camera_info.get("name", f"Camera-{request.camera_id}"),
+                "camera_type": camera_info.get("camera_type", "USB"),
+                "device_index": camera_info.get("device_index", 0),
+                "model_id": request.model_id,
+                "model_path": model_info["path"],
+                "confidence": request.confidence,
+                "iou_threshold": request.iou_threshold
+            }
+            
+            analysis_task = AnalysisTask(
+                task_type="realtime_camera",
+                status="pending",
+                source_info=source_info,
+                source_width=camera_width,
+                source_height=camera_height,
+                source_fps=camera_fps,
+                created_at=datetime.utcnow()
+            )
+            
+            db.add(analysis_task)
+            await db.commit()
+            await db.refresh(analysis_task)
+            task_id = analysis_task.id
+            
+            api_logger.info(f"創建分析任務記錄成功: {task_id}")
+            
+        except Exception as e:
+            await db.rollback()
+            api_logger.error(f"創建任務記錄失敗: {e}")
+            raise HTTPException(status_code=500, detail=f"創建任務記錄失敗: {str(e)}")
+        
+        # 5. 啟動背景即時檢測任務
+        background_tasks.add_task(
+            run_realtime_detection,
+            task_id=task_id,
+            camera_info=camera_info,
+            model_info=model_info,
+            request=request,
+            db_session_factory=AsyncSessionLocal
+        )
+        
+        api_logger.info(f"即時分析任務 {task_id} 已啟動")
+        
+        return RealtimeAnalysisResponse(
+            task_id=str(task_id),
+            status="started",
+            message="即時分析任務已成功啟動",
+            camera_info={
+                "id": camera_info["id"],
+                "name": camera_info.get("name", ""),
+                "resolution": f"{camera_width}x{camera_height}",
+                "fps": camera_fps
+            },
+            model_info={
+                "id": model_info["id"],
+                "filename": model_info["filename"],
+                "confidence": request.confidence,
+                "iou_threshold": request.iou_threshold
+            },
+            created_at=datetime.utcnow()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"啟動即時分析失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"啟動即時分析失敗: {str(e)}")
 
 # ===== 攝影機管理 API =====
 
@@ -2355,3 +2531,154 @@ async def delete_video(video_id: str):
     except Exception as e:
         api_logger.error(f"刪除影片失敗: {e}")
         raise HTTPException(status_code=500, detail=f"刪除影片失敗: {str(e)}")
+
+# ===== 即時檢測背景任務 =====
+
+async def run_realtime_detection(
+    task_id: int,
+    camera_info: Dict[str, Any],
+    model_info: Dict[str, Any],
+    request: RealtimeAnalysisRequest,
+    db_session_factory
+):
+    """執行即時檢測的背景任務"""
+    import cv2
+    from ultralytics import YOLO
+    
+    api_logger.info(f"開始執行即時檢測任務: {task_id}")
+    
+    async def update_task_status(status: str, error_message: str = None):
+        """更新任務狀態"""
+        try:
+            async with db_session_factory() as db:
+                query = select(AnalysisTask).where(AnalysisTask.id == task_id)
+                result = await db.execute(query)
+                task = result.scalar_one_or_none()
+                
+                if task:
+                    task.status = status
+                    if status == "running" and not task.start_time:
+                        task.start_time = datetime.utcnow()
+                    elif status in ["completed", "failed"]:
+                        task.end_time = datetime.utcnow()
+                        
+                    await db.commit()
+                    api_logger.info(f"任務 {task_id} 狀態更新為: {status}")
+        except Exception as e:
+            api_logger.error(f"更新任務狀態失敗: {e}")
+    
+    async def save_detection_result(frame_number: int, detections: list):
+        """儲存檢測結果到資料庫"""
+        try:
+            async with db_session_factory() as db:
+                for detection in detections:
+                    # 獲取邊界框座標
+                    x1, y1, x2, y2 = detection['bbox']
+                    center_x = (x1 + x2) / 2
+                    center_y = (y1 + y2) / 2
+                    
+                    detection_result = DetectionResult(
+                        task_id=task_id,
+                        frame_number=frame_number,
+                        timestamp=datetime.utcnow(),
+                        object_type=detection['class_name'],
+                        confidence=detection['confidence'],
+                        bbox_x1=float(x1),
+                        bbox_y1=float(y1),
+                        bbox_x2=float(x2),
+                        bbox_y2=float(y2),
+                        center_x=float(center_x),
+                        center_y=float(center_y)
+                    )
+                    
+                    db.add(detection_result)
+                
+                await db.commit()
+                
+        except Exception as e:
+            api_logger.error(f"儲存檢測結果失敗: {e}")
+    
+    cap = None
+    model = None
+    frame_number = 0
+    
+    try:
+        # 1. 更新任務狀態為執行中
+        await update_task_status("running")
+        
+        # 2. 初始化攝影機
+        device_index = camera_info.get("device_index", 0)
+        api_logger.info(f"初始化攝影機: {device_index}")
+        
+        cap = cv2.VideoCapture(device_index)
+        if not cap.isOpened():
+            raise Exception(f"無法開啟攝影機: {device_index}")
+        
+        # 設定攝影機解析度
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        # 3. 載入 YOLO 模型
+        api_logger.info(f"載入YOLO模型: {model_info['path']}")
+        model = YOLO(model_info['path'])
+        
+        # 4. 開始即時檢測迴圈
+        api_logger.info("開始即時檢測迴圈")
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                api_logger.warning("無法從攝影機讀取影像")
+                await asyncio.sleep(0.1)
+                continue
+            
+            frame_number += 1
+            
+            try:
+                # 執行 YOLO 檢測
+                results = model(frame, conf=request.confidence, iou=request.iou_threshold)
+                
+                # 處理檢測結果
+                detections = []
+                for result in results:
+                    boxes = result.boxes
+                    if boxes is not None:
+                        for box in boxes:
+                            # 獲取邊界框座標
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            confidence = float(box.conf[0].cpu().numpy())
+                            class_id = int(box.cls[0].cpu().numpy())
+                            class_name = model.names[class_id]
+                            
+                            detections.append({
+                                'bbox': [x1, y1, x2, y2],
+                                'confidence': confidence,
+                                'class_name': class_name,
+                                'class_id': class_id
+                            })
+                
+                # 每10幀或有檢測結果時儲存
+                if detections or frame_number % 10 == 0:
+                    await save_detection_result(frame_number, detections)
+                
+                # 記錄處理進度
+                if frame_number % 100 == 0:
+                    api_logger.info(f"任務 {task_id} 已處理 {frame_number} 幀，檢測到 {len(detections)} 個物件")
+                
+            except Exception as e:
+                api_logger.error(f"檢測處理失敗 (幀 {frame_number}): {e}")
+            
+            # 控制處理速度，避免過載
+            await asyncio.sleep(0.033)  # 約30 FPS
+            
+    except Exception as e:
+        api_logger.error(f"即時檢測任務失敗: {e}")
+        await update_task_status("failed", str(e))
+        
+    finally:
+        # 清理資源
+        if cap:
+            cap.release()
+        
+        api_logger.info(f"即時檢測任務 {task_id} 已結束，共處理 {frame_number} 幀")
