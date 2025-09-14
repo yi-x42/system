@@ -497,6 +497,45 @@ async def get_analysis_tasks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"取得任務列表失敗: {str(e)}")
 
+@router.delete("/analysis/tasks/{task_id}", summary="刪除分析任務")
+async def delete_analysis_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    刪除分析任務及其相關資料
+    - 刪除任務本身
+    - 級聯刪除所有相關的檢測結果
+    - 只允許刪除非運行狀態的任務
+    """
+    try:
+        # 檢查任務是否存在
+        task = await db_service.get_analysis_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任務不存在")
+        
+        # 檢查任務狀態，不允許刪除運行中的任務
+        if task.status == 'running':
+            raise HTTPException(
+                status_code=400, 
+                detail="無法刪除運行中的任務，請先停止任務"
+            )
+        
+        # 執行級聯刪除
+        deleted_detections = await db_service.delete_analysis_task_cascade(db, task_id)
+        
+        return {
+            'success': True,
+            'message': f"任務 {task_id} 已刪除",
+            'task_id': task_id,
+            'deleted_detections': deleted_detections
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"刪除任務失敗: {str(e)}")
+
 @router.get("/analysis/{task_id}", summary="取得分析任務詳情")
 async def get_analysis_task(
     task_id: int,

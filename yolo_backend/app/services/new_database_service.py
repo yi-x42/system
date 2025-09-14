@@ -130,6 +130,39 @@ class DatabaseService:
         )
         return result.scalars().all()
     
+    async def delete_analysis_task_cascade(self, session: AsyncSession, task_id: int) -> int:
+        """
+        級聯刪除分析任務及相關資料
+        
+        Args:
+            session: 資料庫會話
+            task_id: 任務ID
+            
+        Returns:
+            int: 被刪除的檢測結果數量
+        """
+        from sqlalchemy import delete, select, func
+        
+        # 首先計算要刪除的檢測結果數量
+        count_result = await session.execute(
+            select(func.count(DetectionResult.id)).where(DetectionResult.task_id == task_id)
+        )
+        detection_count = count_result.scalar() or 0
+        
+        # 刪除相關的檢測結果
+        await session.execute(
+            delete(DetectionResult).where(DetectionResult.task_id == task_id)
+        )
+        
+        # 刪除任務本身
+        await session.execute(
+            delete(AnalysisTask).where(AnalysisTask.id == task_id)
+        )
+        
+        await session.commit()
+        
+        return detection_count
+    
     # ============================================================================
     # 檢測結果相關操作
     # ============================================================================

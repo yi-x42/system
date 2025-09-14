@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../lib/api';
 
 // 定義從後端 API 回傳的系統統計資料結構
@@ -285,6 +285,9 @@ export interface AnalysisTask {
   start_time?: string;
   end_time?: string;
   created_at: string;
+  task_name?: string;
+  model_id?: string;
+  confidence_threshold?: number;
 }
 
 export interface CreateAnalysisTaskResponse {
@@ -542,5 +545,71 @@ const startRealtimeAnalysis = async (requestData: RealtimeAnalysisRequest): Prom
 export const useStartRealtimeAnalysis = () => {
   return useMutation<RealtimeAnalysisResponse, Error, RealtimeAnalysisRequest>({
     mutationFn: startRealtimeAnalysis,
+  });
+};
+
+// 分析任務列表 API 回應介面
+export interface AnalysisTasksResponse {
+  success: boolean;
+  tasks: AnalysisTask[];
+  count: number;
+}
+
+// 獲取分析任務列表的非同步函式
+const fetchAnalysisTasks = async (taskType?: string, status?: string, limit: number = 50): Promise<AnalysisTasksResponse> => {
+  const params = new URLSearchParams();
+  if (taskType) params.append('task_type', taskType);
+  if (status) params.append('status', status);
+  params.append('limit', limit.toString());
+  
+  const { data } = await apiClient.get(`/analysis/tasks?${params.toString()}`);
+  return data;
+};
+
+// 獲取分析任務列表的Hook
+export const useAnalysisTasks = (taskType?: string, status?: string, limit: number = 50) => {
+  return useQuery<AnalysisTasksResponse, Error>({
+    queryKey: ['analysisTasks', taskType, status, limit],
+    queryFn: () => fetchAnalysisTasks(taskType, status, limit),
+    // 設定每 10 秒自動重新整理一次資料
+    refetchInterval: 10000,
+  });
+};
+
+// 停止任務的非同步函式
+const stopAnalysisTask = async (taskId: string): Promise<{ message: string; task_id: string }> => {
+  const { data } = await apiClient.put(`/frontend/tasks/${taskId}/stop`);
+  return data;
+};
+
+// 停止任務的Hook
+export const useStopAnalysisTask = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation<{ message: string; task_id: string }, Error, string>({
+    mutationFn: stopAnalysisTask,
+    onSuccess: () => {
+      // 自動重新載入任務列表
+      queryClient.invalidateQueries({ queryKey: ['analysisTasks'] });
+    },
+  });
+};
+
+// 刪除任務的非同步函式
+const deleteAnalysisTask = async (taskId: string): Promise<{ success: boolean; message: string; task_id: number; deleted_detections: number }> => {
+  const { data } = await apiClient.delete(`/analysis/tasks/${taskId}`);
+  return data;
+};
+
+// 刪除任務的Hook
+export const useDeleteAnalysisTask = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation<{ success: boolean; message: string; task_id: number; deleted_detections: number }, Error, string>({
+    mutationFn: deleteAnalysisTask,
+    onSuccess: () => {
+      // 自動重新載入任務列表
+      queryClient.invalidateQueries({ queryKey: ['analysisTasks'] });
+    },
   });
 };

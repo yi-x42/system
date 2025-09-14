@@ -18,6 +18,10 @@ import {
   useCreateAndExecuteAnalysisTask,
   AnalysisTaskRequest,
   CreateAnalysisTaskResponse,
+  useAnalysisTasks,
+  AnalysisTask,
+  useStopAnalysisTask,
+  useDeleteAnalysisTask,
   useVideoList,
   VideoFileInfo,
   useDeleteVideo,
@@ -59,8 +63,11 @@ export function DetectionAnalysisOriginal() {
   const [realtimeModel, setRealtimeModel] = useState<string>("");
   const [isRealtimeAnalysisRunning, setIsRealtimeAnalysisRunning] = useState(false);
 
-  // 任務管理相關狀態 - 使用空陣列，避免顯示模擬數據
-  const [runningTasks] = useState<any[]>([]);
+  // 獲取所有分析任務（不限制狀態，包含所有任務）
+  const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
+  
+  // 獲取運行中的任務
+  const runningTasks = allTasksData?.tasks || [];
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
@@ -74,6 +81,8 @@ export function DetectionAnalysisOriginal() {
   const deleteVideoMutation = useDeleteVideo();
   const startRealtimeAnalysisMutation = useStartRealtimeAnalysis();
   const videoAnalysisMutation = useVideoAnalysis();
+  const stopTaskMutation = useStopAnalysisTask();
+  const deleteTaskMutation = useDeleteAnalysisTask();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -150,10 +159,36 @@ export function DetectionAnalysisOriginal() {
     // TODO: 實現任務暫停/恢復邏輯
   };
 
-  const stopTask = (taskId: string) => {
-    console.log('停止任務:', taskId);
-    // TODO: 實現停止任務邏輯 - 直接設為 completed 狀態
-    // API 調用: PUT /api/v1/tasks/{taskId}/stop -> status: 'completed'
+  const stopTask = async (taskId: string) => {
+    try {
+      await stopTaskMutation.mutateAsync(taskId);
+      console.log('任務已停止:', taskId);
+      // React Query 會自動重新載入任務列表數據
+    } catch (error) {
+      console.error('停止任務失敗:', error);
+      alert('停止任務失敗，請稍後再試');
+    }
+  };
+
+  const deleteTask = async (taskId: string, taskName: string) => {
+    // 確認對話框
+    const confirmed = window.confirm(
+      `確定要刪除任務「${taskName}」嗎？\n\n此操作將會：\n- 刪除任務記錄\n- 刪除所有相關的檢測結果\n- 此操作無法復原`
+    );
+    
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const result = await deleteTaskMutation.mutateAsync(taskId);
+      console.log('任務已刪除:', result);
+      alert(`任務已成功刪除！\n- 任務ID: ${result.task_id}\n- 同時刪除了 ${result.deleted_detections} 筆檢測結果`);
+      // React Query 會自動重新載入任務列表數據
+    } catch (error) {
+      console.error('刪除任務失敗:', error);
+      alert('刪除任務失敗，請稍後再試');
+    }
   };
 
   // 文件處理函數
@@ -798,15 +833,17 @@ export function DetectionAnalysisOriginal() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-2">
-                            {task.type === 'realtime' ? (
+                            {task.task_type === 'realtime_camera' ? (
                               <Camera className="h-5 w-5" />
                             ) : (
                               <FileVideo className="h-5 w-5" />
                             )}
                             <div>
-                              <CardTitle className="text-base">{task.name}</CardTitle>
+                              <CardTitle className="text-base">
+                                {task.task_name || `任務 #${task.id}`}
+                              </CardTitle>
                               <p className="text-sm text-muted-foreground">
-                                模型: {task.model}
+                                模型: {task.model_id || 'yolo11n.pt'}
                               </p>
                             </div>
                           </div>
@@ -822,53 +859,84 @@ export function DetectionAnalysisOriginal() {
                           <p className="text-sm text-muted-foreground">開始時間</p>
                           <div className="flex items-center gap-1 mt-1">
                             <Clock className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-sm">{task.startTime}</span>
+                            <span className="text-sm">
+                              {task.start_time ? new Date(task.start_time).toLocaleString() : '未開始'}
+                            </span>
                           </div>
                         </div>
-                        {task.camera && (
-                          <div>
-                            <p className="text-sm text-muted-foreground">攝影機</p>
-                            <p className="text-sm font-medium">{task.camera}</p>
-                          </div>
-                        )}
                         <div>
-                          <p className="text-sm text-muted-foreground">處理速度</p>
-                          <p className="text-lg font-medium">{task.fps} FPS</p>
+                          <p className="text-sm text-muted-foreground">任務類型</p>
+                          <p className="text-sm font-medium">
+                            {task.task_type === 'realtime_camera' ? '即時攝影機' : '影片分析'}
+                          </p>
                         </div>
                         <div>
-                          <p className="text-sm text-muted-foreground">檢測數量</p>
-                          <p className="text-lg font-medium">{task.detectionCount}</p>
+                          <p className="text-sm text-muted-foreground">來源解析度</p>
+                          <p className="text-lg font-medium">
+                            {task.source_width && task.source_height ? 
+                              `${task.source_width}x${task.source_height}` : 
+                              '未知'
+                            }
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">信心度閾值</p>
+                          <p className="text-lg font-medium">
+                            {task.confidence_threshold ? 
+                              `${Math.round(task.confidence_threshold * 100)}%` : 
+                              '50%'
+                            }
+                          </p>
                         </div>
                       </div>
 
                       <div className="flex justify-end gap-2">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => toggleTaskStatus(task.id)}
-                          disabled={task.status === 'stopping'}
-                        >
-                          {task.status === 'running' ? (
-                            <>
-                              <Square className="h-4 w-4 mr-2" />
-                              暫停
-                            </>
-                          ) : (
-                            <>
-                              <Play className="h-4 w-4 mr-2" />
-                              恢復
-                            </>
-                          )}
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="destructive"
-                          onClick={() => stopTask(task.id)}
-                          disabled={task.status === 'stopping'}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          停止
-                        </Button>
+                        {/* 暫停/恢復按鈕 - 只對運行中或暫停的任務顯示 */}
+                        {(task.status === 'running' || task.status === 'paused') && (
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => toggleTaskStatus(task.id.toString())}
+                          >
+                            {task.status === 'running' ? (
+                              <>
+                                <Square className="h-4 w-4 mr-2" />
+                                暫停
+                              </>
+                            ) : (
+                              <>
+                                <Play className="h-4 w-4 mr-2" />
+                                恢復
+                              </>
+                            )}
+                          </Button>
+                        )}
+                        
+                        {/* 停止按鈕 - 只對運行中或暫停的任務顯示 */}
+                        {(task.status === 'running' || task.status === 'paused') && (
+                          <Button 
+                            size="sm" 
+                            variant="destructive"
+                            onClick={() => stopTask(task.id.toString())}
+                            disabled={stopTaskMutation.isPending}
+                          >
+                            <Square className="h-4 w-4 mr-2" />
+                            {stopTaskMutation.isPending ? '停止中...' : '停止'}
+                          </Button>
+                        )}
+                        
+                        {/* 刪除按鈕 - 只對非運行狀態的任務顯示 */}
+                        {task.status !== 'running' && (
+                          <Button 
+                            size="sm" 
+                            variant="destructive"
+                            onClick={() => deleteTask(task.id.toString(), task.task_name || `任務 #${task.id}`)}
+                            disabled={deleteTaskMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            {deleteTaskMutation.isPending ? '刪除中...' : '刪除'}
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -896,17 +964,17 @@ export function DetectionAnalysisOriginal() {
                   </div>
                   <div className="text-center">
                     <p className="text-2xl font-bold text-blue-600">
-                      {runningTasks.reduce((sum, task) => sum + task.detectionCount, 0)}
+                      {runningTasks.filter(t => t.status === 'completed').length}
                     </p>
-                    <p className="text-sm text-muted-foreground">總檢測數</p>
+                    <p className="text-sm text-muted-foreground">已完成</p>
                   </div>
                   <div className="text-center">
                     <p className="text-2xl font-bold text-purple-600">
                       {runningTasks.length > 0 
-                        ? Math.round(runningTasks.reduce((sum, task) => sum + task.fps, 0) / runningTasks.length) 
+                        ? Math.round(runningTasks.reduce((sum, task) => sum + (task.source_fps || 30), 0) / runningTasks.length) 
                         : 0}
                     </p>
-                    <p className="text-sm text-muted-foreground">平均 FPS</p>
+                    <p className="text-sm text-muted-foreground">平均來源 FPS</p>
                   </div>
                 </div>
               </CardContent>
