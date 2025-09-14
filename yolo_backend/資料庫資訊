@@ -7,16 +7,19 @@ YOLOv11 數位雙生分析系統 - 資料庫重設計方案
 ==========================================================
 
 ## 1. analysis_tasks (分析任務表)
-id               INTEGER      主鍵
-task_type        VARCHAR(20)  'realtime_camera' | 'video_file'
-status           VARCHAR(20)  'pending' | 'running' | 'completed' | 'failed'
-source_info      JSON         攝影機配置或影片檔案路徑（不再包含解析度資訊）
-source_width     INTEGER      來源影像寬度（專用欄位）
-source_height    INTEGER      來源影像高度（專用欄位）
-source_fps       FLOAT        來源影像幀率（專用欄位）
-start_time       TIMESTAMP    任務開始時間
-end_time         TIMESTAMP    任務結束時間
-created_at       TIMESTAMP    建立時間
+id                    INTEGER      主鍵
+task_type             VARCHAR(20)  'realtime_camera' | 'video_file'
+status                VARCHAR(20)  'pending' | 'running' | 'paused' | 'completed' | 'failed'
+source_info           JSON         攝影機配置或影片檔案路徑（不再包含解析度資訊）
+source_width          INTEGER      來源影像寬度（專用欄位）
+source_height         INTEGER      來源影像高度（專用欄位）
+source_fps            FLOAT        來源影像幀率（專用欄位）
+start_time            TIMESTAMP    任務開始時間
+end_time              TIMESTAMP    任務結束時間
+created_at            TIMESTAMP    建立時間
+task_name             VARCHAR(200) 任務名稱（用於前端顯示）
+model_id              VARCHAR(100) 使用的YOLO模型ID（如：yolo11n.pt）
+confidence_threshold  FLOAT        信心度閾值（預設0.5，用於物件辨識）
 
 ## 2. detection_results (檢測結果表)
 id               INTEGER      主鍵
@@ -239,13 +242,60 @@ task_data = {
 - ✅ 支援解析度範圍過濾
 
 ==========================================================
+📝 2025年9月14日 - 任務管理系統更新
+==========================================================
+
+新增任務管理系統欄位到 analysis_tasks 表格：
+
+1. **task_name (VARCHAR(200))**
+   - 目的：提供使用者友善的任務名稱
+   - 用途：在前端任務管理頁面顯示可讀的任務名稱
+   - 範例：「會議室A即時監控」、「大廳影片分析任務」
+
+2. **model_id (VARCHAR(100))**
+   - 目的：記錄該任務使用的YOLO模型
+   - 用途：支援多模型管理和任務回溯
+   - 範例：「yolo11n.pt」、「yolo11s.pt」、「custom_model.pt」
+
+3. **confidence_threshold (FLOAT, DEFAULT 0.5)**
+   - 目的：記錄該任務的信心度閾值設定
+   - 用途：任務特定的辨識精度控制
+   - 範圍：0.0 - 1.0，預設 0.5
+
+這些欄位支援完整的任務管理工作流程：
+- 攝影機配置頁面 → 建立即時分析任務
+- 任務管理頁面 → 顯示、暫停、停止任務
+- 模型管理頁面 → 切換不同YOLO模型
+
+**狀態管理簡化 (2025/9/14)**：
+採用簡化的 5 狀態設計以支援前端操作：
+- 'pending' - 待處理：任務已建立但尚未開始
+- 'running' - 運行中：任務正在執行分析
+- 'paused' ⭐ - 已暫停：任務暫時停止，可恢復
+- 'completed' - 已完成：任務完成（自然完成或用戶停止）
+- 'failed' - 失敗：任務執行失敗
+
+簡化工作流程：
+- 啟動任務：pending → running
+- 暫停/恢復：running ⟷ paused  
+- 停止任務：running/paused → completed（直接完成，無過渡狀態）
+- 失敗處理：任何狀態 → failed
+
+前端任務管理頁面功能：
+- 即時顯示任務狀態（待處理/運行中/已暫停/已完成/失敗）
+- 暫停/恢復控制按鈕
+- 停止任務按鈕（直接標記為完成）
+
+==========================================================
 📝 下一步工作項目
 ==========================================================
 
 1. 前端管理介面適配新解析度欄位顯示
-2. 創建資料庫遷移腳本處理現有資料
+2. 創建資料庫遷移腳本處理現有資料 ✅ (已完成)
 3. 實作完整的解析度過濾和統計功能測試
 4. 更新 YOLO 服務整合新的資料結構（如需要）
 5. 驗證所有 API 端點的解析度追蹤功能
+6. 實作任務管理系統的 API 端點 🆕
+7. 完成前端任務管理頁面的資料綁定 🆕
 6. 效能測試和優化
 

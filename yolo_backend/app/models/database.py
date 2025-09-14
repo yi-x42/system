@@ -15,7 +15,7 @@ class AnalysisTask(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_type = Column(String(20), nullable=False)  # 'realtime_camera' | 'video_file'
-    status = Column(String(20), nullable=False, default='pending')  # 'pending' | 'running' | 'completed' | 'failed'
+    status = Column(String(20), nullable=False, default='pending')  # 'pending' | 'running' | 'paused' | 'completed' | 'failed'
     source_info = Column(JSON)  # 攝影機配置或影片檔案路徑（不含解析度）
     source_width = Column(Integer)  # 來源影像寬度
     source_height = Column(Integer)  # 來源影像高度
@@ -23,6 +23,11 @@ class AnalysisTask(Base):
     start_time = Column(DateTime)  # 任務開始時間
     end_time = Column(DateTime)    # 任務結束時間
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # 任務管理系統欄位
+    task_name = Column(String(200))  # 任務名稱
+    model_id = Column(String(100))   # 使用的YOLO模型ID
+    confidence_threshold = Column(Float, default=0.5)  # 信心度閾值
     
     # 關聯關係
     detection_results = relationship("DetectionResult", back_populates="task", cascade="all, delete-orphan")
@@ -51,7 +56,10 @@ class AnalysisTask(Base):
             'source_fps': self.source_fps,
             'start_time': safe_isoformat(self.start_time),
             'end_time': safe_isoformat(self.end_time),
-            'created_at': safe_isoformat(self.created_at)
+            'created_at': safe_isoformat(self.created_at),
+            'task_name': self.task_name,
+            'model_id': self.model_id,
+            'confidence_threshold': self.confidence_threshold
         }
 
 class DetectionResult(Base):

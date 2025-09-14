@@ -32,6 +32,8 @@ class RealtimeSession:
     detection_count: int = 0
     last_detection_time: Optional[datetime] = None
     consumer_id: Optional[str] = None
+    confidence_threshold: float = 0.5
+    iou_threshold: float = 0.45
 
 
 class RealtimeDetectionService:
@@ -53,7 +55,9 @@ class RealtimeDetectionService:
         task_id: str, 
         camera_id: str,
         device_index: int,
-        db_service: DatabaseService = None
+        db_service: DatabaseService = None,
+        confidence_threshold: float = 0.5,
+        iou_threshold: float = 0.45
     ) -> bool:
         """開始實時檢測 - 使用共享視訊流"""
         try:
@@ -82,7 +86,9 @@ class RealtimeDetectionService:
                 camera_id=camera_id,
                 running=True,
                 start_time=datetime.now(),
-                consumer_id=f"detection_{task_id}"
+                consumer_id=f"detection_{task_id}",
+                confidence_threshold=confidence_threshold,
+                iou_threshold=iou_threshold
             )
             
             # 創建流消費者
@@ -145,8 +151,12 @@ class RealtimeDetectionService:
             # 更新幀計數
             session.frame_count += 1
             
-            # 執行 YOLO 推理
-            predictions = self.yolo_service.predict_frame(frame)
+            # 執行 YOLO 推理 - 使用會話中的信心度閾值
+            predictions = self.yolo_service.predict_frame(
+                frame, 
+                conf_threshold=session.confidence_threshold,
+                iou_threshold=session.iou_threshold
+            )
             
             if predictions and len(predictions) > 0:
                 session.detection_count += len(predictions)

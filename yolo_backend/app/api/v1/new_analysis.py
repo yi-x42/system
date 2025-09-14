@@ -271,12 +271,15 @@ async def get_analysis_task_results(
         logger.error(f"獲取檢測結果失敗: {e}")
         raise HTTPException(status_code=500, detail=f"獲取檢測結果失敗: {str(e)}")
 
-@router.post("/analysis/video", summary="開始影片檔案分析")
+@router.post("/new-analysis/start-video-analysis", summary="開始影片檔案分析")
 async def start_video_analysis(
     background_tasks: BackgroundTasks,
     file: Optional[UploadFile] = File(None),
     source_id: Optional[int] = Form(None),
     file_path: Optional[str] = Form(None),
+    task_name: str = Form("影片分析任務"),
+    model_id: str = Form("yolo11n"),
+    confidence_threshold: float = Form(0.5),
     db: AsyncSession = Depends(get_db)
 ):
     """上傳影片並開始分析"""
@@ -327,7 +330,10 @@ async def start_video_analysis(
                 'source_id': source_id,
                 'file_path': actual_file_path,
                 'original_filename': original_filename
-            }
+            },
+            'task_name': task_name,
+            'model_id': model_id,
+            'confidence_threshold': confidence_threshold
         }
 
         # 量測來源解析度和FPS並寫入專用欄位（若量測失敗則略過，不阻斷流程）

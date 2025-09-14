@@ -179,6 +179,31 @@ export const useVideoUpload = () => {
   });
 };
 
+// 影片分析回應類型定義
+export interface VideoAnalysisResponse {
+  success: boolean;
+  task_id: number;
+  message: string;
+  task: any;
+}
+
+// 影片分析的非同步函式
+const startVideoAnalysis = async (formData: FormData): Promise<VideoAnalysisResponse> => {
+  const { data } = await apiClient.post('/new-analysis/start-video-analysis', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return data;
+};
+
+// 建立影片分析的 mutation hook
+export const useVideoAnalysis = () => {
+  return useMutation<VideoAnalysisResponse, Error, FormData>({
+    mutationFn: startVideoAnalysis,
+  });
+};
+
 // YOLO 模型清單型別
 export interface YoloModelFileInfo {
   id: string;

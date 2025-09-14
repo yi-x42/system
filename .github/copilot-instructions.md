@@ -14,17 +14,20 @@
     -   **應用程式入口**: `yolo_backend/app/main.py`。
     -   **核心模型**: 使用 `ultralytics` 搭配 `yolo11n.pt` 模型。
     -   **資料庫**: 使用 PostgreSQL
-    ## 1. analysis_tasks (分析任務表)
-id               INTEGER      主鍵
-task_type        VARCHAR(20)  'realtime_camera' | 'video_file'
-status           VARCHAR(20)  'pending' | 'running' | 'completed' | 'failed'
-source_info      JSON         攝影機配置或影片檔案路徑（不再包含解析度資訊）
-source_width     INTEGER      來源影像寬度（專用欄位）
-source_height    INTEGER      來源影像高度（專用欄位）
-source_fps       FLOAT        來源影像幀率（專用欄位）
-start_time       TIMESTAMP    任務開始時間
-end_time         TIMESTAMP    任務結束時間
-created_at       TIMESTAMP    建立時間
+## 1. analysis_tasks (分析任務表)
+id                    INTEGER      主鍵
+task_type             VARCHAR(20)  'realtime_camera' | 'video_file'
+status                VARCHAR(20)  'pending' | 'running' | 'paused' | 'completed' | 'failed'
+source_info           JSON         攝影機配置或影片檔案路徑（不再包含解析度資訊）
+source_width          INTEGER      來源影像寬度（專用欄位）
+source_height         INTEGER      來源影像高度（專用欄位）
+source_fps            FLOAT        來源影像幀率（專用欄位）
+start_time            TIMESTAMP    任務開始時間
+end_time              TIMESTAMP    任務結束時間
+created_at            TIMESTAMP    建立時間
+task_name             VARCHAR(200) 任務名稱（用於前端顯示）
+model_id              VARCHAR(100) 使用的YOLO模型ID（如：yolo11n.pt）
+confidence_threshold  FLOAT        信心度閾值（預設0.5，用於物件辨識）
 
 ## 2. detection_results (檢測結果表)
 id               INTEGER      主鍵

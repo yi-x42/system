@@ -700,7 +700,10 @@ async def start_realtime_analysis(
                 source_width=camera_width,
                 source_height=camera_height,
                 source_fps=camera_fps,
-                created_at=datetime.utcnow()
+                created_at=datetime.utcnow(),
+                task_name=request.task_name,
+                model_id=request.model_id,
+                confidence_threshold=request.confidence
             )
             
             db.add(analysis_task)
@@ -2606,7 +2609,9 @@ async def run_realtime_detection(
             task_id=str(task_id),
             camera_id=camera_id,
             device_index=device_index,
-            db_service=db_service
+            db_service=db_service,
+            confidence_threshold=request.confidence,
+            iou_threshold=request.iou_threshold
         )
         
         if success:

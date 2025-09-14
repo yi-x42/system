@@ -23,7 +23,8 @@ import {
   useDeleteVideo,
   useCameras,
   useStartRealtimeAnalysis,
-  RealtimeAnalysisRequest
+  RealtimeAnalysisRequest,
+  useVideoAnalysis
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -72,6 +73,7 @@ export function DetectionAnalysisOriginal() {
   const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
   const deleteVideoMutation = useDeleteVideo();
   const startRealtimeAnalysisMutation = useStartRealtimeAnalysis();
+  const videoAnalysisMutation = useVideoAnalysis();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -126,16 +128,19 @@ export function DetectionAnalysisOriginal() {
     switch (status) {
       case 'running': return 'default';
       case 'paused': return 'secondary';
-      case 'stopping': return 'destructive';
+      case 'completed': return 'outline';
+      case 'failed': return 'destructive';
       default: return 'outline';
     }
   };
 
   const getTaskStatusText = (status: string) => {
     switch (status) {
+      case 'pending': return '待處理';
       case 'running': return '運行中';
       case 'paused': return '已暫停';
-      case 'stopping': return '停止中';
+      case 'completed': return '已完成';
+      case 'failed': return '失敗';
       default: return '未知';
     }
   };
@@ -147,7 +152,8 @@ export function DetectionAnalysisOriginal() {
 
   const stopTask = (taskId: string) => {
     console.log('停止任務:', taskId);
-    // TODO: 實現停止任務邏輯
+    // TODO: 實現停止任務邏輯 - 直接設為 completed 狀態
+    // API 調用: PUT /api/v1/tasks/{taskId}/stop -> status: 'completed'
   };
 
   // 文件處理函數
@@ -222,53 +228,34 @@ export function DetectionAnalysisOriginal() {
     }
 
     try {
-      let taskData: AnalysisTaskRequest;
+      // 使用新的影片分析 API，透過 FormData 傳送參數
+      const formData = new FormData();
       
       if (targetVideo) {
         // 從影片列表中選擇的影片
-        const [width, height] = targetVideo.resolution 
-          ? targetVideo.resolution.split('x').map(Number)
-          : [1920, 1080];
-
-        taskData = {
-          task_type: 'video_file',
-          source_info: {
-            file_path: targetVideo.file_path,
-            original_filename: targetVideo.name,
-            confidence_threshold: confidenceThreshold,
-          },
-          source_width: width || 1920,
-          source_height: height || 1080,
-          source_fps: 30.0, // 預設值，因為VideoFileInfo沒有fps欄位
-        };
+        formData.append('file_path', targetVideo.file_path);
       } else if (uploadResult) {
         // 新上傳的影片
-        const [width, height] = uploadResult.video_info.resolution 
-          ? uploadResult.video_info.resolution.split('x').map(Number)
-          : [1920, 1080];
-
-        taskData = {
-          task_type: 'video_file',
-          source_info: {
-            file_path: uploadResult.file_path,
-            original_filename: uploadResult.original_name,
-            confidence_threshold: confidenceThreshold,
-          },
-          source_width: width || 1920,
-          source_height: height || 1080,
-          source_fps: uploadResult.video_info.fps || 30.0,
-        };
-      } else {
-        throw new Error('無效的影片資料');
+        formData.append('file_path', uploadResult.file_path);
       }
+      
+      // 新增三個必要欄位
+      formData.append('task_name', `影片分析_${new Date().toLocaleString()}`);
+      formData.append('model_id', selectedModel);
+      formData.append('confidence_threshold', confidenceThreshold.toString());
 
-      console.log('創建並執行分析任務:', taskData);
+      console.log('開始影片分析，參數:', {
+        task_name: `影片分析_${new Date().toLocaleString()}`,
+        model_id: selectedModel,
+        confidence_threshold: confidenceThreshold,
+        target_video: targetVideo?.name || uploadResult?.original_name
+      });
       
-      // 使用新的 create-and-execute API
-      const result = await createAndExecuteTaskMutation.mutateAsync(taskData);
-      console.log('分析任務已創建並開始執行:', result);
+      // 使用新的影片分析 API
+      const result = await videoAnalysisMutation.mutateAsync(formData);
+      console.log('影片分析已開始:', result);
       
-      alert(`分析任務已開始執行！\n任務 ID: ${result.task_id}\n狀態: ${result.status}\n${result.message}`);
+      alert(`影片分析已開始執行！\n任務 ID: ${result.task_id}\n狀態: ${result.success ? '成功' : '失敗'}\n${result.message}`);
       
       // 重新載入影片列表以更新狀態
       refetchVideoList();
@@ -713,7 +700,22 @@ export function DetectionAnalysisOriginal() {
                   </div>
 
                   <div className="space-y-3">
-                    
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="confidence-threshold-realtime">信心度閾值</Label>
+                        <span className="text-sm text-muted-foreground">{confidenceThreshold.toFixed(1)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        id="confidence-threshold-realtime"
+                        min="0.1"
+                        max="1"
+                        step="0.1"
+                        value={confidenceThreshold}
+                        onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+                        className="w-full"
+                      />
+                    </div>
                     
                     <div className="flex items-center justify-between">
                       <Label htmlFor="auto-alert">自動警報</Label>

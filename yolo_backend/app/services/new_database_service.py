@@ -34,7 +34,10 @@ class DatabaseService:
             source_width=task_data.get('source_width'),
             source_height=task_data.get('source_height'),
             source_fps=task_data.get('source_fps'),
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
+            task_name=task_data.get('task_name'),
+            model_id=task_data.get('model_id'),
+            confidence_threshold=task_data.get('confidence_threshold', 0.5)
         )
         session.add(task)
         await session.commit()
@@ -444,45 +447,64 @@ class DatabaseService:
     def create_detection_result_sync(self, detection_data: Dict[str, Any]) -> bool:
         """同步儲存檢測結果（用於即時檢測）- 使用同步資料庫連接"""
         try:
+            # 驗證必要的資料欄位
+            required_fields = [
+                'task_id', 'frame_number', 'timestamp', 'object_type', 'confidence',
+                'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'center_x', 'center_y'
+            ]
+            
+            for field in required_fields:
+                if field not in detection_data:
+                    db_logger.error(f"檢測結果缺少必要欄位: {field}")
+                    return False
+            
+            db_logger.debug(f"準備儲存檢測結果: task_id={detection_data['task_id']}, frame={detection_data['frame_number']}, object={detection_data['object_type']}")
+            
             # 使用同步資料庫連接，避免 asyncio 衝突
-            from app.core.database import sync_engine
-            from sqlalchemy.orm import sessionmaker
+            from app.core.database import sync_engine, SyncSessionLocal
             from sqlalchemy import text
             
-            # 建立同步 session
-            SyncSessionLocal = sessionmaker(bind=sync_engine)
-            
             with SyncSessionLocal() as session:
-                # 使用原始 SQL 插入，避免 ORM 的 async 問題
-                sql = text("""
-                    INSERT INTO detection_results 
-                    (task_id, frame_number, timestamp, object_type, confidence, 
-                     bbox_x1, bbox_y1, bbox_x2, bbox_y2, center_x, center_y)
-                    VALUES 
-                    (:task_id, :frame_number, :timestamp, :object_type, :confidence, 
-                     :bbox_x1, :bbox_y1, :bbox_x2, :bbox_y2, :center_x, :center_y)
-                """)
-                
-                session.execute(sql, {
-                    'task_id': int(detection_data['task_id']),
-                    'frame_number': detection_data['frame_number'],
-                    'timestamp': detection_data['timestamp'],
-                    'object_type': detection_data['object_type'],
-                    'confidence': detection_data['confidence'],
-                    'bbox_x1': detection_data['bbox_x1'],
-                    'bbox_y1': detection_data['bbox_y1'],
-                    'bbox_x2': detection_data['bbox_x2'],
-                    'bbox_y2': detection_data['bbox_y2'],
-                    'center_x': detection_data['center_x'],
-                    'center_y': detection_data['center_y']
-                })
-                
-                session.commit()
-                db_logger.debug(f"成功同步儲存檢測結果到任務 {detection_data.get('task_id')}")
-                return True
+                try:
+                    # 使用原始 SQL 插入，避免 ORM 的 async 問題
+                    sql = text("""
+                        INSERT INTO detection_results 
+                        (task_id, frame_number, timestamp, object_type, confidence, 
+                         bbox_x1, bbox_y1, bbox_x2, bbox_y2, center_x, center_y)
+                        VALUES 
+                        (:task_id, :frame_number, :timestamp, :object_type, :confidence, 
+                         :bbox_x1, :bbox_y1, :bbox_x2, :bbox_y2, :center_x, :center_y)
+                    """)
+                    
+                    params = {
+                        'task_id': int(detection_data['task_id']),
+                        'frame_number': int(detection_data['frame_number']),
+                        'timestamp': detection_data['timestamp'],
+                        'object_type': str(detection_data['object_type']),
+                        'confidence': float(detection_data['confidence']),
+                        'bbox_x1': float(detection_data['bbox_x1']),
+                        'bbox_y1': float(detection_data['bbox_y1']),
+                        'bbox_x2': float(detection_data['bbox_x2']),
+                        'bbox_y2': float(detection_data['bbox_y2']),
+                        'center_x': float(detection_data['center_x']),
+                        'center_y': float(detection_data['center_y'])
+                    }
+                    
+                    session.execute(sql, params)
+                    session.commit()
+                    
+                    db_logger.debug(f"成功同步儲存檢測結果到任務 {detection_data.get('task_id')}")
+                    return True
+                    
+                except Exception as sql_error:
+                    session.rollback()
+                    db_logger.error(f"SQL 執行錯誤: {sql_error}")
+                    db_logger.error(f"檢測結果資料: {detection_data}")
+                    return False
                 
         except Exception as e:
             db_logger.error(f"同步儲存檢測結果失敗: {e}")
+            db_logger.error(f"錯誤的檢測結果資料: {detection_data}")
             return False
 
 # 建立服務實例
