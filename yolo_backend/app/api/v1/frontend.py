@@ -568,6 +568,54 @@ async def stop_task(task_id: str, db: AsyncSession = Depends(get_db), task_servi
         api_logger.error(f"停止任務失敗: {e}")
         raise HTTPException(status_code=500, detail=f"停止任務失敗: {str(e)}")
 
+@router.put("/tasks/{task_id}/toggle")
+async def toggle_task_status(task_id: str, db: AsyncSession = Depends(get_db)):
+    """切換任務狀態（暫停/恢復）"""
+    try:
+        from sqlalchemy import select, update
+        from app.models.database import AnalysisTask
+        
+        # 獲取當前任務狀態
+        result = await db.execute(select(AnalysisTask).where(AnalysisTask.id == int(task_id)))
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(status_code=404, detail="任務不存在")
+        
+        # 保存原始狀態
+        old_status = task.status
+        
+        # 只允許切換運行中和暫停狀態
+        if old_status == 'running':
+            new_status = 'paused'
+            message = "任務已暫停"
+        elif old_status == 'paused':
+            new_status = 'running'
+            message = "任務已恢復"
+        else:
+            raise HTTPException(status_code=400, detail=f"無法切換狀態：任務當前狀態為 {old_status}")
+        
+        # 更新任務狀態
+        await db.execute(
+            update(AnalysisTask)
+            .where(AnalysisTask.id == int(task_id))
+            .values(status=new_status)
+        )
+        await db.commit()
+        
+        return {
+            "message": message,
+            "task_id": int(task_id),
+            "old_status": old_status,
+            "new_status": new_status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"切換任務狀態失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"切換任務狀態失敗: {str(e)}")
+
 @router.get("/tasks/stats")
 async def get_task_stats(db: AsyncSession = Depends(get_db), task_service: TaskService = Depends(get_task_service)):
     """獲取任務統計"""

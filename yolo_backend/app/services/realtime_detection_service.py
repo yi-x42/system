@@ -145,6 +145,28 @@ class RealtimeDetectionService:
     def _process_frame(self, session: RealtimeSession, frame_data: FrameData, db_service: DatabaseService = None):
         """處理單一幀數據"""
         try:
+            # 檢查會話狀態
+            if not session.running:
+                return
+            
+            # 檢查任務的資料庫狀態（每30幀檢查一次，避免頻繁查詢）
+            if session.frame_count % 30 == 0:
+                if db_service:
+                    try:
+                        task_status = db_service.get_task_status_sync(session.task_id)
+                        if task_status in ['paused', 'completed', 'failed', 'stopped']:
+                            detection_logger.info(f"任務 {session.task_id} 狀態為 {task_status}，停止處理幀")
+                            if task_status == 'paused':
+                                # 暫停狀態：停止處理但不清理會話，等待恢復
+                                detection_logger.info(f"任務 {session.task_id} 已暫停，跳過幀處理")
+                                return
+                            else:
+                                # 其他狀態：停止會話
+                                session.running = False
+                                return
+                    except Exception as e:
+                        detection_logger.error(f"檢查任務狀態失敗: {e}")
+            
             frame = frame_data.frame
             timestamp = frame_data.timestamp
             

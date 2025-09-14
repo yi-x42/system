@@ -613,3 +613,22 @@ export const useDeleteAnalysisTask = () => {
     },
   });
 };
+
+// 切換任務狀態（暫停/恢復）的非同步函式
+const toggleAnalysisTaskStatus = async (taskId: string): Promise<{ message: string; task_id: number; old_status: string; new_status: string }> => {
+  const { data } = await apiClient.put(`/frontend/tasks/${taskId}/toggle`);
+  return data;
+};
+
+// 切換任務狀態的Hook
+export const useToggleAnalysisTaskStatus = () => {
+  const queryClient = useQueryClient();
+  
+  return useMutation<{ message: string; task_id: number; old_status: string; new_status: string }, Error, string>({
+    mutationFn: toggleAnalysisTaskStatus,
+    onSuccess: () => {
+      // 自動重新載入任務列表
+      queryClient.invalidateQueries({ queryKey: ['analysisTasks'] });
+    },
+  });
+};

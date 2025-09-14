@@ -22,6 +22,7 @@ import {
   AnalysisTask,
   useStopAnalysisTask,
   useDeleteAnalysisTask,
+  useToggleAnalysisTaskStatus,
   useVideoList,
   VideoFileInfo,
   useDeleteVideo,
@@ -83,6 +84,7 @@ export function DetectionAnalysisOriginal() {
   const videoAnalysisMutation = useVideoAnalysis();
   const stopTaskMutation = useStopAnalysisTask();
   const deleteTaskMutation = useDeleteAnalysisTask();
+  const toggleTaskStatusMutation = useToggleAnalysisTaskStatus();
 
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
@@ -154,9 +156,15 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
-  const toggleTaskStatus = (taskId: string) => {
-    console.log('切換任務狀態:', taskId);
-    // TODO: 實現任務暫停/恢復邏輯
+  const toggleTaskStatus = async (taskId: string) => {
+    try {
+      await toggleTaskStatusMutation.mutateAsync(taskId);
+      console.log('任務狀態已切換:', taskId);
+      // React Query 會自動重新載入任務列表數據
+    } catch (error) {
+      console.error('切換任務狀態失敗:', error);
+      alert('切換任務狀態失敗，請稍後再試');
+    }
   };
 
   const stopTask = async (taskId: string) => {

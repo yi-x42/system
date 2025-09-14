@@ -181,21 +181,32 @@ class TaskService:
     async def stop_task(self, task_id: str, db: AsyncSession = None) -> bool:
         """停止任務"""
         try:
-            if task_id not in self.active_tasks:
-                api_logger.warning(f"任務不存在: {task_id}")
-                return False
+            # 首先嘗試停止實際的檢測服務
+            try:
+                from app.services.realtime_detection_service import realtime_detection_service
+                success = await realtime_detection_service.stop_realtime_detection(task_id)
+                if success:
+                    api_logger.info(f"實時檢測服務已停止: {task_id}")
+                else:
+                    api_logger.warning(f"實時檢測服務停止失敗或任務不存在: {task_id}")
+            except Exception as e:
+                api_logger.error(f"停止實時檢測服務失敗: {e}")
             
-            task = self.active_tasks[task_id]
+            # 如果任務在記憶體中，更新記憶體狀態
+            if task_id in self.active_tasks:
+                task = self.active_tasks[task_id]
+                
+                if task["status"] not in ["running", "paused"]:
+                    api_logger.warning(f"任務未在運行: {task_id}, 狀態: {task['status']}")
+                
+                # 更新任務狀態
+                task["status"] = "stopped"
+                task["end_time"] = datetime.utcnow()
+            else:
+                # 任務不在記憶體中，但可能在資料庫中運行
+                api_logger.info(f"任務不在記憶體中，嘗試從資料庫停止: {task_id}")
             
-            if task["status"] != "running":
-                api_logger.warning(f"任務未在運行: {task_id}")
-                return True
-            
-            # 更新任務狀態
-            task["status"] = "stopped"
-            task["end_time"] = datetime.utcnow()
-            
-            # 更新資料庫
+            # 更新資料庫狀態（無論任務是否在記憶體中）
             if db:
                 try:
                     query = select(AnalysisTask).where(AnalysisTask.id == int(task_id))
@@ -203,9 +214,16 @@ class TaskService:
                     db_task = result.scalar_one_or_none()
                     
                     if db_task:
-                        db_task.status = 'completed'
-                        db_task.end_time = datetime.utcnow()
-                        await db.commit()
+                        if db_task.status in ['running', 'paused']:
+                            db_task.status = 'completed'
+                            db_task.end_time = datetime.utcnow()
+                            await db.commit()
+                            api_logger.info(f"資料庫任務狀態已更新為完成: {task_id}")
+                        else:
+                            api_logger.info(f"資料庫任務狀態已是: {db_task.status}")
+                    else:
+                        api_logger.warning(f"資料庫中未找到任務: {task_id}")
+                        return False
                 except Exception as e:
                     api_logger.error(f"更新資料庫任務狀態失敗: {e}")
             

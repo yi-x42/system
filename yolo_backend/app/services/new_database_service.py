@@ -539,6 +539,28 @@ class DatabaseService:
             db_logger.error(f"同步儲存檢測結果失敗: {e}")
             db_logger.error(f"錯誤的檢測結果資料: {detection_data}")
             return False
+    
+    def get_task_status_sync(self, task_id: str) -> Optional[str]:
+        """同步獲取任務狀態"""
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            from app.core.config import settings
+            
+            # 創建同步引擎和會話
+            sync_engine = create_engine(settings.database_url.replace('postgresql+asyncpg://', 'postgresql://'))
+            SyncSessionLocal = sessionmaker(bind=sync_engine)
+            
+            with SyncSessionLocal() as session:
+                result = session.execute(
+                    select(AnalysisTask.status).where(AnalysisTask.id == int(task_id))
+                )
+                task_status = result.scalar_one_or_none()
+                return task_status
+                
+        except Exception as e:
+            db_logger.error(f"同步獲取任務狀態失敗 [{task_id}]: {e}")
+            return None
 
 # 建立服務實例
 db_service = DatabaseService()
