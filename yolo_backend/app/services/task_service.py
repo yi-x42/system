@@ -179,49 +179,71 @@ class TaskService:
             return False
     
     async def stop_task(self, task_id: str, db: AsyncSession = None) -> bool:
-        """停止任務"""
+        """停止任務 - 修復版本：優先檢查資料庫，不依賴內存狀態"""
         try:
-            if task_id not in self.active_tasks:
-                api_logger.warning(f"任務不存在: {task_id}")
-                return False
+            api_logger.info(f"開始停止任務: {task_id}")
             
-            task = self.active_tasks[task_id]
-            
-            if task["status"] not in ["running", "paused"]:
-                api_logger.warning(f"任務未在運行: {task_id}, 狀態: {task['status']}")
-                return True
-            
-            # 停止實際的檢測服務
-            try:
-                from app.services.realtime_detection_service import realtime_detection_service
-                success = await realtime_detection_service.stop_realtime_detection(task_id)
-                if success:
-                    api_logger.info(f"實時檢測服務已停止: {task_id}")
-                else:
-                    api_logger.warning(f"實時檢測服務停止失敗或任務不存在: {task_id}")
-            except Exception as e:
-                api_logger.error(f"停止實時檢測服務失敗: {e}")
-            
-            # 更新任務狀態
-            task["status"] = "stopped"
-            task["end_time"] = datetime.utcnow()
-            
-            # 更新資料庫
+            # 🔥 修復：優先檢查資料庫中的任務，而不是依賴內存
+            db_task = None
             if db:
                 try:
                     query = select(AnalysisTask).where(AnalysisTask.id == int(task_id))
                     result = await db.execute(query)
                     db_task = result.scalar_one_or_none()
                     
-                    if db_task:
-                        db_task.status = 'completed'
-                        db_task.end_time = datetime.utcnow()
-                        await db.commit()
+                    if not db_task:
+                        api_logger.warning(f"資料庫中任務不存在: {task_id}")
+                        # 如果資料庫中沒有任務，但檢測服務可能還在運行，仍然嘗試停止
+                    else:
+                        api_logger.info(f"資料庫中找到任務 {task_id}，狀態: {db_task.status}")
+                        
+                        # 如果任務已經是完成狀態，直接返回成功
+                        if db_task.status in ['completed', 'stopped', 'failed']:
+                            api_logger.info(f"任務 {task_id} 已經是終止狀態: {db_task.status}")
+                            # 仍然嘗試停止檢測服務，以防有殘留的檢測進程
+                        
+                except Exception as e:
+                    api_logger.error(f"查詢資料庫任務失敗: {e}")
+            
+            # 停止實際的檢測服務（無論內存或資料庫狀態如何，都嘗試停止）
+            detection_stopped = False
+            try:
+                from app.services.realtime_detection_service import realtime_detection_service
+                success = await realtime_detection_service.stop_realtime_detection(task_id)
+                if success:
+                    api_logger.info(f"實時檢測服務已停止: {task_id}")
+                    detection_stopped = True
+                else:
+                    api_logger.warning(f"實時檢測服務停止失敗或任務不存在: {task_id}")
+            except Exception as e:
+                api_logger.error(f"停止實時檢測服務失敗: {e}")
+            
+            # 更新內存中的任務狀態（如果存在）
+            if task_id in self.active_tasks:
+                task = self.active_tasks[task_id]
+                task["status"] = "stopped"
+                task["end_time"] = datetime.utcnow()
+                api_logger.info(f"已更新內存中任務 {task_id} 的狀態")
+            else:
+                api_logger.info(f"內存中沒有任務 {task_id}，跳過內存狀態更新")
+            
+            # 更新資料庫狀態
+            if db and db_task:
+                try:
+                    db_task.status = 'completed'
+                    db_task.end_time = datetime.utcnow()
+                    await db.commit()
+                    api_logger.info(f"已更新資料庫中任務 {task_id} 的狀態為 completed")
                 except Exception as e:
                     api_logger.error(f"更新資料庫任務狀態失敗: {e}")
             
-            api_logger.info(f"任務已停止: {task_id}")
-            return True
+            # 判斷停止是否成功
+            if detection_stopped or db_task:
+                api_logger.info(f"任務停止成功: {task_id}")
+                return True
+            else:
+                api_logger.warning(f"任務停止部分成功: {task_id} (檢測服務或資料庫任務可能不存在)")
+                return True  # 返回成功，因為目標已達成（停止任務）
             
         except Exception as e:
             api_logger.error(f"停止任務失敗 {task_id}: {e}")

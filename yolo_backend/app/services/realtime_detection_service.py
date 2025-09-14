@@ -154,6 +154,13 @@ class RealtimeDetectionService:
                 if db_service:
                     try:
                         task_status = db_service.get_task_status_sync(session.task_id)
+                        
+                        # 🔥 修復：如果任務不存在或已停止，立即停止檢測
+                        if task_status is None:
+                            detection_logger.warning(f"任務 {session.task_id} 不存在，停止檢測處理")
+                            session.running = False
+                            return
+                        
                         if task_status in ['paused', 'completed', 'failed', 'stopped']:
                             detection_logger.info(f"任務 {session.task_id} 狀態為 {task_status}，停止處理幀")
                             if task_status == 'paused':
@@ -166,6 +173,10 @@ class RealtimeDetectionService:
                                 return
                     except Exception as e:
                         detection_logger.error(f"檢查任務狀態失敗: {e}")
+                        # 出現異常時，為安全起見，停止處理
+                        detection_logger.warning(f"由於無法檢查任務狀態，停止任務 {session.task_id} 的處理")
+                        session.running = False
+                        return
             
             frame = frame_data.frame
             timestamp = frame_data.timestamp

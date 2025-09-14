@@ -498,6 +498,22 @@ class DatabaseService:
             from sqlalchemy import text
             
             with SyncSessionLocal() as session:
+                # 🔥 修復：先驗證任務是否存在，防止外鍵約束錯誤
+                task_id = int(detection_data['task_id'])
+                task_check = session.execute(
+                    text("SELECT id, status FROM analysis_tasks WHERE id = :task_id"), 
+                    {'task_id': task_id}
+                ).fetchone()
+                
+                if not task_check:
+                    db_logger.warning(f"任務 {task_id} 不存在，跳過檢測結果儲存")
+                    return False
+                
+                # 檢查任務狀態，如果已停止則不儲存
+                task_status = task_check[1]  # status 欄位
+                if task_status in ['completed', 'stopped', 'failed']:
+                    db_logger.warning(f"任務 {task_id} 已停止（狀態: {task_status}），跳過檢測結果儲存")
+                    return False
                 try:
                     # 使用原始 SQL 插入，避免 ORM 的 async 問題
                     sql = text("""
