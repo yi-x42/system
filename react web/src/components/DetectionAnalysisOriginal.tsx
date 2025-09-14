@@ -37,6 +37,8 @@ import {
   Camera,
   Plus,
   Trash2,
+  Clock,
+  Square,
 } from "lucide-react";
 
 export function DetectionAnalysisOriginal() {
@@ -55,6 +57,9 @@ export function DetectionAnalysisOriginal() {
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [realtimeModel, setRealtimeModel] = useState<string>("");
   const [isRealtimeAnalysisRunning, setIsRealtimeAnalysisRunning] = useState(false);
+
+  // 任務管理相關狀態 - 使用空陣列，避免顯示模擬數據
+  const [runningTasks] = useState<any[]>([]);
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
@@ -114,6 +119,35 @@ export function DetectionAnalysisOriginal() {
   // 檢查模型是否已啟用
   const isModelActive = (modelId: string) => {
     return activeModels?.some(activeModel => activeModel.id === modelId) || false;
+  };
+
+  // 任務管理相關輔助函數
+  const getTaskStatusColor = (status: string) => {
+    switch (status) {
+      case 'running': return 'default';
+      case 'paused': return 'secondary';
+      case 'stopping': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
+  const getTaskStatusText = (status: string) => {
+    switch (status) {
+      case 'running': return '運行中';
+      case 'paused': return '已暫停';
+      case 'stopping': return '停止中';
+      default: return '未知';
+    }
+  };
+
+  const toggleTaskStatus = (taskId: string) => {
+    console.log('切換任務狀態:', taskId);
+    // TODO: 實現任務暫停/恢復邏輯
+  };
+
+  const stopTask = (taskId: string) => {
+    console.log('停止任務:', taskId);
+    // TODO: 實現停止任務邏輯
   };
 
   // 文件處理函數
@@ -322,6 +356,7 @@ export function DetectionAnalysisOriginal() {
         <TabsList>
           <TabsTrigger value="video-analysis">影片分析</TabsTrigger>
           <TabsTrigger value="camera-analysis">攝影機配置</TabsTrigger>
+          <TabsTrigger value="task-management">任務管理</TabsTrigger>
           <TabsTrigger value="yolo-models">YOLO 模型管理</TabsTrigger>
         </TabsList>
 
@@ -456,7 +491,7 @@ export function DetectionAnalysisOriginal() {
                     <Label htmlFor="detection-model">偵測模型</Label>
                     <Select 
                       value={selectedModel} 
-                      onValueChange={(value) => {
+                      onValueChange={(value: string) => {
                         if (value !== "no-models") {
                           setSelectedModel(value);
                         }
@@ -733,6 +768,150 @@ export function DetectionAnalysisOriginal() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="task-management">
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h3>進行中的分析任務</h3>
+              <Badge variant="outline">
+                {runningTasks.length} 個任務運行中
+              </Badge>
+            </div>
+
+            {runningTasks.length === 0 ? (
+              <Card>
+                <CardContent className="text-center py-8">
+                  <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">目前沒有進行中的分析任務</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    前往「攝影機配置」或「影片分析」標籤頁開始新的分析任務
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {runningTasks.map((task) => (
+                  <Card key={task.id}>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            {task.type === 'realtime' ? (
+                              <Camera className="h-5 w-5" />
+                            ) : (
+                              <FileVideo className="h-5 w-5" />
+                            )}
+                            <div>
+                              <CardTitle className="text-base">{task.name}</CardTitle>
+                              <p className="text-sm text-muted-foreground">
+                                模型: {task.model}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <Badge variant={getTaskStatusColor(task.status)}>
+                          {getTaskStatusText(task.status)}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4 md:grid-cols-4 mb-4">
+                        <div>
+                          <p className="text-sm text-muted-foreground">開始時間</p>
+                          <div className="flex items-center gap-1 mt-1">
+                            <Clock className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-sm">{task.startTime}</span>
+                          </div>
+                        </div>
+                        {task.camera && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">攝影機</p>
+                            <p className="text-sm font-medium">{task.camera}</p>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm text-muted-foreground">處理速度</p>
+                          <p className="text-lg font-medium">{task.fps} FPS</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">檢測數量</p>
+                          <p className="text-lg font-medium">{task.detectionCount}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => toggleTaskStatus(task.id)}
+                          disabled={task.status === 'stopping'}
+                        >
+                          {task.status === 'running' ? (
+                            <>
+                              <Square className="h-4 w-4 mr-2" />
+                              暫停
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-4 w-4 mr-2" />
+                              恢復
+                            </>
+                          )}
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          onClick={() => stopTask(task.id)}
+                          disabled={task.status === 'stopping'}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          停止
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>任務統計</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-green-600">
+                      {runningTasks.filter(t => t.status === 'running').length}
+                    </p>
+                    <p className="text-sm text-muted-foreground">運行中</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {runningTasks.filter(t => t.status === 'paused').length}
+                    </p>
+                    <p className="text-sm text-muted-foreground">已暫停</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-blue-600">
+                      {runningTasks.reduce((sum, task) => sum + task.detectionCount, 0)}
+                    </p>
+                    <p className="text-sm text-muted-foreground">總檢測數</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-purple-600">
+                      {runningTasks.length > 0 
+                        ? Math.round(runningTasks.reduce((sum, task) => sum + task.fps, 0) / runningTasks.length) 
+                        : 0}
+                    </p>
+                    <p className="text-sm text-muted-foreground">平均 FPS</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
 
         <TabsContent value="yolo-models">
           <div className="space-y-6">
