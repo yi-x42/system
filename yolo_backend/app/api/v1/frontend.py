@@ -8,6 +8,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, File, UploadFile, Query
 from fastapi.responses import JSONResponse
@@ -228,38 +229,38 @@ def get_model_info_from_filename(filename: str, file_size: int) -> dict:
 async def list_yolo_models():
     """列出 yolo_backend/模型 資料夾下所有模型檔案"""
     try:
-        # 指定模型資料夾路徑
-        model_dir = r"D:\project\system\yolo_backend\模型"
+        # 指定模型資料夾路徑（相對於當前檔案）
+        # frontend.py -> v1 -> api -> app -> yolo_backend
+        yolo_backend_dir = Path(__file__).parent.parent.parent.parent
+        model_dir = yolo_backend_dir / "模型"
         
         # 檢查資料夾是否存在
-        if not os.path.exists(model_dir):
+        if not model_dir.exists():
             api_logger.warning(f"模型資料夾不存在: {model_dir}")
             return []
         
         model_files = []
         
         # 掃描 .pt 檔案
-        for file in os.listdir(model_dir):
-            if file.endswith('.pt'):
-                file_path = os.path.join(model_dir, file)
-                if os.path.isfile(file_path):
-                    stat = os.stat(file_path)
-                    
-                    # 根據檔案名稱推斷模型資訊
-                    model_info = get_model_info_from_filename(file, stat.st_size)
-                    
-                    model_files.append(ModelFileInfo(
-                        id=file.replace('.pt', ''),
-                        name=file,
-                        modelType=model_info['modelType'],
-                        parameterCount=model_info['parameterCount'],
-                        fileSize=model_info['fileSize'],
-                        status=model_info['status'],
-                        size=stat.st_size,
-                        created_at=stat.st_ctime,
-                        modified_at=stat.st_mtime,
-                        path=file_path
-                    ))
+        for file_path in model_dir.iterdir():
+            if file_path.suffix == '.pt' and file_path.is_file():
+                stat = file_path.stat()
+                
+                # 根據檔案名稱推斷模型資訊
+                model_info = get_model_info_from_filename(file_path.name, stat.st_size)
+                
+                model_files.append(ModelFileInfo(
+                    id=file_path.stem,  # 檔案名稱（不含副檔名）
+                    name=file_path.name,  # 完整檔案名稱
+                    modelType=model_info['modelType'],
+                    parameterCount=model_info['parameterCount'],
+                    fileSize=model_info['fileSize'],
+                    status=model_info['status'],
+                    size=stat.st_size,
+                    created_at=stat.st_ctime,
+                    modified_at=stat.st_mtime,
+                    path=str(file_path)  # 轉為字串
+                ))
         
         api_logger.info(f"找到 {len(model_files)} 個模型檔案")
         return model_files
