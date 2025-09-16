@@ -28,6 +28,72 @@ from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
 
+# ===== 工具函數 =====
+
+def find_models_directory() -> Optional[Path]:
+    """
+    穩健地尋找模型資料夾，支援跨環境部署
+    
+    搜尋策略：
+    1. 從當前檔案向上尋找包含 yolo_backend 的目錄
+    2. 檢查多個可能的模型資料夾位置
+    3. 支援不同的專案結構和部署方式
+    """
+    current_file = Path(__file__).resolve()
+    
+    # 策略1: 從當前檔案向上尋找 yolo_backend 目錄
+    for parent in current_file.parents:
+        # 檢查是否為 yolo_backend 目錄
+        if parent.name == "yolo_backend":
+            models_dir = parent / "模型"
+            if models_dir.exists():
+                return models_dir
+        
+        # 檢查是否包含 yolo_backend 子目錄
+        yolo_backend_dir = parent / "yolo_backend"
+        if yolo_backend_dir.exists():
+            models_dir = yolo_backend_dir / "模型"
+            if models_dir.exists():
+                return models_dir
+    
+    # 策略2: 檢查常見的專案結構
+    possible_roots = [
+        Path.cwd(),  # 當前工作目錄
+        Path(__file__).resolve().parent.parent.parent.parent,  # 相對於檔案位置
+        Path(__file__).resolve().parent.parent.parent.parent.parent,  # 再上一層（應對嵌套結構）
+    ]
+    
+    for root in possible_roots:
+        for subdir in ["yolo_backend", "system/yolo_backend", "../yolo_backend"]:
+            try:
+                models_dir = (root / subdir / "模型").resolve()
+                if models_dir.exists():
+                    return models_dir
+            except:
+                continue
+    
+    # 策略3: 使用環境變數或配置（如果有設定）
+    from app.core.config import get_settings
+    try:
+        settings = get_settings()
+        if hasattr(settings, 'models_directory') and settings.models_directory:
+            models_dir = Path(settings.models_directory)
+            if models_dir.exists():
+                return models_dir
+    except:
+        pass
+    
+    # 策略4: 檢查其他環境變數
+    for env_var in ["YOLO_MODELS_DIR", "MODELS_DIR"]:
+        env_models_dir = os.environ.get(env_var)
+        if env_models_dir:
+            models_dir = Path(env_models_dir)
+            if models_dir.exists():
+                return models_dir
+    
+    api_logger.warning("無法找到模型資料夾，已嘗試所有可能的路徑")
+    return None
+
 # ===== 模型清單相關模型 =====
 
 class ModelFileInfo(BaseModel):
@@ -229,13 +295,11 @@ def get_model_info_from_filename(filename: str, file_size: int) -> dict:
 async def list_yolo_models():
     """列出 yolo_backend/模型 資料夾下所有模型檔案"""
     try:
-        # 指定模型資料夾路徑（相對於當前檔案）
-        # frontend.py -> v1 -> api -> app -> yolo_backend
-        yolo_backend_dir = Path(__file__).parent.parent.parent.parent
-        model_dir = yolo_backend_dir / "模型"
+        # 自動尋找專案根目錄和模型資料夾（穩健的跨環境方法）
+        model_dir = find_models_directory()
         
         # 檢查資料夾是否存在
-        if not model_dir.exists():
+        if not model_dir or not model_dir.exists():
             api_logger.warning(f"模型資料夾不存在: {model_dir}")
             return []
         

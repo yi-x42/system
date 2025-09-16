@@ -30,6 +30,7 @@ class Settings:
         # YOLOv11 模型設定
         self.model_path = os.getenv("MODEL_PATH", "yolo11n.pt")
         self.YOLO_MODEL_PATH = self.model_path
+        self.models_directory = os.getenv("MODELS_DIR", "")  # 可選的模型目錄覆寫
         self.device = os.getenv("DEVICE", "auto")
         self.DEVICE = self.device
         self.confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
