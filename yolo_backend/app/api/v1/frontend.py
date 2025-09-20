@@ -28,7 +28,72 @@ from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
 
+# 全域變數：用於儲存網路速度測量的歷史數據
+_network_measurement_cache = {
+    "last_bytes": 0,
+    "last_time": 0,
+    "ethernet_interface": "乙太網路"  # 預設乙太網路介面名稱
+}
+
 # ===== 工具函數 =====
+
+def get_ethernet_speed() -> float:
+    """
+    計算乙太網路的即時速度 (MB/s)
+    使用時間間隔測量來計算真正的網路傳輸速度
+    """
+    import time
+    
+    try:
+        import psutil
+        current_time = time.time()
+        
+        # 嘗試獲取乙太網路介面的統計數據
+        net_io_per_nic = psutil.net_io_counters(pernic=True)
+        ethernet_stats = None
+        
+        # 尋找乙太網路介面 (支援不同的命名方式)
+        possible_ethernet_names = ["乙太網路", "Ethernet", "eth0", "以太网"]
+        for name in possible_ethernet_names:
+            if name in net_io_per_nic:
+                ethernet_stats = net_io_per_nic[name]
+                _network_measurement_cache["ethernet_interface"] = name
+                break
+        
+        if not ethernet_stats:
+            # 如果找不到乙太網路介面，使用總統計
+            ethernet_stats = psutil.net_io_counters()
+        
+        # 計算當前總流量
+        current_bytes = ethernet_stats.bytes_sent + ethernet_stats.bytes_recv
+        
+        # 檢查是否有歷史數據
+        if _network_measurement_cache["last_time"] > 0:
+            # 計算時間差和流量差
+            time_diff = current_time - _network_measurement_cache["last_time"]
+            bytes_diff = current_bytes - _network_measurement_cache["last_bytes"]
+            
+            # 確保時間間隔合理 (至少0.5秒，避免除零錯誤)
+            if time_diff >= 0.5:
+                # 計算速度 (bytes/s -> MB/s)
+                speed_bps = bytes_diff / time_diff
+                speed_mbps = speed_bps / (1024 * 1024)
+                
+                # 更新快取
+                _network_measurement_cache["last_bytes"] = current_bytes
+                _network_measurement_cache["last_time"] = current_time
+                
+                # 回傳速度，限制在合理範圍內 (0-1000 MB/s)
+                return max(0.0, min(1000.0, speed_mbps))
+        
+        # 初次測量或時間間隔太短，更新快取並回傳0
+        _network_measurement_cache["last_bytes"] = current_bytes
+        _network_measurement_cache["last_time"] = current_time
+        return 0.0
+        
+    except Exception as e:
+        api_logger.warning(f"獲取乙太網路速度失敗: {e}")
+        return 0.0
 
 def find_models_directory() -> Optional[Path]:
     """
@@ -116,6 +181,7 @@ class SystemStats(BaseModel):
     cpu_usage: float = Field(..., description="CPU使用率")
     memory_usage: float = Field(..., description="記憶體使用率")
     gpu_usage: float = Field(..., description="GPU使用率")
+    network_usage: float = Field(..., description="乙太網路即時速度 (MB/s)")
     active_tasks: int = Field(..., description="活躍任務數")
     system_uptime_seconds: int = Field(..., description="系統運行總秒數")
     last_updated: datetime = Field(..., description="最後更新時間")
@@ -410,6 +476,9 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             except:
                 gpu_usage = 0.0
         
+        # 獲取乙太網路即時速度 (MB/s)
+        network_usage = get_ethernet_speed()
+        
         # 從資料庫獲取活躍任務數
         active_tasks = 0
         
@@ -437,6 +506,7 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             cpu_usage=round(cpu_usage, 1),
             memory_usage=round(memory_usage, 1),
             gpu_usage=round(gpu_usage, 1),
+            network_usage=round(network_usage, 2),
             active_tasks=active_tasks,
             system_uptime_seconds=int(uptime_seconds),
             last_updated=datetime.now()

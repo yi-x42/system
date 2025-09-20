@@ -18,6 +18,7 @@ export interface SystemStats {
   cpu_usage: number;
   memory_usage: number;
   gpu_usage: number;
+  network_usage: number;
   gpu_memory_usage: number;
 }
 
