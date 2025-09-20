@@ -32,8 +32,8 @@ export const useSystemStats = () => {
   return useQuery<SystemStats, Error>({
     queryKey: ['systemStats'],
     queryFn: fetchSystemStats,
-    // 設定每 5 秒自動重新整理一次資料
-    refetchInterval: 5000,
+    // 設定每 1 秒自動重新整理一次資料
+    refetchInterval: 1000,
   });
 };
 

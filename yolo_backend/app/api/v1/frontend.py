@@ -117,7 +117,6 @@ class SystemStats(BaseModel):
     memory_usage: float = Field(..., description="記憶體使用率")
     gpu_usage: float = Field(..., description="GPU使用率")
     active_tasks: int = Field(..., description="活躍任務數")
-    total_detections: int = Field(..., description="總檢測數")
     system_uptime_seconds: int = Field(..., description="系統運行總秒數")
     last_updated: datetime = Field(..., description="最後更新時間")
 
@@ -389,7 +388,7 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
         import psutil
         
         # 獲取真實的系統監控數據
-        cpu_usage = psutil.cpu_percent(interval=1)
+        cpu_usage = psutil.cpu_percent()  # 移除 interval=1 避免阻塞
         memory = psutil.virtual_memory()
         memory_usage = memory.percent
         
@@ -411,14 +410,13 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             except:
                 gpu_usage = 0.0
         
-        # 從資料庫獲取活躍任務數和總檢測數
+        # 從資料庫獲取活躍任務數
         active_tasks = 0
-        total_detections = 0
         
         try:
             # 獲取活躍任務數
             from sqlalchemy import select, func
-            from app.models.database import AnalysisTask, DetectionResult
+            from app.models.database import AnalysisTask
             
             # 計算活躍任務
             active_tasks_result = await db.execute(
@@ -427,12 +425,6 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
                 )
             )
             active_tasks = active_tasks_result.scalar() or 0
-            
-            # 計算總檢測數
-            total_detections_result = await db.execute(
-                select(func.count(DetectionResult.id))
-            )
-            total_detections = total_detections_result.scalar() or 0
             
         except Exception as db_error:
             api_logger.warning(f"無法從資料庫獲取統計數據: {db_error}")
@@ -446,7 +438,6 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
             memory_usage=round(memory_usage, 1),
             gpu_usage=round(gpu_usage, 1),
             active_tasks=active_tasks,
-            total_detections=total_detections,
             system_uptime_seconds=int(uptime_seconds),
             last_updated=datetime.now()
         )
