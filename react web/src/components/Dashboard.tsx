@@ -253,18 +253,30 @@ export function Dashboard() {
           <div className="grid gap-4 md:grid-cols-3">
             <div>
               <p className="text-sm text-muted-foreground">CPU 使用率</p>
-              <p className="text-2xl">45%</p>
-              <Progress value={45} className="mt-2" />
+              {isLoading ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <p className="text-2xl">{systemStats?.cpu_usage?.toFixed(1) || 0}%</p>
+              )}
+              <Progress value={systemStats?.cpu_usage || 0} className="mt-2" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">GPU 使用率</p>
-              <p className="text-2xl">72%</p>
-              <Progress value={72} className="mt-2" />
+              {isLoading ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <p className="text-2xl">{systemStats?.gpu_usage?.toFixed(1) || 0}%</p>
+              )}
+              <Progress value={systemStats?.gpu_usage || 0} className="mt-2" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">記憶體使用率</p>
-              <p className="text-2xl">68%</p>
-              <Progress value={68} className="mt-2" />
+              {isLoading ? (
+                <Skeleton className="h-8 w-16" />
+              ) : (
+                <p className="text-2xl">{systemStats?.memory_usage?.toFixed(1) || 0}%</p>
+              )}
+              <Progress value={systemStats?.memory_usage || 0} className="mt-2" />
             </div>
           </div>
         </CardContent>
