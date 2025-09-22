@@ -14,3 +14,14 @@ dependencies = [
     "sqlalchemy>=2.0.43",
     "ultralytics>=8.3.202",
 ]
+
+[tool.poe.tasks]
+start-api = "uvicorn main:app --host 0.0.0.0 --port 8001"
+dev-api = "uvicorn main:app --host 0.0.0.0 --port 8001 --reload"
+dev-client = { shell = "cd client && npm run dev" }
+build-client = { shell = "cd client && npm run build" }
+
+[dependency-groups]
+dev = [
+    "poethepoet>=0.37.0",
+]

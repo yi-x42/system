@@ -118,3 +118,94 @@ curl -X GET "http://localhost:8001/api/v1/health"
 ---
 
 **🎉 現在您的 YOLOv11 數位雙生分析系統已經準備就緒！**
+
+## 🚢 部署教學
+
+以下示範在本機與團隊成員電腦上快速部署（開發用）。若需正式上線，請搭配系統服務與反向代理（例如 Nginx）進一步強化。
+
+- 先決條件
+  - Python 3.13+
+  - Node.js 18+（含 npm）
+  - Docker Desktop（可選，用於啟動相依服務）
+
+- 準備環境變數
+  - 複製 `.env.example` 為 `.env` 並依需求調整（特別是資料庫密碼）：
+    ```bash
+    cp .env.example .env
+    # 編輯 .env 後保存
+    ```
+
+- 啟動相依服務（PostgreSQL/Redis/MinIO，皆可按需取捨）
+  - 使用內建開發用 Compose：
+    ```bash
+    docker compose -f docker-compose.dev.yml up -d postgres redis minio pgadmin
+    ```
+  - 預設對外連接：
+    - PostgreSQL: localhost:5432（帳號 `postgres`）
+    - Redis: localhost:6379
+    - MinIO Console: http://localhost:9001（預設帳密 `minioadmin/minioadmin`）
+
+- 安裝後端依賴
+  ```bash
+    uv sync --group dev
+  ```
+
+- 啟動後端 API
+  - 使用 uv + poe（pyproject 已內建任務）：
+    ```bash
+    uv run poe dev-api   # 於 http://localhost:8001 提供 API（含自動重載）
+    ```
+  - 或直接使用 uvicorn：
+    ```bash
+    uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    ```
+
+- 啟動前端（Vite + React）
+  ```bash
+  cd client
+  npm install
+  npm run dev  # 於 http://localhost:3000 啟動
+  ```
+
+- 驗證服務
+  - API Docs: http://localhost:8001/docs
+  - 健康檢查: http://localhost:8001/api/v1/health
+  - 前端開發伺服器: http://localhost:3000
+
+提示：若使用 `.env` 將 `PORT` 設為 `8001`，且以 `uv run main.py`啟動，實際 API 端口也會一致。
+
+### 常見問題（FAQ）
+- 端口衝突：
+  - 變更 `uvicorn` 的 `--port` 或調整前端 `vite.config.ts` 中的 `server.port`。
+- 無法連線資料庫：
+  - 確認 Docker 服務 `postgres` 正在運作，並比對 `.env` 的 `POSTGRES_*` 與 `docker-compose.dev.yml` 設定是否一致。
+- 首次模型下載較慢：
+  - 首次使用 YOLO 權重會下載，請保持網路暢通；或先行放置 `yolo11n.pt` 至指定路徑並在 `.env` 以 `MODEL_PATH` 指定。
+
+## 💻 開發教學
+
+面向開發者的日常流程與專案啟動方式如下：
+
+- 專案結構要點（節錄）
+  - 後端 FastAPI 入口：`main.py`
+  - API 路由：`app/api/v1/*`
+  - 資料庫與 ORM：`app/core/database.py`, `app/models/*`
+  - 設定：`app/core/config.py`（自動讀取專案根目錄 `.env`）
+  - 前端：`client/`（Vite + React + TypeScript）
+
+- 推薦工作流
+  1) 啟動相依服務（見「部署教學」）。
+  2) 後端開發：
+     - 使用 uv：`uv run poe dev-api`
+     - 或使用 uvicorn：`uvicorn main:app --reload --port 8001`
+  3) 前端開發：
+     - `cd client && npm run dev`
+  4) 介面測試：
+     - 以瀏覽器開啟 `http://localhost:3000` 與 `http://localhost:8001/docs`
+
+- 測試與排錯建議
+  - 使用 `curl`/`HTTPie` 驗證 API 端點；留意回應中的錯誤訊息與 `app/core/logger.py` 輸出。
+  - 若資料表未建立，後端啟動時會透過 SQLAlchemy 自動 `create_all`（位於 `main.py` 的 lifespan 中）。
+  - 需要跳過模型初始化時，可在環境變數設定 `SKIP_YOLO_INIT=true`。
+
+---
