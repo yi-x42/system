@@ -1,9 +1,0 @@
-﻿event_id,timestamp,object_id,object_type,behavior,zone,position_x,position_y,duration,confidence,metadata,source
-speed_1_1756904542,2025-09-03 21:02:22.194275,1,sports ball,abnormal_speed,unknown_area,320.34197998046875,950.8724670410156,,1.0,"{""speed"": 600.5701421352245, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_5_1756904542,2025-09-03 21:02:22.503651,5,sports ball,abnormal_speed,unknown_area,320.3230438232422,1028.426142692566,,1.0,"{""speed"": 414.15184577361583, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_5_1756904542,2025-09-03 21:02:22.546483,5,sports ball,abnormal_speed,unknown_area,320.35121154785156,1020.9156637191772,,1.0,"{""speed"": 175.36499005593808, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_1_1756904542,2025-09-03 21:02:22.593133,1,sports ball,abnormal_speed,unknown_area,320.3881530761719,992.8302345275879,,1.0,"{""speed"": 105.19771464377335, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_5_1756904542,2025-09-03 21:02:22.857331,5,sports ball,abnormal_speed,unknown_area,320.4405059814453,988.3715991973877,,1.0,"{""speed"": 104.70159388675638, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_1_1756904543,2025-09-03 21:02:23.491772,1,sports ball,abnormal_speed,unknown_area,320.40101623535156,1021.8893966674805,,1.0,"{""speed"": 196.24632570375806, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_1_1756904543,2025-09-03 21:02:23.972365,1,sports ball,abnormal_speed,unknown_area,320.40977478027344,1012.3742122650146,,1.0,"{""speed"": 314.87306060030386, ""threshold"": 100.0}",demo_for_annotation.mp4
-speed_1_1756904544,2025-09-03 21:02:24.315748,1,sports ball,abnormal_speed,unknown_area,320.31431579589844,1018.4759454727173,,1.0,"{""speed"": 308.42610204268186, ""threshold"": 100.0}",demo_for_annotation.mp4
