@@ -185,6 +185,10 @@ class SystemStats(BaseModel):
     network_usage: float = Field(..., description="乙太網路即時速度 (MB/s)")
     active_tasks: int = Field(..., description="活躍任務數")
     system_uptime_seconds: int = Field(..., description="系統運行總秒數")
+    total_cameras: int = Field(0, description="攝影機總數")
+    online_cameras: int = Field(0, description="線上攝影機數量")
+    total_alerts_today: int = Field(0, description="今日警報總數")
+    alerts_vs_yesterday: int = Field(0, description="與昨日比較的警報變化百分比")
     last_updated: datetime = Field(..., description="最後更新時間")
 
 class TaskCreate(BaseModel):
@@ -480,13 +484,17 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
         # 獲取乙太網路即時速度 (MB/s)
         network_usage = get_ethernet_speed()
         
-        # 從資料庫獲取活躍任務數
+        # 從資料庫獲取活躍任務數和攝影機統計
         active_tasks = 0
+        total_cameras = 0
+        online_cameras = 0
         
         try:
             # 獲取活躍任務數
             from sqlalchemy import select, func
-            from app.models.database import AnalysisTask
+            from app.models.database import AnalysisTask, DataSource
+            
+            api_logger.info("開始獲取系統統計數據...")
             
             # 計算活躍任務
             active_tasks_result = await db.execute(
@@ -495,23 +503,63 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
                 )
             )
             active_tasks = active_tasks_result.scalar() or 0
+            api_logger.info(f"活躍任務數: {active_tasks}")
+            
+            # 計算攝影機總數 - 從 data_sources 表中的攝影機類型資料來源
+            total_cameras_result = await db.execute(
+                select(func.count(DataSource.id)).where(
+                    DataSource.source_type == 'camera'
+                )
+            )
+            total_cameras = total_cameras_result.scalar() or 0
+            api_logger.info(f"資料庫中攝影機總數: {total_cameras}")
+            
+            # 獲取線上攝影機數量 - 簡化實作，暫時假設所有攝影機都在線
+            # 後續可以優化為真正的即時檢測
+            online_cameras = total_cameras
+            api_logger.info(f"攝影機數量統計: 總數={total_cameras}, 線上={online_cameras}")
             
         except Exception as db_error:
-            api_logger.warning(f"無法從資料庫獲取統計數據: {db_error}")
+            api_logger.error(f"無法從資料庫獲取統計數據: {db_error}")
+            api_logger.exception("詳細錯誤信息:")
 
         # 獲取系統運行時間
         from app.core.uptime import get_system_uptime
         uptime_seconds = get_system_uptime()
         
-        stats = SystemStats(
-            cpu_usage=round(cpu_usage, 1),
-            memory_usage=round(memory_usage, 1),
-            gpu_usage=round(gpu_usage, 1),
-            network_usage=round(network_usage, 2),
-            active_tasks=active_tasks,
-            system_uptime_seconds=int(uptime_seconds),
-            last_updated=datetime.now()
-        )
+        api_logger.info(f"準備構造SystemStats: total_cameras={total_cameras}, online_cameras={online_cameras}")
+        
+        try:
+            stats = SystemStats(
+                cpu_usage=round(cpu_usage, 1),
+                memory_usage=round(memory_usage, 1),
+                gpu_usage=round(gpu_usage, 1),
+                network_usage=round(network_usage, 2),
+                active_tasks=active_tasks,
+                system_uptime_seconds=int(uptime_seconds),
+                total_cameras=total_cameras,
+                online_cameras=online_cameras,
+                total_alerts_today=0,  # 暫時設為0，可以後續擴展
+                alerts_vs_yesterday=0,  # 暫時設為0，可以後續擴展
+                last_updated=datetime.now()
+            )
+            api_logger.info(f"✅ SystemStats 構造成功: {stats}")
+        except Exception as stats_error:
+            api_logger.error(f"❌ SystemStats 構造失敗: {stats_error}")
+            # 提供基本的fallback統計數據
+            stats = SystemStats(
+                cpu_usage=round(cpu_usage, 1),
+                memory_usage=round(memory_usage, 1),
+                gpu_usage=round(gpu_usage, 1),
+                network_usage=round(network_usage, 2),
+                active_tasks=0,
+                system_uptime_seconds=int(uptime_seconds),
+                total_cameras=0,
+                online_cameras=0,
+                total_alerts_today=0,
+                alerts_vs_yesterday=0,
+                last_updated=datetime.now()
+            )
         
         return stats
         
