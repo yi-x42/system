@@ -72,20 +72,24 @@ export function Dashboard() {
     },
   ];
 
-  // 使用真實的攝影機數據，並映射狀態
+  // 使用真實的攝影機數據，直接使用API返回的即時狀態
   const cameras = realTimeCameras?.map(camera => {
     console.log('🔍 攝影機映射:', {
       原始資料: camera,
-      映射後狀態: camera.status === "active" ? "online" : 
-                camera.status === "inactive" ? "offline" : 
-                camera.status === "error" ? "warning" : "offline"
+      API返回狀態: camera.status,
+      最終顯示狀態: camera.status === "online" ? "online" : 
+                   camera.status === "offline" ? "offline" : 
+                   camera.status === "error" ? "warning" : 
+                   camera.status === "inactive" ? "offline" : "offline"
     });
     return {
       id: camera.id,
       name: camera.name,
-      status: camera.status === "active" ? "online" : 
-              camera.status === "inactive" ? "offline" : 
-              camera.status === "error" ? "warning" : "offline",
+      // 直接使用API返回的即時檢測狀態，不需要額外映射
+      status: camera.status === "online" ? "online" : 
+              camera.status === "offline" ? "offline" : 
+              camera.status === "error" ? "warning" : 
+              camera.status === "inactive" ? "offline" : "offline",
       lastSeen: "即時更新"
     };
   }) || [];
