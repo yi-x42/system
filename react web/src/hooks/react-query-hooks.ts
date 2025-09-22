@@ -70,7 +70,33 @@ export const useCameras = () => {
     queryKey: ['cameras'],
     queryFn: fetchCameras,
     refetchOnWindowFocus: false,
-    staleTime: 30000, // 30 seconds
+    // 每 10 秒自動重新整理攝影機狀態
+    refetchInterval: 10000,
+    staleTime: 5000, // 5 seconds
+  });
+};
+
+// 獲取攝影機列表（帶即時狀態檢測）的非同步函式
+const fetchCamerasWithRealTimeCheck = async (): Promise<CameraInfo[]> => {
+  const { data } = await apiClient.get('/frontend/cameras?real_time_check=true');
+  return data;
+};
+
+// 攝影機列表的 hook（帶即時狀態檢測）
+export const useCamerasWithRealTimeCheck = () => {
+  return useQuery<CameraInfo[], Error>({
+    queryKey: ['cameras', 'realtime'],
+    queryFn: fetchCamerasWithRealTimeCheck,
+    refetchOnWindowFocus: true,
+    // 每 15 秒執行即時檢測（比較慢但更準確）
+    refetchInterval: 15000,
+    staleTime: 0, // 立即過期，確保資料即時更新
+    // 在背景中靜默更新，避免loading狀態影響UI
+    refetchIntervalInBackground: true,
+    // 確保即使有快取也會重新取得資料
+    refetchOnMount: true,
+    // 網路重連時自動重取
+    refetchOnReconnect: true,
   });
 };
 

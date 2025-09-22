@@ -500,6 +500,7 @@ from dataclasses import dataclass
 from app.core.logger import api_logger
 
 @dataclass
+@dataclass
 class Camera:
     """攝影機數據類"""
     id: str
@@ -787,7 +788,7 @@ class CameraService:
                     source_type='camera',
                     name=name,
                     config=config,
-                    status='inactive'
+                    status='active'
                 )
                 db.add(source)
                 db.commit()
@@ -799,7 +800,7 @@ class CameraService:
                 camera = Camera(
                     id=camera_id,
                     name=name,
-                    status="inactive",
+                    status="active",
                     camera_type=camera_type,
                     resolution=resolution,
                     fps=fps,
@@ -898,5 +899,77 @@ class CameraService:
             return camera.rtsp_url
         
         return None
+    
+    async def check_camera_status_realtime(self, camera: Camera) -> str:
+        """即時檢查攝影機狀態"""
+        try:
+            if camera.camera_type == "USB":
+                # USB攝影機檢查
+                return await self._check_usb_camera_status(camera)
+            elif camera.camera_type == "Network":
+                # 網路攝影機檢查
+                return await self._check_network_camera_status(camera)
+            else:
+                return "unknown"
+                
+        except Exception as e:
+            api_logger.error(f"即時檢查攝影機狀態失敗: {e}")
+            return "error"
+    
+    async def _check_usb_camera_status(self, camera: Camera) -> str:
+        """檢查USB攝影機狀態"""
+        import asyncio
+        
+        try:
+            if camera.device_index is None:
+                return "error"
+                
+            # 在線程池中執行阻塞的攝影機檢查
+            loop = asyncio.get_event_loop()
+            status = await loop.run_in_executor(None, self._check_usb_device, camera.device_index)
+            
+            api_logger.debug(f"USB攝影機 {camera.name} (index={camera.device_index}) 檢查結果: {status}")
+            return status
+            
+        except Exception as e:
+            api_logger.error(f"檢查USB攝影機狀態失敗: {e}")
+            return "error"
+    
+    def _check_usb_device(self, device_index: int) -> str:
+        """同步檢查USB設備狀態"""
+        try:
+            # 嘗試打開攝影機
+            cap = cv2.VideoCapture(device_index)
+            
+            if not cap.isOpened():
+                cap.release()
+                return "offline"
+                
+            # 嘗試讀取一幀
+            ret, frame = cap.read()
+            cap.release()
+            
+            if ret and frame is not None:
+                return "online"
+            else:
+                return "offline"
+                
+        except Exception as e:
+            return "error"
+    
+    async def _check_network_camera_status(self, camera: Camera) -> str:
+        """檢查網路攝影機狀態"""
+        try:
+            if not camera.rtsp_url:
+                return "error"
+            
+            # 這裡可以加入更複雜的網路攝影機檢查邏輯
+            # 例如 ping IP、嘗試連接 RTSP 串流等
+            # 暫時回傳 offline，避免長時間阻塞
+            return "offline"
+            
+        except Exception as e:
+            api_logger.error(f"檢查網路攝影機狀態失敗: {e}")
+            return "error"
     
 

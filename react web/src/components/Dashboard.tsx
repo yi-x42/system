@@ -14,11 +14,20 @@ import {
   XCircle,
   Clock,
 } from "lucide-react";
-import { useSystemStats } from "../hooks/react-query-hooks";
+import { useSystemStats, useCamerasWithRealTimeCheck } from "../hooks/react-query-hooks";
 import { Skeleton } from "./ui/skeleton";
 
 export function Dashboard() {
   const { data: systemStats, isLoading, isError, error } = useSystemStats();
+  const { data: realTimeCameras, isLoading: camerasLoading, error: camerasError } = useCamerasWithRealTimeCheck();
+  
+  // 添加調試資訊
+  console.log('🔍 Dashboard - 攝影機資料更新:', {
+    realTimeCameras,
+    camerasLoading,
+    camerasError: camerasError?.message,
+    timestamp: new Date().toISOString()
+  });
 
   // 格式化運行時間
   const formatUptime = (seconds: number | undefined) => {
@@ -63,13 +72,25 @@ export function Dashboard() {
     },
   ];
 
-  const cameras = [
-    { id: 1, name: "大門入口", status: "online", lastSeen: "剛剛" },
-    { id: 2, name: "停車場", status: "online", lastSeen: "1分鐘前" },
-    { id: 3, name: "後門出口", status: "offline", lastSeen: "5分鐘前" },
-    { id: 4, name: "走廊A", status: "online", lastSeen: "剛剛" },
-    { id: 5, name: "走廊B", status: "warning", lastSeen: "3分鐘前" },
-  ];
+  // 使用真實的攝影機數據，並映射狀態
+  const cameras = realTimeCameras?.map(camera => {
+    console.log('🔍 攝影機映射:', {
+      原始資料: camera,
+      映射後狀態: camera.status === "active" ? "online" : 
+                camera.status === "inactive" ? "offline" : 
+                camera.status === "error" ? "warning" : "offline"
+    });
+    return {
+      id: camera.id,
+      name: camera.name,
+      status: camera.status === "active" ? "online" : 
+              camera.status === "inactive" ? "offline" : 
+              camera.status === "error" ? "warning" : "offline",
+      lastSeen: "即時更新"
+    };
+  }) || [];
+  
+  console.log('🔍 Dashboard - 最終攝影機列表:', cameras);
 
   return (
     <div className="space-y-6">
@@ -167,42 +188,72 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {cameras.map((camera) => (
-                <div key={camera.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {camera.status === "online" && (
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                    )}
-                    {camera.status === "offline" && (
-                      <XCircle className="h-4 w-4 text-red-500" />
-                    )}
-                    {camera.status === "warning" && (
-                      <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                    )}
-                    <div>
-                      <p className="font-medium">{camera.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        最後更新: {camera.lastSeen}
-                      </p>
+              {camerasLoading ? (
+                // 加載狀態顯示骨架屏
+                Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-4 w-4 rounded-full" />
+                      <div>
+                        <Skeleton className="h-4 w-24 mb-1" />
+                        <Skeleton className="h-3 w-16" />
+                      </div>
                     </div>
+                    <Skeleton className="h-6 w-12 rounded-full" />
                   </div>
-                  <Badge
-                    variant={
-                      camera.status === "online"
-                        ? "default"
-                        : camera.status === "offline"
-                        ? "destructive"
-                        : "secondary"
-                    }
-                  >
-                    {camera.status === "online"
-                      ? "線上"
-                      : camera.status === "offline"
-                      ? "離線"
-                      : "警告"}
-                  </Badge>
+                ))
+              ) : camerasError ? (
+                // 錯誤狀態顯示
+                <div className="text-center py-4">
+                  <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">載入攝影機狀態失敗</p>
+                  <p className="text-xs text-red-500">{camerasError.message}</p>
                 </div>
-              ))}
+              ) : cameras.length === 0 ? (
+                // 無攝影機時的顯示
+                <div className="text-center py-4">
+                  <Camera className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">尚未配置攝影機</p>
+                </div>
+              ) : (
+                // 正常狀態顯示攝影機列表
+                cameras.map((camera) => (
+                  <div key={camera.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {camera.status === "online" && (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      )}
+                      {camera.status === "offline" && (
+                        <XCircle className="h-4 w-4 text-red-500" />
+                      )}
+                      {camera.status === "warning" && (
+                        <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                      )}
+                      <div>
+                        <p className="font-medium">{camera.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          最後更新: {camera.lastSeen}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge
+                      variant={
+                        camera.status === "online"
+                          ? "default"
+                          : camera.status === "offline"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {camera.status === "online"
+                        ? "線上"
+                        : camera.status === "offline"
+                        ? "離線"
+                        : "警告"}
+                    </Badge>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

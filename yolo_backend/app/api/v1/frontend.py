@@ -24,6 +24,7 @@ from app.services.camera_service import CameraService
 from app.services.task_service import TaskService, get_task_service
 from app.services.analytics_service import AnalyticsService
 from app.services.new_database_service import DatabaseService
+from app.services.camera_status_monitor import get_camera_monitor
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
@@ -931,13 +932,133 @@ async def start_realtime_analysis(
 
 # ===== 攝影機管理 API =====
 
-@router.get("/cameras", response_model=List[CameraInfo])
-async def get_cameras():
-    """獲取攝影機列表"""
+@router.get("/cameras")
+async def get_cameras(
+    real_time_check: bool = Query(False, description="是否進行即時狀態檢測"),
+    db: AsyncSession = Depends(get_async_db)
+) -> List[CameraInfo]:
+    """獲取攝影機列表（支援即時狀態檢測）"""
+    print(f"🚨 DEBUG: get_cameras 函數被調用! real_time_check={real_time_check}")
     try:
+        print(f"🚨 DEBUG: 進入 try 區塊")
+        api_logger.info(f"🔍 get_cameras 被調用，real_time_check={real_time_check}")
         camera_service = CameraService()
+        print(f"🚨 DEBUG: CameraService 建立完成")
+        api_logger.info("✅ CameraService 建立成功")
         cameras = await camera_service.get_cameras()
-        return cameras
+        print(f"🚨 DEBUG: 獲取到攝影機列表，數量: {len(cameras)}")
+        api_logger.info(f"✅ 獲取到 {len(cameras)} 個攝影機")
+        
+        # 如果需要進行即時檢測
+        if real_time_check:
+            api_logger.info("🔄 開始進行即時狀態檢測")
+            print(f"🚨 DEBUG: 開始即時檢測，攝影機數量: {len(cameras)}")
+            # 對每台攝影機進行即時狀態檢測
+            for i, camera in enumerate(cameras):
+                try:
+                    print(f"🚨 DEBUG: 檢測攝影機 {i+1}: {camera.name}")
+                    # 執行真正的即時檢測
+                    actual_status = await camera_service.check_camera_status_realtime(camera)
+                    print(f"🚨 DEBUG: 攝影機 {i+1} 即時狀態: {actual_status}")
+                    
+                    # 更新攝影機狀態
+                    if hasattr(camera, '__dict__'):
+                        camera.__dict__['status'] = actual_status
+                    else:
+                        # 如果是 dataclass，需要創建新的實例
+                        from dataclasses import replace
+                        camera = replace(camera, status=actual_status)
+                        cameras[i] = camera  # 更新列表中的攝影機
+                    
+                    api_logger.info(f"✅ 攝影機 {camera.name} 即時狀態更新為: {actual_status}")
+                    
+                except Exception as e:
+                    print(f"🚨 DEBUG: 攝影機 {i+1} 即時檢測失敗: {e}")
+                    api_logger.error(f"❌ 攝影機 {camera.name} 即時檢測失敗: {e}")
+                    # 即時檢測失敗時，標記為錯誤狀態
+                    if hasattr(camera, '__dict__'):
+                        camera.__dict__['status'] = 'error'
+                    else:
+                        from dataclasses import replace
+                        camera = replace(camera, status='error')
+                        cameras[i] = camera
+        
+        # 將 Camera dataclass 轉換為 CameraInfo Pydantic 模型
+        camera_infos = []
+        for i, camera in enumerate(cameras):
+            try:
+                api_logger.info(f"🔄 轉換攝影機 {i}: type={type(camera)}")
+                api_logger.info(f"  camera object repr: {repr(camera)}")
+                
+                # 逐個嘗試訪問屬性
+                try:
+                    camera_id = camera.id
+                    api_logger.info(f"  ✅ ID: {camera_id}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ ID 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_name = camera.name
+                    api_logger.info(f"  ✅ Name: {camera_name}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ Name 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_status = camera.status
+                    api_logger.info(f"  ✅ Status: {camera_status}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ Status 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_type = camera.camera_type
+                    api_logger.info(f"  ✅ Camera Type: {camera_type}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ Camera Type 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_resolution = camera.resolution
+                    api_logger.info(f"  ✅ Resolution: {camera_resolution}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ Resolution 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_fps = camera.fps
+                    api_logger.info(f"  ✅ FPS: {camera_fps}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ FPS 訪問失敗: {e}")
+                    raise
+                
+                try:
+                    camera_group_id = camera.group_id
+                    api_logger.info(f"  ✅ Group ID: {camera_group_id}")
+                except Exception as e:
+                    api_logger.error(f"  ❌ Group ID 訪問失敗: {e}")
+                    raise
+                
+                camera_info = CameraInfo(
+                    id=camera_id,
+                    name=camera_name,
+                    status=camera_status,
+                    camera_type=camera_type,
+                    resolution=camera_resolution,
+                    fps=camera_fps,
+                    group_id=camera_group_id
+                )
+                api_logger.info(f"  ✅ CameraInfo 建立成功")
+                camera_infos.append(camera_info)
+                
+            except Exception as camera_error:
+                api_logger.error(f"❌ 攝影機 {i} 轉換失敗: {camera_error}")
+                import traceback
+                api_logger.error(f"完整錯誤堆疊:\n{traceback.format_exc()}")
+                raise camera_error
+        
+        return camera_infos
         
     except Exception as e:
         api_logger.error(f"獲取攝影機列表失敗: {e}")
@@ -1015,6 +1136,52 @@ async def toggle_camera(camera_id: str):
     except Exception as e:
         api_logger.error(f"切換攝影機狀態失敗: {e}")
         raise HTTPException(status_code=500, detail=f"攝影機狀態切換失敗: {str(e)}")
+
+@router.get("/cameras/{camera_id}/status")
+async def check_camera_status(camera_id: int):
+    """檢查單個攝影機的即時狀態"""
+    try:
+        db_service = DatabaseService()
+        camera_monitor = get_camera_monitor(db_service)
+        
+        # 進行即時狀態檢測
+        status = await camera_monitor.get_camera_status_immediately(camera_id)
+        
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"攝影機 {camera_id} 不存在")
+        
+        return {
+            "camera_id": camera_id,
+            "status": status,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": f"攝影機狀態: {status}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        api_logger.error(f"檢查攝影機 {camera_id} 狀態失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"攝影機狀態檢測失敗: {str(e)}")
+
+@router.post("/cameras/status/check-all")
+async def check_all_cameras_status():
+    """檢查所有攝影機的即時狀態"""
+    try:
+        db_service = DatabaseService()
+        camera_monitor = get_camera_monitor(db_service)
+        
+        # 檢查所有攝影機狀態
+        results = await camera_monitor.check_all_cameras()
+        
+        return {
+            "message": f"已檢查 {len(results)} 個攝影機的狀態",
+            "timestamp": datetime.utcnow().isoformat(),
+            "results": results
+        }
+        
+    except Exception as e:
+        api_logger.error(f"檢查所有攝影機狀態失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"攝影機狀態檢測失敗: {str(e)}")
 
 @router.post("/cameras/scan")
 async def scan_cameras():

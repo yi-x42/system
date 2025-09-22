@@ -44,6 +44,9 @@ from app.utils.exceptions import YOLOBackendException
 # 導入 WebSocket 推送服務
 from app.websocket.push_service import realtime_push_service
 
+# 導入攝影機狀態監控服務
+from app.services.camera_status_monitor import get_camera_monitor
+
 # （已移除舊管理介面）
 
 
@@ -82,6 +85,17 @@ async def lifespan(app: FastAPI):
         await realtime_push_service.start()
         main_logger.info("🚀 WebSocket 推送服務已啟動")
         
+        # 啟動攝影機狀態監控服務
+        db_service = DatabaseService()
+        camera_monitor = get_camera_monitor(db_service)
+        app.state.camera_monitor = camera_monitor
+        
+        # 在背景啟動監控任務
+        import asyncio
+        monitoring_task = asyncio.create_task(camera_monitor.start_monitoring())
+        app.state.monitoring_task = monitoring_task
+        main_logger.info("🔍 攝影機狀態監控服務已啟動")
+        
     except Exception as e:
         main_logger.error(f"❌ 資料庫初始化失敗: {e}")
         raise
@@ -113,6 +127,18 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, 'queue_manager') and app.state.queue_manager:
         app.state.queue_manager.stop()
         main_logger.info("⏹️ 異步隊列管理器已停止")
+    
+    # 停止攝影機狀態監控服務
+    if hasattr(app.state, 'camera_monitor') and app.state.camera_monitor:
+        app.state.camera_monitor.stop_monitoring()
+        main_logger.info("⏹️ 攝影機狀態監控服務已停止")
+    
+    if hasattr(app.state, 'monitoring_task') and app.state.monitoring_task:
+        app.state.monitoring_task.cancel()
+        try:
+            await app.state.monitoring_task
+        except asyncio.CancelledError:
+            pass
     
     # 停止 WebSocket 推送服務
     await realtime_push_service.stop()

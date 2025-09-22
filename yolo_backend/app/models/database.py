@@ -119,7 +119,7 @@ class DataSource(Base):
     source_type = Column(String(20), nullable=False)  # 'camera' | 'video_file'
     name = Column(String(100), nullable=False)
     config = Column(JSON)  # 配置資訊（IP、檔案路徑等）
-    status = Column(String(20), nullable=False, default='active')  # 'active' | 'inactive' | 'error'
+    status = Column(String(20), nullable=False, default='active')  # 'active' | 'inactive' | 'error' (資料庫約束限制)
     last_check = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
