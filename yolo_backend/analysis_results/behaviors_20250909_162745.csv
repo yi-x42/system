@@ -1,2 +1,0 @@
-﻿event_id,timestamp,object_id,object_type,behavior,zone,position_x,position_y,duration,confidence,metadata,source
-crowd_unknown_area_1757406465,2025-09-09 16:27:45.061470,-1,crowd,crowding,unknown_area,0,0,,1.0,"{""count"": 6, ""threshold"": 5}",system
