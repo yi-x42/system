@@ -38,9 +38,18 @@ async def get_video_files():
     import os
     import cv2
     from datetime import datetime
+    from pathlib import Path
     
     try:
-        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        # 尋找專案 uploads/videos 目錄（向上尋找，找不到則回退到 CWD）
+        videos_dir = None
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "uploads" / "videos"
+            if candidate.exists() and candidate.is_dir():
+                videos_dir = str(candidate)
+                break
+        if videos_dir is None:
+            videos_dir = str(Path.cwd() / "uploads" / "videos")
         
         if not os.path.exists(videos_dir):
             return {"videos": [], "total": 0}

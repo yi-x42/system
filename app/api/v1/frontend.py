@@ -98,66 +98,88 @@ def get_ethernet_speed() -> float:
 
 def find_models_directory() -> Optional[Path]:
     """
-    穩健地尋找模型資料夾，支援跨環境部署
-    
-    搜尋策略：
-    1. 從當前檔案向上尋找包含 yolo_backend 的目錄
-    2. 檢查多個可能的模型資料夾位置
-    3. 支援不同的專案結構和部署方式
+    尋找模型資料夾：優先使用專案根目錄 `uploads/models`。
+
+    搜尋優先序：
+    1) 自 `__file__` 向上搜尋，找到包含 `uploads/models` 的專案根目錄
+    2) 檢查當前工作目錄下的 `uploads/models`
+    3) 讀取設定值 `settings.models_directory`（如有）
+    4) 使用環境變數 `YOLO_MODELS_DIR` 或 `MODELS_DIR`
     """
     current_file = Path(__file__).resolve()
-    
-    # 策略1: 從當前檔案向上尋找 yolo_backend 目錄
+
+    # 優先：沿父層尋找 uploads/models
     for parent in current_file.parents:
-        # 檢查是否為 yolo_backend 目錄
-        if parent.name == "yolo_backend":
-            models_dir = parent / "模型"
-            if models_dir.exists():
-                return models_dir
-        
-        # 檢查是否包含 yolo_backend 子目錄
-        yolo_backend_dir = parent / "yolo_backend"
-        if yolo_backend_dir.exists():
-            models_dir = yolo_backend_dir / "模型"
-            if models_dir.exists():
-                return models_dir
-    
-    # 策略2: 檢查常見的專案結構
-    possible_roots = [
-        Path.cwd(),  # 當前工作目錄
-        Path(__file__).resolve().parent.parent.parent.parent,  # 相對於檔案位置
-        Path(__file__).resolve().parent.parent.parent.parent.parent,  # 再上一層（應對嵌套結構）
-    ]
-    
-    for root in possible_roots:
-        for subdir in ["yolo_backend", "system/yolo_backend", "../yolo_backend"]:
-            try:
-                models_dir = (root / subdir / "模型").resolve()
-                if models_dir.exists():
-                    return models_dir
-            except:
-                continue
-    
-    # 策略3: 使用環境變數或配置（如果有設定）
-    from app.core.config import get_settings
+        candidate = parent / "uploads" / "models"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+
+    # 其次：當前工作目錄
+    cwd_candidate = Path.cwd() / "uploads" / "models"
+    if cwd_candidate.exists() and cwd_candidate.is_dir():
+        return cwd_candidate
+
+    # 設定檔中的指定路徑（如有）
     try:
+        from app.core.config import get_settings
         settings = get_settings()
-        if hasattr(settings, 'models_directory') and settings.models_directory:
+        if getattr(settings, "models_directory", None):
             models_dir = Path(settings.models_directory)
-            if models_dir.exists():
+            if models_dir.exists() and models_dir.is_dir():
                 return models_dir
-    except:
+    except Exception:
         pass
-    
-    # 策略4: 檢查其他環境變數
+
+    # 環境變數回退
     for env_var in ["YOLO_MODELS_DIR", "MODELS_DIR"]:
         env_models_dir = os.environ.get(env_var)
         if env_models_dir:
             models_dir = Path(env_models_dir)
-            if models_dir.exists():
+            if models_dir.exists() and models_dir.is_dir():
                 return models_dir
-    
-    api_logger.warning("無法找到模型資料夾，已嘗試所有可能的路徑")
+
+    api_logger.warning("無法找到模型資料夾（預期：專案 uploads/models）")
+    return None
+
+def find_videos_directory() -> Optional[Path]:
+    """
+    尋找影片資料夾：優先使用專案根目錄 `uploads/videos`。
+
+    搜尋優先序：
+    1) 自 `__file__` 向上搜尋 `uploads/videos`
+    2) 檢查 `Path.cwd()/uploads/videos`
+    3) 設定值 `settings.videos_directory`（如存在）
+    4) 環境變數 `VIDEOS_DIR` 或 `UPLOADS_VIDEOS_DIR`
+    """
+    current_file = Path(__file__).resolve()
+
+    for parent in current_file.parents:
+        candidate = parent / "uploads" / "videos"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+
+    cwd_candidate = Path.cwd() / "uploads" / "videos"
+    if cwd_candidate.exists() and cwd_candidate.is_dir():
+        return cwd_candidate
+
+    try:
+        from app.core.config import get_settings
+        settings = get_settings()
+        if getattr(settings, "videos_directory", None):
+            videos_dir = Path(settings.videos_directory)
+            if videos_dir.exists() and videos_dir.is_dir():
+                return videos_dir
+    except Exception:
+        pass
+
+    for env_var in ["VIDEOS_DIR", "UPLOADS_VIDEOS_DIR"]:
+        env_dir = os.environ.get(env_var)
+        if env_dir:
+            p = Path(env_dir)
+            if p.exists() and p.is_dir():
+                return p
+
+    api_logger.warning("無法找到影片資料夾（預期：專案 uploads/videos）")
     return None
 
 # ===== 模型清單相關模型 =====
@@ -363,9 +385,9 @@ def get_model_info_from_filename(filename: str, file_size: int) -> dict:
 
 @router.get("/models/list", response_model=List[ModelFileInfo])
 async def list_yolo_models():
-    """列出 yolo_backend/模型 資料夾下所有模型檔案"""
+    """列出專案 `uploads/models` 資料夾下所有模型檔案"""
     try:
-        # 自動尋找專案根目錄和模型資料夾（穩健的跨環境方法）
+        # 自動尋找專案 `uploads/models` 模型資料夾
         model_dir = find_models_directory()
         
         # 檢查資料夾是否存在
@@ -846,19 +868,12 @@ async def start_realtime_analysis(
         
         api_logger.info(f"使用攝影機: {camera_info['name']} (狀態: {camera_info['status']})")
         
-        # 2. 驗證模型
+        # 2. 驗證模型：統一使用專案 uploads/models
         model_files = []
-        # 使用正確的模型目錄路徑
         import os
-        from pathlib import Path
-        
-        # 獲取 yolo_backend 根目錄路徑
-        current_dir = Path(__file__).parent.parent.parent.parent  # 從 app/api/v1/ 回到 yolo_backend/
-        models_dir = current_dir
-        
+        models_dir = find_models_directory()
         api_logger.info(f"查找模型目錄: {models_dir}")
-        
-        if not models_dir.exists():
+        if not models_dir or not models_dir.exists():
             raise HTTPException(status_code=500, detail=f"模型目錄不存在: {models_dir}")
             
         for file in models_dir.iterdir():
@@ -1540,19 +1555,9 @@ async def get_detection_detail(
 
 @router.get("/models")
 async def get_available_models():
-    """獲取可用的YOLO模型"""
+    """獲取可用的YOLO模型（來自 `uploads/models`）"""
     try:
-        import os
         from pathlib import Path
-        
-        # 檢查當前目錄和常見模型目錄中的 .pt 文件
-        model_dirs = [
-            ".",  # 當前目錄
-            "models",  # models 目錄
-            "weights",  # weights 目錄
-            "../",  # 上級目錄
-            "../../",  # 根目錄
-        ]
         
         found_models = []
         
@@ -1600,23 +1605,22 @@ async def get_available_models():
             }
         }
         
-        # 掃描模型文件
-        for model_dir in model_dirs:
-            model_path = Path(model_dir)
-            if model_path.exists():
-                for pt_file in model_path.glob("*.pt"):
-                    filename = pt_file.name
-                    if filename in model_info:
-                        file_size = pt_file.stat().st_size / (1024 * 1024)  # MB
-                        model_data = model_info[filename].copy()
-                        model_data.update({
-                            "file": filename,
-                            "status": "unloaded",  # 預設為未載入
-                            "available": True,
-                            "file_path": str(pt_file.absolute()),
-                            "actual_size_mb": round(file_size, 1)
-                        })
-                        found_models.append(model_data)
+        # 掃描 uploads/models 下的模型文件
+        models_dir = find_models_directory()
+        if models_dir and models_dir.exists():
+            for pt_file in models_dir.glob("*.pt"):
+                filename = pt_file.name
+                if filename in model_info:
+                    file_size = pt_file.stat().st_size / (1024 * 1024)  # MB
+                    model_data = model_info[filename].copy()
+                    model_data.update({
+                        "file": filename,
+                        "status": "unloaded",  # 預設為未載入
+                        "available": True,
+                        "file_path": str(pt_file.absolute()),
+                        "actual_size_mb": round(file_size, 1)
+                    })
+                    found_models.append(model_data)
         
         # 如果沒找到任何模型，返回預設的模型列表（但標記為不可用）
         if not found_models:
@@ -2149,17 +2153,18 @@ async def get_available_cameras():
         raise HTTPException(status_code=500, detail=f"獲取可用攝影機失敗: {str(e)}")
 
 @router.get("/data-sources/types/video/files")
-async def get_video_files(directory: str = "."):
+async def get_video_files(directory: Optional[str] = None):
     """獲取指定目錄下的影片檔案"""
     try:
-        if not os.path.exists(directory):
+        base_dir = directory or (str(find_videos_directory()) if find_videos_directory() else ".")
+        if not os.path.exists(base_dir):
             raise HTTPException(status_code=404, detail="目錄不存在")
         
         video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm']
         video_files = []
         
-        for file in os.listdir(directory):
-            file_path = os.path.join(directory, file)
+        for file in os.listdir(base_dir):
+            file_path = os.path.join(base_dir, file)
             if os.path.isfile(file_path):
                 _, ext = os.path.splitext(file)
                 if ext.lower() in video_extensions:
@@ -2172,7 +2177,7 @@ async def get_video_files(directory: str = "."):
                     })
         
         return {
-            "directory": directory,
+            "directory": base_dir,
             "files": video_files,
             "count": len(video_files)
         }
@@ -2205,8 +2210,9 @@ async def upload_video_file(file: UploadFile = File(...)):
                 detail=f"檔案太大。最大支援 500MB，您的檔案為 {file.size / 1024 / 1024:.1f}MB"
             )
         
-        # 創建上傳目錄
-        upload_dir = "uploads/videos"
+        # 創建上傳目錄（uploads/videos）
+        videos_dir = find_videos_directory() or (Path("uploads") / "videos")
+        upload_dir = str(videos_dir)
         os.makedirs(upload_dir, exist_ok=True)
         
         # 生成唯一檔案名
@@ -2765,7 +2771,8 @@ async def get_video_list():
     獲取上傳影片資料夾中的影片列表
     """
     try:
-        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        videos_dir_path = find_videos_directory()
+        videos_dir = str(videos_dir_path) if videos_dir_path else "uploads/videos"
         
         if not os.path.exists(videos_dir):
             return JSONResponse(content={"videos": []})
@@ -2854,7 +2861,8 @@ async def get_videos_simple():
     簡化版獲取影片列表 - 用於測試
     """
     try:
-        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        videos_dir_path = find_videos_directory()
+        videos_dir = str(videos_dir_path) if videos_dir_path else "uploads/videos"
         
         if not os.path.exists(videos_dir):
             return {"videos": [], "total": 0}
@@ -2912,7 +2920,8 @@ async def delete_video(video_id: str):
     刪除影片檔案
     """
     try:
-        videos_dir = "D:/project/system/yolo_backend/uploads/videos"
+        videos_dir_path = find_videos_directory()
+        videos_dir = str(videos_dir_path) if videos_dir_path else "uploads/videos"
         video_path = os.path.join(videos_dir, video_id)
         
         # 檢查檔案是否存在
