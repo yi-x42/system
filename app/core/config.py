@@ -61,7 +61,9 @@ class Settings:
         self.log_retention = "30 days"
 
         # ====== 3. 資料庫設定 ======
-        self.postgres_server = os.getenv("POSTGRES_SERVER", "localhost")
+        # 兼容兩種變數名稱：POSTGRES_SERVER 與 POSTGRES_HOST（.env 目前使用 POSTGRES_HOST）
+        pg_host = os.getenv("POSTGRES_SERVER") or os.getenv("POSTGRES_HOST") or "localhost"
+        self.postgres_server = pg_host
         self.postgres_user = os.getenv("POSTGRES_USER", "postgres")
         self.postgres_password = os.getenv("POSTGRES_PASSWORD", "__DEFAULT_FALLBACK_PASSWORD__")
         self.postgres_db = os.getenv("POSTGRES_DB", "yolo_analysis")
@@ -104,6 +106,14 @@ class Settings:
         self.DATABASE_MAX_OVERFLOW = 10
         self.DATABASE_ECHO = self.debug
 
+        # 暴露大寫別名（與部分腳本/舊程式碼相容）
+        self.POSTGRES_HOST = self.postgres_server
+        self.POSTGRES_SERVER = self.postgres_server
+        self.POSTGRES_USER = self.postgres_user
+        self.POSTGRES_PASSWORD = self.postgres_password
+        self.POSTGRES_DB = self.postgres_db
+        self.POSTGRES_PORT = self.postgres_port
+
         # Redis
         self.redis_host = os.getenv("REDIS_HOST", "localhost")
         self.redis_port = int(os.getenv("REDIS_PORT", "6379"))
@@ -131,33 +141,24 @@ class Settings:
         )
     
     def _load_env_file(self):
-        """僅載入『專案根目錄』的 .env，並在偵測到密碼不一致時強制覆蓋。
+        """直接讀取專案根目錄的 .env（不再向上尋找或依賴 start.py）。
 
-        規則：
-        1. 專案根目錄判定：向上尋找同層具有 start.py 的資料夾。
-        2. 只允許載入根目錄 .env（忽略子資料夾的任何 .env / .env.backup）。
-        3. 如果系統環境已有 POSTGRES_PASSWORD 且與根 .env 不同，記錄警告並覆蓋。
-        4. 其他變數：若已存在則不覆蓋；若不存在則新增。
+        假設專案結構為：
+          <repo_root>/
+            ├─ .env
+            └─ app/
+                └─ core/config.py
         """
         try:
-            # 1. 尋找專案根目錄（包含 start.py 且同時包含 yolo_backend 子目錄）
-            root_dir = None
-            for parent in Path(__file__).resolve().parents:
-                start_py = parent / 'start.py'
-                yolo_backend_dir = parent / 'yolo_backend'
-                if start_py.exists() and yolo_backend_dir.exists() and yolo_backend_dir.is_dir():
-                    root_dir = parent
-                    break
-            if root_dir is None:
-                print("⚠️  無法判定專案根目錄 (找不到 start.py)，跳過 .env 載入")
-                return
-
+            # 直接推導 repo 根目錄：從 app/core/config.py 回到上兩層
+            root_dir = Path(__file__).resolve().parents[2]
             env_path = root_dir / '.env'
+
             if not env_path.exists():
                 print(f"⚠️  根目錄未找到 .env：{env_path}，使用程式內預設值")
                 return
 
-            # 2. 讀取根 .env 內容至暫存 dict
+            # 讀取 .env 至暫存 dict
             parsed = {}
             with open(env_path, 'r', encoding='utf-8') as f:
                 for raw in f:
@@ -170,32 +171,36 @@ class Settings:
             existing_pwd = os.environ.get('POSTGRES_PASSWORD')
             file_pwd = parsed.get('POSTGRES_PASSWORD')
 
-            # 3. 密碼處理：若文件有值且 (不存在或不同) 則覆蓋
+            # 密碼處理：若文件有值且 (不存在或不同) 則覆蓋
             if file_pwd:
                 if existing_pwd is None:
                     os.environ['POSTGRES_PASSWORD'] = file_pwd
-                    print(f"✅ 載入 root .env POSTGRES_PASSWORD (長度 {len(file_pwd)})")
+                    print(f"✅ 載入 .env POSTGRES_PASSWORD (長度 {len(file_pwd)})")
                 elif existing_pwd != file_pwd:
                     os.environ['POSTGRES_PASSWORD'] = file_pwd
                     print(
-                        "⚠️  偵測到預先存在的 POSTGRES_PASSWORD 與 root .env 不一致 → 已強制覆蓋"
+                        "⚠️  偵測到預先存在的 POSTGRES_PASSWORD 與 .env 不一致 → 已強制覆蓋"
                         f" (原長度 {len(existing_pwd)} -> 新長度 {len(file_pwd)})"
                     )
                 else:
-                    print("✅ root .env POSTGRES_PASSWORD 與現有環境一致 (無需變更)")
+                    print("✅ .env POSTGRES_PASSWORD 與現有環境一致 (無需變更)")
             else:
-                print("⚠️  root .env 未定義 POSTGRES_PASSWORD，將使用現有或 fallback")
+                print("⚠️  .env 未定義 POSTGRES_PASSWORD，將使用現有或 fallback")
 
-            # 4. 載入其他變數（不覆蓋既有環境）
+            # 載入其他變數（不覆蓋既有環境）
             for k, v in parsed.items():
                 if k == 'POSTGRES_PASSWORD':
                     continue
                 if k not in os.environ:
                     os.environ[k] = v
 
-            print(f"✅ 已處理根目錄 .env：{env_path} (實際根目錄: {root_dir})")
+            # 相容名稱對齊：若僅定義 POSTGRES_HOST 而未定義 POSTGRES_SERVER，則補上
+            if 'POSTGRES_HOST' in parsed and 'POSTGRES_SERVER' not in os.environ:
+                os.environ['POSTGRES_SERVER'] = parsed['POSTGRES_HOST']
+
+            print(f"✅ 已載入 .env：{env_path}")
         except Exception as e:
-            print(f"❌ 讀取根目錄 .env 失敗: {e}")
+            print(f"❌ 讀取 .env 失敗: {e}")
     
     @property
     def database_url(self) -> str:

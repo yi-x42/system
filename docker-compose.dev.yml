@@ -1,0 +1,116 @@
+version: "3.9"
+
+# 開發用 Docker Compose：只提供外部相依服務（不建置應用程式）
+# 服務涵蓋：PostgreSQL、Redis（可選）、MinIO（可選）、pgAdmin（可選）
+# 對應專案中的環境變數：
+# - 資料庫：POSTGRES_SERVER, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT
+# - Redis：REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB
+# - MinIO：MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE
+
+name: yolo-dev-stack
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: yolo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: '49679904'
+      POSTGRES_DB: yolo_analysis
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devnet
+
+  # 可選：Redis（若未使用可移除此服務）
+  redis:
+    image: redis:7-alpine
+    container_name: yolo-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devnet
+
+  # 可選：MinIO 物件儲存（若未使用可移除此服務）
+  minio:
+    image: minio/minio:latest
+    container_name: yolo-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "config", "host", "add", "local", "http://localhost:9000", "minioadmin", "minioadmin"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - devnet
+
+  # 可選：pgAdmin（圖形化管理 PostgreSQL）
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: yolo-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@local
+      PGADMIN_DEFAULT_PASSWORD: devpassword
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - devnet
+
+networks:
+  devnet:
+    name: yolo-devnet
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+
+# 使用建議：
+# 1) 將應用程式的環境變數設定為：
+#    POSTGRES_SERVER=localhost
+#    POSTGRES_PORT=5432
+#    POSTGRES_USER=postgres
+#    POSTGRES_PASSWORD=devpassword
+#    POSTGRES_DB=yolo_analysis
+#    REDIS_HOST=localhost
+#    REDIS_PORT=6379
+#    REDIS_DB=0
+#    MINIO_ENDPOINT=localhost:9000
+#    MINIO_ACCESS_KEY=minioadmin
+#    MINIO_SECRET_KEY=minioadmin
+#    MINIO_BUCKET=yolo-data
+#    MINIO_SECURE=false
+# 2) 首次啟用時可先建立 MinIO bucket：
+#    - 開啟 http://localhost:9001 以登入 console（minioadmin/minioadmin），建立 bucket：yolo-data
+# 3) 若未使用 Redis / MinIO / pgAdmin，可直接刪除對應服務區塊。
+# 4) 依需求自行調整對外映射 port，避免本機衝突。
+
