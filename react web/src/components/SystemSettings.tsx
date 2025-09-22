@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "./ui/dialog";
 import { Progress } from "./ui/progress";
+import { Skeleton } from "./ui/skeleton";
 import {
   Settings,
   Users,
@@ -29,10 +30,14 @@ import {
   Server,
   Power,
 } from "lucide-react";
+import { useSystemStats } from "../hooks/react-query-hooks";
 
 export function SystemSettings() {
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
+  
+  // 獲取真實系統統計數據
+  const { data: systemStats, isLoading, isError } = useSystemStats();
 
   // 模擬用戶數據
   const users = [
@@ -764,45 +769,54 @@ export function SystemSettings() {
                 <CardTitle>當前系統狀態</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>CPU 使用率</span>
-                      <span>45%</span>
-                    </div>
-                    <Progress value={45} />
+                {isLoading ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div key={index} className="space-y-2">
+                        <Skeleton className="h-4 w-24" />
+                        <Skeleton className="h-2 w-full" />
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>記憶體使用率</span>
-                      <span>62%</span>
-                    </div>
-                    <Progress value={62} />
+                ) : isError ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    無法載入系統狀態數據
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>GPU 使用率</span>
-                      <span>38%</span>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>CPU 使用率</span>
+                        <span>{systemStats?.cpu_usage?.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={systemStats?.cpu_usage || 0} />
                     </div>
-                    <Progress value={38} />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>磁碟使用率</span>
-                      <span>73%</span>
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>記憶體使用率</span>
+                        <span>{systemStats?.memory_usage?.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={systemStats?.memory_usage || 0} />
                     </div>
-                    <Progress value={73} />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>網路使用率</span>
-                      <span>28%</span>
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>GPU 使用率</span>
+                        <span>{systemStats?.gpu_usage?.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={systemStats?.gpu_usage || 0} />
                     </div>
-                    <Progress value={28} />
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span>網路使用率</span>
+                        <span>{systemStats?.network_usage?.toFixed(2)} MB/s</span>
+                      </div>
+                      <Progress value={Math.min((systemStats?.network_usage || 0) * 10, 100)} />
+                    </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
+
           </div>
         </TabsContent>
       </Tabs>
