@@ -325,6 +325,10 @@ export function CameraControl() {
         
         // 關閉掃描結果對話框
         setShowScanResults(false);
+        // 關閉整個新增配置彈窗並重置掃描狀態
+        setIsAddDialogOpen(false);
+        setScanResults([]);
+        setScanProgress(0);
       
         console.log("已新增攝影機:", newCamera);
       } catch (error) {
