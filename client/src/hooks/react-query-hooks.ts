@@ -659,3 +659,21 @@ export const useToggleAnalysisTaskStatus = () => {
     },
   });
 };
+
+// ===== 系統控制相關 =====
+interface ShutdownResponse {
+  message: string;
+  scheduled_in_seconds?: number;
+}
+
+const shutdownSystem = async (): Promise<ShutdownResponse> => {
+  // 後端實際路徑為 /api/v1/frontend/system/shutdown ，apiClient 已在 baseURL 中含 /api/v1
+  const { data } = await apiClient.post('/frontend/system/shutdown');
+  return data;
+};
+
+export const useShutdownSystem = () => {
+  return useMutation<ShutdownResponse, Error, void>({
+    mutationFn: shutdownSystem,
+  });
+};

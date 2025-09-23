@@ -31,10 +31,13 @@ import {
   Power,
 } from "lucide-react";
 import { useSystemStats } from "../hooks/react-query-hooks";
+import { useShutdownSystem } from "../hooks/react-query-hooks";
 
 export function SystemSettings() {
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
+  const [confirmingShutdown, setConfirmingShutdown] = useState(false);
+  const { mutate: triggerShutdown, isPending: isShuttingDown, isSuccess: shutdownSuccess, error: shutdownError, data: shutdownData } = useShutdownSystem();
   
   // 獲取真實系統統計數據
   const { data: systemStats, isLoading, isError } = useSystemStats();
@@ -140,10 +143,50 @@ export function SystemSettings() {
               <RefreshCw className="h-4 w-4 mr-2" />
               重新啟動系統
             </Button>
-            <Button variant="destructive" className="text-[14px]">
-              <Power className="h-4 w-4 mr-2" />
-              停止系統
-            </Button>
+            <div className="relative">
+              {!confirmingShutdown && (
+                <Button
+                  variant="destructive"
+                  className="text-[14px]"
+                  disabled={isShuttingDown || shutdownSuccess}
+                  onClick={() => setConfirmingShutdown(true)}
+                >
+                  <Power className="h-4 w-4 mr-2" />
+                  {shutdownSuccess ? '已排程關閉' : '停止系統'}
+                </Button>
+              )}
+              {confirmingShutdown && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="destructive"
+                    className="text-[14px]"
+                    disabled={isShuttingDown}
+                    onClick={() => {
+                      triggerShutdown();
+                      setConfirmingShutdown(false);
+                    }}
+                  >
+                    {isShuttingDown ? '執行中...' : '確認停止'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-[14px]"
+                    onClick={() => setConfirmingShutdown(false)}
+                    disabled={isShuttingDown}
+                  >
+                    取消
+                  </Button>
+                </div>
+              )}
+            </div>
+            {shutdownError && (
+              <span className="text-xs text-destructive absolute mt-10">關閉失敗</span>
+            )}
+            {shutdownSuccess && shutdownData?.scheduled_in_seconds !== undefined && (
+              <span className="text-xs text-muted-foreground absolute mt-10">
+                系統將於 {shutdownData.scheduled_in_seconds}s 後關閉
+              </span>
+            )}
           </div>
         </div>
       </div>
