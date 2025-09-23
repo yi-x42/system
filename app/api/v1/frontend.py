@@ -1622,7 +1622,7 @@ async def get_available_models():
                     })
                     found_models.append(model_data)
         
-        # 如果沒找到任何模型，返回預設的模型列表（但標記為不可用）
+        # 如果沒找到任何模型，返回預設的模型列表（但標记為不可用）
         if not found_models:
             for filename, info in model_info.items():
                 model_data = info.copy()
@@ -3009,7 +3009,8 @@ async def run_realtime_detection(
             device_index=device_index,
             db_service=db_service,
             confidence_threshold=request.confidence,
-            iou_threshold=request.iou_threshold
+            iou_threshold=request.iou_threshold,
+            model_path=model_info.get("path")
         )
         
         if success:

@@ -12,6 +12,7 @@ from app.services.realtime_detection_service import get_realtime_detection_servi
 from app.services.new_database_service import DatabaseService
 from app.core.database import get_async_db
 from app.core.logger import api_logger
+from app.core.config import settings
 
 router = APIRouter(prefix="/realtime", tags=["實時檢測"])
 
@@ -64,7 +65,8 @@ async def start_realtime_detection(
             task_id=str(db_task_id),
             camera_id=f"camera_{camera_index}",
             device_index=camera_index,
-            db_service=db_service
+            db_service=db_service,
+            model_path=settings.model_path
         )
         
         if not success:

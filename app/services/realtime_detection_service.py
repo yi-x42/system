@@ -57,20 +57,29 @@ class RealtimeDetectionService:
         device_index: int,
         db_service: DatabaseService = None,
         confidence_threshold: float = 0.5,
-        iou_threshold: float = 0.45
+        iou_threshold: float = 0.45,
+        model_path: Optional[str] = None
     ) -> bool:
-        """開始實時檢測 - 使用共享視訊流"""
+        """開始實時檢測 - 使用共享視訊流（支援動態模型切換）"""
         try:
+            detection_logger.debug(
+                f"[start_realtime_detection] 收到啟動請求 task_id={task_id} camera_id={camera_id} device_index={device_index} "
+                f"conf={confidence_threshold} iou={iou_threshold} model_path={model_path}"
+            )
             if task_id in self.active_sessions:
                 detection_logger.warning(f"任務已存在: {task_id}")
                 return False
                 
-            # 載入 YOLO 模型
-            if not self.yolo_service.is_loaded:
-                model_loaded = await self.yolo_service.load_model(settings.model_path)
-                if not model_loaded:
-                    detection_logger.error("YOLO 模型載入失敗")
+            # 模型載入 / 切換
+            target_model_path = model_path or settings.model_path
+            if (not self.yolo_service.is_loaded) or (self.yolo_service._model_path != target_model_path):
+                detection_logger.info(f"載入/切換 YOLO 模型: {target_model_path}")
+                loaded = await self.yolo_service.load_model(target_model_path)
+                if not loaded:
+                    detection_logger.error(f"YOLO 模型載入失敗: {target_model_path}")
                     return False
+            else:
+                detection_logger.info(f"沿用已載入模型: {self.yolo_service._model_path}")
             
             # 確保攝影機流正在運行
             if not camera_stream_manager.is_stream_running(camera_id):
@@ -80,7 +89,6 @@ class RealtimeDetectionService:
                     detection_logger.error(f"攝影機流啟動失敗: {camera_id}")
                     return False
             
-            # 創建檢測會話
             session = RealtimeSession(
                 task_id=task_id,
                 camera_id=camera_id,
@@ -91,21 +99,22 @@ class RealtimeDetectionService:
                 iou_threshold=iou_threshold
             )
             
-            # 創建流消費者
             consumer = StreamConsumer(
                 consumer_id=session.consumer_id,
                 callback=self._create_frame_callback(session, db_service)
             )
             
-            # 將消費者添加到攝影機流
             success = camera_stream_manager.add_consumer(camera_id, consumer)
             if not success:
                 detection_logger.error(f"無法添加檢測消費者到攝影機流 {camera_id}")
                 return False
             
             self.active_sessions[task_id] = session
-            
-            detection_logger.info(f"實時檢測啟動成功: {task_id}, 攝影機: {camera_id}")
+            detection_logger.info(f"實時檢測啟動成功: {task_id}, 攝影機: {camera_id}, 模型: {target_model_path}")
+            detection_logger.debug(
+                f"[start_realtime_detection] 建立會話: task_id={task_id} consumer_id={session.consumer_id} "
+                f"active_sessions={list(self.active_sessions.keys())}"
+            )
             return True
             
         except Exception as e:
@@ -115,6 +124,13 @@ class RealtimeDetectionService:
     def _create_frame_callback(self, session: RealtimeSession, db_service: DatabaseService = None):
         """創建幀處理回調函數"""
         def frame_callback(frame_data: FrameData):
+            try:
+                detection_logger.debug(
+                    f"[frame_callback] task_id={session.task_id} 收到幀 frame_number={frame_data.frame_number} "
+                    f"camera_id={frame_data.camera_id} consumers={len(camera_stream_manager.streams.get(frame_data.camera_id).consumers) if camera_stream_manager.streams.get(frame_data.camera_id) else 'NA'}"
+                )
+            except Exception:
+                pass
             self._process_frame(session, frame_data, db_service)
         return frame_callback
 
@@ -183,6 +199,11 @@ class RealtimeDetectionService:
             
             # 更新幀計數
             session.frame_count += 1
+            if session.frame_count <= 5 or session.frame_count % 30 == 0:
+                detection_logger.debug(
+                    f"[_process_frame] task_id={session.task_id} 處理幀 frame_count={session.frame_count} timestamp={timestamp.isoformat()} "
+                    f"frame_shape={frame.shape if hasattr(frame, 'shape') else 'NA'}"
+                )
             
             # 執行 YOLO 推理 - 使用會話中的信心度閾值
             predictions = self.yolo_service.predict_frame(
@@ -190,6 +211,10 @@ class RealtimeDetectionService:
                 conf_threshold=session.confidence_threshold,
                 iou_threshold=session.iou_threshold
             )
+            if session.frame_count <= 5 or session.frame_count % 30 == 0:
+                detection_logger.debug(
+                    f"[_process_frame] task_id={session.task_id} 預測完成 幀={session.frame_count} 預測數={len(predictions) if predictions else 0}"
+                )
             
             if predictions and len(predictions) > 0:
                 session.detection_count += len(predictions)
@@ -234,6 +259,10 @@ class RealtimeDetectionService:
                         
                         # 儲存檢測結果到資料庫
                         detection_logger.debug(f"準備儲存 {len(detection_results)} 個檢測結果到任務 {session.task_id}")
+                        if len(detection_results) > 0 and (session.frame_count <=5 or session.frame_count % 30 == 0):
+                            detection_logger.debug(
+                                f"[_process_frame] 第一筆檢測樣本: {detection_results[0]}"
+                            )
                         
                         # 使用執行器避免阻塞主循環
                         try:
@@ -247,6 +276,10 @@ class RealtimeDetectionService:
                                         if not success:
                                             detection_logger.error(f"儲存檢測結果失敗: {detection_result}")
                                     detection_logger.debug(f"成功提交儲存 {len(detection_results)} 個檢測結果")
+                                    if len(detection_results) > 0 and (session.frame_count <=5 or session.frame_count % 30 == 0):
+                                        detection_logger.debug(
+                                            f"[save_detections] 插入完成 樣本 task_id={session.task_id} frame={session.frame_count}"
+                                        )
                                 except Exception as e:
                                     detection_logger.error(f"線程中儲存檢測結果失敗: {e}")
                             

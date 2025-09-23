@@ -240,6 +240,7 @@ class TaskService:
         try:
             from app.services.realtime_detection_service import get_realtime_detection_service
             from app.services.new_database_service import DatabaseService
+            from app.core.config import settings
             
             task = self.active_tasks[task_id]
             config = task["config"]
@@ -252,8 +253,10 @@ class TaskService:
             # 啟動實時檢測
             success = await realtime_service.start_realtime_detection(
                 task_id=task_id,
-                camera_index=camera_index,
-                db_service=db_service
+                camera_id=f"camera_{camera_index}",
+                device_index=camera_index,
+                db_service=db_service,
+                model_path=settings.model_path
             )
             
             if not success:
