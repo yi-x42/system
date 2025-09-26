@@ -278,7 +278,7 @@ async def start_video_analysis(
     source_id: Optional[int] = Form(None),
     file_path: Optional[str] = Form(None),
     task_name: str = Form("影片分析任務"),
-    model_id: str = Form("yolo11n"),
+    model_id: str = Form("yolo11n"),  # 可能是內建名稱或資料庫數字ID (字串型態)
     confidence_threshold: float = Form(0.5),
     db: AsyncSession = Depends(get_db)
 ):
@@ -323,7 +323,33 @@ async def start_video_analysis(
         
         logger.info(f"🎬 分析檔案路徑: {actual_file_path}")
 
-        # 建立分析任務
+        # 解析模型：支援傳入數字型 ID（資料庫）或直接給檔名/別名
+        selected_model_id: Optional[int] = None
+        model_path_resolved: Optional[str] = None
+        try:
+            # 嘗試將 model_id 解析為整數 ID
+            numeric_id = int(model_id)
+            selected_model_id = numeric_id
+            from sqlalchemy import select
+            from app.models.database import Model
+            q = select(Model).where(Model.id == numeric_id)
+            res = await db.execute(q)
+            m = res.scalar_one_or_none()
+            if not m:
+                raise HTTPException(status_code=404, detail=f"模型 ID {numeric_id} 不存在")
+            model_path_resolved = m.path
+            logger.info(f"📦 使用資料庫模型 ID={numeric_id} path={model_path_resolved}")
+        except ValueError:
+            # 非數字，視為直接提供的模型名稱或路徑
+            logger.info(f"📦 使用直接提供模型識別: {model_id}")
+            model_path_resolved = model_id  # 可能是 yolo11n.pt 或 'yolo11n'
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"解析模型失敗: {e}")
+            raise HTTPException(status_code=500, detail="解析模型失敗")
+
+        # 建立分析任務（保留原始 model_id 方便追蹤）
         task_data = {
             'task_type': 'video_file',
             'source_info': {
@@ -367,7 +393,7 @@ async def start_video_analysis(
         logger.info(f"🎬 分析任務已建立: {task.id}")
         
         # 在背景執行影片分析
-        background_tasks.add_task(process_video_analysis, task.id, actual_file_path)
+        background_tasks.add_task(process_video_analysis, task.id, actual_file_path, model_path_resolved)
         
         return {
             'success': True,
@@ -791,8 +817,8 @@ async def get_system_statistics(
 # 背景任務處理函數
 # ============================================================================
 
-async def process_video_analysis(task_id: int, file_path: str):
-    """背景處理影片分析"""
+async def process_video_analysis(task_id: int, file_path: str, model_path: Optional[str] = None):
+    """背景處理影片分析 (支援動態模型)"""
     logger.info(f"🎬 開始處理影片分析任務 {task_id}: {file_path}")
     
     # 需要創建新的資料庫會話用於背景任務
@@ -807,7 +833,31 @@ async def process_video_analysis(task_id: int, file_path: str):
         
         # 初始化基本的影片分析服務（不使用資料庫整合版）
         from app.services.video_analysis_service import VideoAnalysisService
-        analysis_service = VideoAnalysisService(model_path="yolo11n.pt")
+        # 若未顯式傳入，嘗試從任務紀錄解析 model_id；否則 fallback 預設
+        resolved_model_path = model_path or "yolo11n.pt"
+        if model_path is None:
+            try:
+                from app.models.database import AnalysisTask, Model
+                from sqlalchemy import select
+                async with AsyncSessionLocal() as s2:
+                    task_obj = await s2.get(AnalysisTask, task_id)
+                    if task_obj and task_obj.model_id:
+                        # 嘗試轉 int
+                        try:
+                            mid = int(task_obj.model_id)
+                            q = select(Model).where(Model.id == mid)
+                            r = await s2.execute(q)
+                            mm = r.scalar_one_or_none()
+                            if mm:
+                                resolved_model_path = mm.path
+                                logger.info(f"📦 從任務 model_id 解析模型路徑: {resolved_model_path}")
+                        except ValueError:
+                            # 非數值就直接當作路徑或名稱
+                            resolved_model_path = task_obj.model_id
+            except Exception as ie:
+                logger.warning(f"嘗試從任務解析模型失敗，使用預設: {ie}")
+        analysis_service = VideoAnalysisService(model_path=resolved_model_path)
+        logger.info(f"🎯 使用影片分析模型: {resolved_model_path}")
         
         # 執行影片分析
         results = analysis_service.analyze_video_file(file_path)

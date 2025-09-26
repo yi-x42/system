@@ -19,6 +19,7 @@ except ImportError:
 
 try:
     from ultralytics import YOLO
+    from app.core.paths import resolve_model_path
 except ImportError:
     logger.error("YOLO import failed")
     YOLO = None
@@ -38,6 +39,8 @@ class VideoAnnotationService:
                 raise Exception("YOLO not available")
             
             # 檢查模型檔案
+            # 解析模型路徑 (允許傳入簡單檔名)
+            model_path = resolve_model_path(model_path)
             model_file = Path(model_path)
             if not model_file.exists():
                 # 嘗試在當前目錄查找

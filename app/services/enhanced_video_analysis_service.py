@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 import json
 import uuid
 from ultralytics import YOLO
+from app.core.paths import resolve_model_path
 
 from app.core.logger import main_logger as logger
 from app.services.video_analysis_service import VideoAnalysisService, DetectionRecord, BehaviorEvent
@@ -22,8 +23,7 @@ class EnhancedVideoAnalysisService(VideoAnalysisService):
     """增強的影片分析服務 - 支援資料庫保存"""
     
     def __init__(self, model_path: str = "yolo11n.pt", device: str = "auto", db_service: Optional[DatabaseService] = None):
-        # 只傳遞 model_path 給父類
-        super().__init__(model_path)
+        super().__init__(resolve_model_path(model_path))
         # 單獨設定 device
         self.device = device
         # 如果指定了 device，設定模型的設備

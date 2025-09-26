@@ -16,6 +16,7 @@ import queue
 import json
 import uuid
 from ultralytics import YOLO
+from app.core.paths import resolve_model_path
 
 from app.core.logger import main_logger as logger
 from app.utils.coordinate_system import get_coordinate_converter
@@ -385,10 +386,15 @@ class BehaviorAnalyzer:
 
 
 class VideoAnalysisService:
-    """主要的影片分析服務"""
+    """主要的影片分析服務（支援動態模型載入）"""
     
-    def __init__(self, model_path: str = "yolo11n.pt"):
-        self.model = YOLO(model_path)
+    def __init__(self, model_path: str | None = None):
+        # 延遲載入：首次使用或切換時才載入模型
+        self.model: YOLO | None = None
+        self.model_path: str | None = None
+        if model_path:
+            self.set_model(model_path)
+        
         self.zone_manager = ZoneManager()
         self.object_tracker = ObjectTracker()
         self.behavior_analyzer = BehaviorAnalyzer()
@@ -402,10 +408,29 @@ class VideoAnalysisService:
         self.current_source = None
         
         logger.info("VideoAnalysisService 初始化完成")
+
+    def set_model(self, model_path: str):
+        """設定 / 切換 YOLO 模型 (必要時才重新載入) - 使用集中解析。"""
+        resolved = resolve_model_path(model_path)
+        try:
+            if self.model is not None and self.model_path == resolved:
+                logger.debug(f"沿用已載入影片分析模型: {resolved}")
+                return
+            logger.info(f"載入影片分析模型: {model_path} (resolved={resolved})")
+            self.model = YOLO(resolved)
+            self.model_path = resolved
+        except Exception as e:
+            logger.error(f"載入影片分析模型失敗: {model_path} (resolved={resolved}) -> {e}")
+            raise
         
-    def analyze_camera(self, camera_id: int = 0, duration: int = 60) -> Dict[str, Any]:
+    def analyze_camera(self, camera_id: int = 0, duration: int = 60, model_path: str | None = None) -> Dict[str, Any]:
         """分析攝影機輸入"""
         try:
+            if model_path:
+                self.set_model(model_path)
+            elif self.model is None:
+                # fallback 預設
+                self.set_model("yolo11n.pt")
             cap = cv2.VideoCapture(camera_id)
             if not cap.isOpened():
                 raise Exception(f"無法開啟攝影機 {camera_id}")
@@ -427,9 +452,13 @@ class VideoAnalysisService:
             if 'cap' in locals():
                 cap.release()
                 
-    def analyze_video_file(self, video_path: str) -> Dict[str, Any]:
+    def analyze_video_file(self, video_path: str, model_path: str | None = None) -> Dict[str, Any]:
         """分析影片檔案"""
         try:
+            if model_path:
+                self.set_model(model_path)
+            elif self.model is None:
+                self.set_model("yolo11n.pt")
             if not Path(video_path).exists():
                 raise Exception(f"影片檔案不存在: {video_path}")
                 

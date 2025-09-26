@@ -20,6 +20,7 @@ from PIL import Image
 import cv2
 
 from app.core.config import settings, YOLO_CLASSES
+from app.core.paths import resolve_model_path
 from app.core.logger import detection_logger, performance_logger, log_performance
 from app.utils.exceptions import ModelNotLoadedException, InferenceException
 
@@ -94,6 +95,10 @@ class YOLOService:
             bool: 載入是否成功
         """
         model_path = model_path or settings.model_path
+        resolved_path = resolve_model_path(model_path)
+        if resolved_path != model_path:
+            detection_logger.info(f"解析模型路徑: {model_path} -> {resolved_path}")
+        model_path = resolved_path
         
         async with self._lock:
             if self._model is not None and self._model_path == model_path:

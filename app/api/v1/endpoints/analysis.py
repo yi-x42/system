@@ -125,7 +125,8 @@ async def analyze_camera(
 @router.post("/video/upload")
 async def analyze_uploaded_video(
     file: UploadFile = File(..., description="上傳的影片檔案"),
-    analysis_type: str = Form("detection", description="分析類型: detection(檢測), annotation(標註)")
+    analysis_type: str = Form("detection", description="分析類型: detection(檢測), annotation(標註)"),
+    model_id: Optional[int] = Form(None, description="指定使用的模型 ID")
 ):
     """
     上傳影片分析端點
@@ -154,8 +155,29 @@ async def analyze_uploaded_video(
         source = "uploaded"
         
         # 執行分析
+        # 解析模型路徑（若有指定）
+        model_path = None
+        if model_id is not None:
+            try:
+                # 使用現有 get_async_db 產生 session
+                async for db in get_async_db():  # get_async_db 是 async generator
+                    from sqlalchemy import select
+                    from app.models.database import Model
+                    q = select(Model).where(Model.id == model_id)
+                    res = await db.execute(q)
+                    m = res.scalar_one_or_none()
+                    if not m:
+                        raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
+                    model_path = m.path
+                    break
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"查詢模型失敗: {e}")
+                raise HTTPException(status_code=500, detail="查詢模型失敗")
+
         if analysis_type == "detection":
-            result = get_video_analysis_service().analyze_video_file(video_path)
+            result = get_video_analysis_service().analyze_video_file(video_path, model_path=model_path)
         else:  # annotation
             result = get_video_annotation_service().generate_annotated_video(video_path)
         
@@ -180,7 +202,8 @@ async def analyze_uploaded_video(
 @router.post("/video/local")
 async def analyze_local_video(
     local_path: str = Form(..., description="本地影片檔案路徑"),
-    analysis_type: str = Form("detection", description="分析類型: detection(檢測), annotation(標註)")
+    analysis_type: str = Form("detection", description="分析類型: detection(檢測), annotation(標註)"),
+    model_id: Optional[int] = Form(None, description="指定使用的模型 ID")
 ):
     """
     本地影片分析端點
@@ -196,8 +219,27 @@ async def analyze_local_video(
         source = "local"
         
         # 執行分析
+        model_path = None
+        if model_id is not None:
+            try:
+                async for db in get_async_db():
+                    from sqlalchemy import select
+                    from app.models.database import Model
+                    q = select(Model).where(Model.id == model_id)
+                    res = await db.execute(q)
+                    m = res.scalar_one_or_none()
+                    if not m:
+                        raise HTTPException(status_code=404, detail=f"模型 {model_id} 不存在")
+                    model_path = m.path
+                    break
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"查詢模型失敗: {e}")
+                raise HTTPException(status_code=500, detail="查詢模型失敗")
+
         if analysis_type == "detection":
-            result = get_video_analysis_service().analyze_video_file(str(video_path))
+            result = get_video_analysis_service().analyze_video_file(str(video_path), model_path=model_path)
         else:  # annotation  
             result = get_video_annotation_service().generate_annotated_video(str(video_path))
         
