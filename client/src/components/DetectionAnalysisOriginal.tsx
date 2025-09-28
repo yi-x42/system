@@ -5,6 +5,7 @@ import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
@@ -45,6 +46,11 @@ import {
   Trash2,
   Clock,
   Square,
+  Settings,
+  MousePointer,
+  Minus,
+  RotateCcw,
+  Save,
 } from "lucide-react";
 
 export function DetectionAnalysisOriginal() {
@@ -63,6 +69,8 @@ export function DetectionAnalysisOriginal() {
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [realtimeModel, setRealtimeModel] = useState<string>("");
   const [isRealtimeAnalysisRunning, setIsRealtimeAnalysisRunning] = useState(false);
+  const [entranceExitEnabled, setEntranceExitEnabled] = useState(false);
+  const [dwellTimeEnabled, setDwellTimeEnabled] = useState(false);
 
   // 獲取所有分析任務（不限制狀態，包含所有任務）
   const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
@@ -621,7 +629,8 @@ export function DetectionAnalysisOriginal() {
                               size="sm"
                               variant="destructive"
                               disabled={deleteVideoMutation.isPending}
-                              onClick={() => handleDeleteVideo(video)}
+                              onClick={() => handleDeleteVideo(video)
+                              }
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -788,14 +797,179 @@ export function DetectionAnalysisOriginal() {
                   </div>
 
                   <div className="space-y-2">
+                    <h4 className="font-medium">顯示功能</h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="mosaic-toggle">馬賽克</Label>
+                        <Switch id="mosaic-toggle" />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="trajectory-toggle">移動軌跡</Label>
+                        <Switch id="trajectory-toggle" />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="heatmap-toggle">熱力圖</Label>
+                        <Switch id="heatmap-toggle" />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="entrance-exit-toggle">出入計數</Label>
+                        <div className="flex items-center gap-2">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Settings className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-4xl">
+                              <DialogHeader>
+                                <DialogTitle>配置出入計數偵測線</DialogTitle>
+                              </DialogHeader>
+                              <div className="flex gap-4 h-96">
+                                <div className="flex-1 bg-black rounded-lg flex items-center justify-center">
+                                  <div className="text-center text-white">
+                                    <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                                    <p>攝影機畫面</p>
+                                    <p className="text-sm opacity-75">在此處劃設偵測線</p>
+                                  </div>
+                                </div>
+                                <div className="w-48 space-y-4">
+                                  <div>
+                                    <h4 className="font-medium mb-2">繪圖工具</h4>
+                                    <div className="space-y-2">
+                                      <Button variant="outline" className="w-full justify-start">
+                                        <MousePointer className="h-4 w-4 mr-2" />
+                                        選擇
+                                      </Button>
+                                      <Button variant="outline" className="w-full justify-start">
+                                        <Minus className="h-4 w-4 mr-2" />
+                                        劃線
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <h4 className="font-medium mb-2">線條設定</h4>
+                                    <div className="space-y-2">
+                                      <div>
+                                        <Label htmlFor="line-name">線條名稱</Label>
+                                        <Input id="line-name" placeholder="入口線" />
+                                      </div>
+                                      <div>
+                                        <Label htmlFor="line-direction">計數方向</Label>
+                                        <Select>
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="選擇方向" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="both">雙向</SelectItem>
+                                            <SelectItem value="in">僅進入</SelectItem>
+                                            <SelectItem value="out">僅離開</SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button variant="outline" size="sm">
+                                      <RotateCcw className="h-4 w-4 mr-1" />
+                                      重置
+                                    </Button>
+                                    <Button size="sm">
+                                      <Save className="h-4 w-4 mr-1" />
+                                      儲存
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          <Switch 
+                            id="entrance-exit-toggle" 
+                            checked={entranceExitEnabled}
+                            onCheckedChange={setEntranceExitEnabled}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="dwell-time-toggle">區域停留時間</Label>
+                        <div className="flex items-center gap-2">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <Settings className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-4xl">
+                              <DialogHeader>
+                                <DialogTitle>配置區域停留時間偵測區域</DialogTitle>
+                              </DialogHeader>
+                              <div className="flex gap-4 h-96">
+                                <div className="flex-1 bg-black rounded-lg flex items-center justify-center">
+                                  <div className="text-center text-white">
+                                    <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                                    <p>攝影機畫面</p>
+                                    <p className="text-sm opacity-75">在此處劃設偵測區域</p>
+                                  </div>
+                                </div>
+                                <div className="w-48 space-y-4">
+                                  <div>
+                                    <h4 className="font-medium mb-2">繪圖工具</h4>
+                                    <div className="space-y-2">
+                                      <Button variant="outline" className="w-full justify-start">
+                                        <MousePointer className="h-4 w-4 mr-2" />
+                                        選擇
+                                      </Button>
+                                      <Button variant="outline" className="w-full justify-start">
+                                        <Square className="h-4 w-4 mr-2" />
+                                        矩形區域
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <h4 className="font-medium mb-2">區域設定</h4>
+                                    <div className="space-y-2">
+                                      <div>
+                                        <Label htmlFor="area-name">區域名稱</Label>
+                                        <Input id="area-name" placeholder="等候區域" />
+                                      </div>
+                                      <div>
+                                        <Label htmlFor="min-dwell-time">最短停留時間（秒）</Label>
+                                        <Input id="min-dwell-time" type="number" placeholder="5" />
+                                      </div>
+                                      <div>
+                                        <Label htmlFor="max-dwell-time">警報時間（秒）</Label>
+                                        <Input id="max-dwell-time" type="number" placeholder="300" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <Button variant="outline" size="sm">
+                                      <RotateCcw className="h-4 w-4 mr-1" />
+                                      重置
+                                    </Button>
+                                    <Button size="sm">
+                                      <Save className="h-4 w-4 mr-1" />
+                                      儲存
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                          <Switch 
+                            id="dwell-time-toggle" 
+                            checked={dwellTimeEnabled}
+                            onCheckedChange={setDwellTimeEnabled}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
                     <h4 className="font-medium">即時偵測統計</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-muted-foreground">人員數量</span>
-                        <p className="text-xl">0</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">車輛數量</span>
                         <p className="text-xl">0</p>
                       </div>
                       <div>
@@ -806,6 +980,18 @@ export function DetectionAnalysisOriginal() {
                         <span className="text-muted-foreground">處理速度</span>
                         <p className="text-xl">0 FPS</p>
                       </div>
+                      {entranceExitEnabled && (
+                        <div>
+                          <span className="text-muted-foreground">進入/離開</span>
+                          <p className="text-xl">0/0</p>
+                        </div>
+                      )}
+                      {dwellTimeEnabled && (
+                        <div>
+                          <span className="text-muted-foreground">平均停留時間</span>
+                          <p className="text-xl">0分鐘</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
