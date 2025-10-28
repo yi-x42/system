@@ -227,9 +227,6 @@ export function SystemSettings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Asia/Taipei">台北 (GMT+8)</SelectItem>
-                      <SelectItem value="Asia/Tokyo">東京 (GMT+9)</SelectItem>
-                      <SelectItem value="Asia/Shanghai">上海 (GMT+8)</SelectItem>
-                      <SelectItem value="UTC">UTC (GMT+0)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -244,9 +241,6 @@ export function SystemSettings() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="zh-TW">繁體中文</SelectItem>
-                      <SelectItem value="zh-CN">简体中文</SelectItem>
-                      <SelectItem value="en-US">English</SelectItem>
-                      <SelectItem value="ja-JP">日本語</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
