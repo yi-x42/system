@@ -1,0 +1,13 @@
+*** Begin Patch
+*** Update File: client/src/components/CameraControl.tsx
+@@
+-      const scanResult = await scanCamerasMutation.mutateAsync({
+-        max_index: 6,        // 掃描 0-5 號攝影機
+-        warmup_frames: 3,    // 快速模式
+-        force_probe: false,
+-        retries: 1
+-      });
++      const scanResult = await scanCamerasMutation.mutateAsync({
++        register_new: true,
++      });
+*** End Patch

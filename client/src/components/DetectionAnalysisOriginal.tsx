@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -9,11 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
-import { 
-  useYoloModelList, 
-  useToggleModelStatus, 
-  useActiveModels, 
-  useVideoUpload, 
+import RealtimePreview from "./RealtimePreview";
+import {
+  useYoloModelList,
+  useToggleModelStatus,
+  useActiveModels,
+  useVideoUpload,
   VideoUploadResponse,
   useCreateAnalysisTask,
   useCreateAndExecuteAnalysisTask,
@@ -28,9 +29,9 @@ import {
   VideoFileInfo,
   useDeleteVideo,
   useCameras,
-  useStartRealtimeAnalysis,
-  RealtimeAnalysisRequest,
-  useVideoAnalysis
+  useStartLivePersonCamera,
+  LivePersonCameraRequest,
+  useVideoAnalysis,
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -38,7 +39,6 @@ import {
   Play,
   Eye,
   Activity,
-  Target,
   Zap,
   FileVideo,
   Camera,
@@ -68,9 +68,14 @@ export function DetectionAnalysisOriginal() {
   // 即時分析相關狀態
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [realtimeModel, setRealtimeModel] = useState<string>("");
-  const [isRealtimeAnalysisRunning, setIsRealtimeAnalysisRunning] = useState(false);
+  const [isLivePersonCameraRunning, setIsLivePersonCameraRunning] = useState(false);
+  const [livePersonTaskId, setLivePersonTaskId] = useState<string | null>(null);
   const [entranceExitEnabled, setEntranceExitEnabled] = useState(false);
   const [dwellTimeEnabled, setDwellTimeEnabled] = useState(false);
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const [traceEnabled, setTraceEnabled] = useState(false);
+  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
+  const commandSenderRef = useRef<((name: string, value: boolean) => void) | null>(null);
 
   // 獲取所有分析任務（不限制狀態，包含所有任務）
   const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
@@ -88,7 +93,7 @@ export function DetectionAnalysisOriginal() {
   const createTaskMutation = useCreateAnalysisTask();
   const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
   const deleteVideoMutation = useDeleteVideo();
-  const startRealtimeAnalysisMutation = useStartRealtimeAnalysis();
+  const startLivePersonCameraMutation = useStartLivePersonCamera();
   const videoAnalysisMutation = useVideoAnalysis();
   const stopTaskMutation = useStopAnalysisTask();
   const deleteTaskMutation = useDeleteAnalysisTask();
@@ -97,6 +102,49 @@ export function DetectionAnalysisOriginal() {
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
   console.log("攝影機數據:", cameras);
+
+  const selectedCameraInfo = cameras?.find((camera) => {
+    const cameraId = camera.id?.toString();
+    return cameraId === selectedCamera;
+  });
+
+  const handleCommandReady = (
+    sender: ((name: string, value: boolean) => void) | null
+  ) => {
+    commandSenderRef.current = sender;
+    if (sender) {
+      sender("blur_enabled", blurEnabled);
+      sender("trace_enabled", traceEnabled);
+      sender("heatmap_enabled", heatmapEnabled);
+      sender("line_enabled", entranceExitEnabled);
+      sender("zone_enabled", dwellTimeEnabled);
+    }
+  };
+
+  const handleBlurToggle = (value: boolean) => {
+    setBlurEnabled(value);
+    commandSenderRef.current?.("blur_enabled", value);
+  };
+
+  const handleTraceToggle = (value: boolean) => {
+    setTraceEnabled(value);
+    commandSenderRef.current?.("trace_enabled", value);
+  };
+
+  const handleHeatmapToggle = (value: boolean) => {
+    setHeatmapEnabled(value);
+    commandSenderRef.current?.("heatmap_enabled", value);
+  };
+
+  const handleLineToggle = (value: boolean) => {
+    setEntranceExitEnabled(value);
+    commandSenderRef.current?.("line_enabled", value);
+  };
+
+  const handleZoneToggle = (value: boolean) => {
+    setDwellTimeEnabled(value);
+    commandSenderRef.current?.("zone_enabled", value);
+  };
 
   // 模擬分析結果數據
   const analysisResults = [
@@ -342,8 +390,8 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
-  // 開始即時分析的處理函數
-  const handleStartRealtimeAnalysis = async () => {
+  // 開始 Live Person Camera 的處理函式
+  const handleStartLivePersonCamera = async () => {
     if (!selectedCamera) {
       alert('請選擇攝影機');
       return;
@@ -354,29 +402,54 @@ export function DetectionAnalysisOriginal() {
       return;
     }
 
+    const selectedModelInfo = activeModels?.find((model) => model.id === realtimeModel);
+    const modelPath = selectedModelInfo?.path || selectedModelInfo?.name || realtimeModel;
+    if (!modelPath) {
+      alert('無法取得模型路徑，請確認模型設定');
+      return;
+    }
+
     try {
-      setIsRealtimeAnalysisRunning(true);
+      setLivePersonTaskId(null);
+      setIsLivePersonCameraRunning(false);
       
-      const requestData: RealtimeAnalysisRequest = {
-        task_name: `即時分析_${new Date().toLocaleString()}`,
+      
+      const requestData: LivePersonCameraRequest = {
+        task_name: `LivePerson_${new Date().toLocaleString()}`,
         camera_id: selectedCamera,
-        model_id: realtimeModel,
-        confidence: confidenceThreshold,
-        iou_threshold: 0.45,
-        description: "前端發起的即時分析任務"
+        model_path: modelPath,
+        confidence_threshold: confidenceThreshold,
+        imgsz: 640,
+        trace_length: 30,
+        heatmap_radius: 40,
+        heatmap_opacity: 0.5,
+        blur_kernel: 25,
+        corner_enabled: true,
+        blur_enabled: blurEnabled,
+        trace_enabled: traceEnabled,
+        heatmap_enabled: heatmapEnabled,
+        line_enabled: entranceExitEnabled,
+        zone_enabled: dwellTimeEnabled,
+        line_start_x: null,
+        line_start_y: null,
+        line_end_x: null,
+        line_end_y: null,
+        description: "前端發起的 Live Person Camera 任務",
       };
 
-      console.log('開始即時分析:', requestData);
+      console.log('開始 Live Person Camera 分析:', requestData);
       
-      const result = await startRealtimeAnalysisMutation.mutateAsync(requestData);
-      console.log('即時分析已開始:', result);
-      
+      const result = await startLivePersonCameraMutation.mutateAsync(requestData);
+      console.log('Live Person Camera 分析已開始:', result);
+      setIsLivePersonCameraRunning(true);
+      setLivePersonTaskId(result.task_id ?? null);
       alert(`即時分析已開始！\n任務 ID: ${result.task_id}\n狀態: ${result.status}\n${result.message}`);
       
     } catch (error) {
-      console.error('開始即時分析失敗:', error);
+      console.error('開始 Live Person Camera 失敗:', error);
       alert('開始即時分析失敗，請稍後重試');
-      setIsRealtimeAnalysisRunning(false);
+      setIsLivePersonCameraRunning(false);
+      setLivePersonTaskId(null);
     }
   };
 
@@ -779,21 +852,23 @@ export function DetectionAnalysisOriginal() {
 
                   <Button 
                     className="w-full" 
-                    onClick={handleStartRealtimeAnalysis}
-                    disabled={isRealtimeAnalysisRunning || startRealtimeAnalysisMutation.isPending}
+                    onClick={handleStartLivePersonCamera}
+                    disabled={isLivePersonCameraRunning || startLivePersonCameraMutation.isPending}
                   >
                     <Activity className="h-4 w-4 mr-2" />
-                    {isRealtimeAnalysisRunning || startRealtimeAnalysisMutation.isPending ? '分析中...' : '開始即時分析'}
+                    {isLivePersonCameraRunning || startLivePersonCameraMutation.isPending ? '分析中...' : '開始即時分析'}
                   </Button>
                 </div>
 
                 <div className="space-y-4">
-                  <div className="aspect-video bg-black rounded-lg flex items-center justify-center">
-                    <div className="text-center text-white">
-                      <Target className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                      <p>即時分析預覽</p>
-                      <p className="text-sm opacity-75">選擇攝影機開始分析</p>
-                    </div>
+                  <div className="space-y-2">
+                    <h4 className="font-medium">即時分析預覽</h4>
+                    <RealtimePreview
+                      taskId={livePersonTaskId}
+                      running={isLivePersonCameraRunning}
+                      cameraName={selectedCameraInfo?.name}
+                      onCommandReady={handleCommandReady}
+                    />
                   </div>
 
                   <div className="space-y-2">
@@ -801,15 +876,27 @@ export function DetectionAnalysisOriginal() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="mosaic-toggle">馬賽克</Label>
-                        <Switch id="mosaic-toggle" />
+                        <Switch 
+                          id="mosaic-toggle"
+                          checked={blurEnabled}
+                          onCheckedChange={handleBlurToggle}
+                        />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="trajectory-toggle">移動軌跡</Label>
-                        <Switch id="trajectory-toggle" />
+                        <Switch 
+                          id="trajectory-toggle"
+                          checked={traceEnabled}
+                          onCheckedChange={handleTraceToggle}
+                        />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="heatmap-toggle">熱力圖</Label>
-                        <Switch id="heatmap-toggle" />
+                        <Switch 
+                          id="heatmap-toggle"
+                          checked={heatmapEnabled}
+                          onCheckedChange={handleHeatmapToggle}
+                        />
                       </div>
                       <div className="flex items-center justify-between">
                         <Label htmlFor="entrance-exit-toggle">出入計數</Label>
@@ -885,7 +972,7 @@ export function DetectionAnalysisOriginal() {
                           <Switch 
                             id="entrance-exit-toggle" 
                             checked={entranceExitEnabled}
-                            onCheckedChange={setEntranceExitEnabled}
+                            onCheckedChange={handleLineToggle}
                           />
                         </div>
                       </div>
@@ -958,7 +1045,7 @@ export function DetectionAnalysisOriginal() {
                           <Switch 
                             id="dwell-time-toggle" 
                             checked={dwellTimeEnabled}
-                            onCheckedChange={setDwellTimeEnabled}
+                            onCheckedChange={handleZoneToggle}
                           />
                         </div>
                       </div>
