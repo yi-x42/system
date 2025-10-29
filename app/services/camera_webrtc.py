@@ -26,6 +26,7 @@ class CameraStreamTrack(MediaStreamTrack):
         self._consumer_id = f"webrtc_{camera_id}_{id(self)}"
         self._consumer: Optional[StreamConsumer] = None
         self._closed = False
+        self._loop = asyncio.get_running_loop()
 
         def _on_frame(frame_data: FrameData) -> None:
             if self._closed:
@@ -72,19 +73,31 @@ class CameraStreamTrack(MediaStreamTrack):
         video_frame.time_base = time_base
         return video_frame
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
         if self._closed:
             return
 
         self._closed = True
 
         try:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
+            self._loop.call_soon_threadsafe(self._signal_stop)
         except RuntimeError:
-            pass
+            self._signal_stop()
 
         if self._consumer is not None:
             camera_stream_manager.remove_consumer(self.camera_id, self._consumer_id)
             self._consumer = None
 
-        await super().stop()
+        super().stop()
+
+    def _signal_stop(self) -> None:
+        try:
+            while True:
+                self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass

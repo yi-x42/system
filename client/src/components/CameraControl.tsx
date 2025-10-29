@@ -1,16 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import {
   useScanCameras,
   useDeleteCamera,
   useCameras,
-  useCameraStreamInfo,
   useToggleCamera,
   CameraInfo,
-  CameraStreamInfo,
   RegisteredCameraInfo,
 } from "../hooks/react-query-hooks";
-import apiClient from "../lib/api";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -48,171 +45,194 @@ type ScanResultItem = {
   status?: "success" | "error";
 };
 
-// 視頻串流組件
-const waitForIceGathering = (pc: RTCPeerConnection) =>
-  new Promise<void>((resolve) => {
-    if (pc.iceGatheringState === "complete") {
-      resolve();
-      return;
-    }
-
-    const checkState = () => {
-      if (pc.iceGatheringState === "complete") {
-        pc.removeEventListener("icegatheringstatechange", checkState);
-        resolve();
-      }
-    };
-
-    pc.addEventListener("icegatheringstatechange", checkState);
-    setTimeout(() => {
-      pc.removeEventListener("icegatheringstatechange", checkState);
-      resolve();
-    }, 2000);
-  });
+type CameraWithMeta = CameraInfo & {
+  device_id?: string;
+  device_label?: string;
+  list_index?: number;
+};
 
 interface VideoStreamProps {
-  camera: CameraInfo | null;
-  streamInfo: CameraStreamInfo | undefined;
-  isLoading: boolean;
-  error: Error | null;
-  onCameraToggle?: (cameraId: string) => void;
+  camera: CameraWithMeta | null;
+  availableDevices: MediaDeviceInfo[];
+  onDevicesUpdated?: (devices: MediaDeviceInfo[]) => void;
 }
 
-function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: VideoStreamProps) {
+function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStreamProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const peerRef = useRef<RTCPeerConnection | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
 
   useEffect(() => {
-    let isMounted = true;
     let cancelled = false;
 
-    const cleanup = () => {
-      if (peerRef.current) {
-        peerRef.current.getSenders().forEach((sender) => {
-          try {
-            sender.track?.stop();
-          } catch {
-            /* ignore */
-          }
-        });
-        try {
-          peerRef.current.close();
-        } catch {
-          /* ignore */
-        }
-        peerRef.current = null;
-      }
+    const clearVideo = () => {
       const video = videoRef.current;
       if (video) {
         video.srcObject = null;
       }
     };
 
-    if (!camera || !streamInfo) {
-      cleanup();
-      if (isMounted) {
-        setStatusMessage("");
+    const stopTracks = () => {
+      const current = videoRef.current?.srcObject as MediaStream | null;
+      if (current) {
+        current.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            /* ignore */
+          }
+        });
       }
+    };
+
+    if (!camera) {
+      stopTracks();
+      clearVideo();
+      setStatusMessage("選擇攝影機以檢視即時影像");
       return () => {
         cancelled = true;
-        isMounted = false;
-        cleanup();
+        stopTracks();
+        clearVideo();
       };
     }
 
-    const startConnection = async () => {
-      setStatusMessage(streamInfo.is_active ? "連線中…" : "攝影機離線，嘗試連線…");
-
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-      peerRef.current = pc;
-
-      pc.ontrack = (event) => {
-        if (!isMounted || cancelled) {
-          return;
-        }
-        const [stream] = event.streams;
-        if (stream) {
-          const video = videoRef.current;
-          if (video) {
-            video.srcObject = stream;
-          }
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (!isMounted || cancelled) {
-          return;
-        }
-        switch (pc.connectionState) {
-          case "connected":
-            setStatusMessage("");
-            break;
-          case "connecting":
-            setStatusMessage("連線中…");
-            break;
-          case "disconnected":
-            setStatusMessage("連線中斷，重新嘗試中…");
-            break;
-          case "failed":
-            setStatusMessage("WebRTC 連線失敗");
-            break;
-          case "closed":
-            setStatusMessage("連線已關閉");
-            break;
-          default:
-            break;
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        if (!isMounted || cancelled) {
-          return;
-        }
-        if (pc.iceConnectionState === "failed") {
-          setStatusMessage("ICE 連線失敗");
-        }
-      };
-
-      pc.addTransceiver("video", { direction: "recvonly" });
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await waitForIceGathering(pc);
-
-      const localDescription = pc.localDescription;
-      if (!localDescription) {
-        throw new Error("無法建立本地 SDP");
+    const startPreview = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatusMessage("瀏覽器不支援攝影機存取");
+        return;
       }
 
-      const { data } = await apiClient.post(streamInfo.webrtc_endpoint, {
-        sdp: localDescription.sdp,
-        type: localDescription.type,
-      });
+      setStatusMessage("開啟本機攝影機中…");
 
-      const answer = new RTCSessionDescription(data);
-      await pc.setRemoteDescription(answer);
-      if (!cancelled) {
+      try {
+        let constraints: MediaStreamConstraints = {
+          video: true,
+          audio: false,
+        };
+
+        let devicesList = availableDevices;
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            devicesList = devices.filter((device) => device.kind === "videoinput");
+            if (!cancelled) {
+              onDevicesUpdated?.(devicesList);
+            }
+          } catch (err) {
+            console.warn("enumerateDevices failed:", err);
+          }
+        }
+
+        const numericIndex =
+          typeof camera?.device_index === "number" && Number.isFinite(camera.device_index)
+            ? Math.trunc(camera.device_index)
+            : undefined;
+        const listIndex =
+          typeof camera?.list_index === "number" && Number.isFinite(camera.list_index)
+            ? Math.trunc(camera.list_index)
+            : undefined;
+
+        let targetDeviceId = camera?.device_id;
+        let targetDeviceLabel = camera?.device_label;
+
+        if (devicesList.length) {
+          let targetDevice =
+            (targetDeviceId && devicesList.find((d) => d.deviceId === targetDeviceId)) ||
+            undefined;
+
+          const candidateIndices: number[] = [];
+          if (numericIndex !== undefined) {
+            candidateIndices.push(numericIndex);
+          }
+          if (listIndex !== undefined) {
+            candidateIndices.push(listIndex);
+          }
+          if (!candidateIndices.length) {
+            candidateIndices.push(0);
+          }
+
+          for (const candidate of candidateIndices) {
+            if (targetDevice) {
+              break;
+            }
+            const bounded =
+              ((candidate % devicesList.length) + devicesList.length) %
+              devicesList.length;
+            targetDevice = devicesList[bounded];
+          }
+
+          if (targetDevice) {
+            targetDeviceId = targetDevice.deviceId;
+            targetDeviceLabel = targetDevice.label || targetDevice.deviceId;
+          }
+        }
+
+        if (targetDeviceId) {
+          constraints = {
+            video: {
+              deviceId: { exact: targetDeviceId },
+            },
+            audio: false,
+          };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        stopTracks();
+
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          if (typeof video.play === "function") {
+            video.play().catch(() => {
+              /* autoplay blocked */
+            });
+          }
+        }
         setStatusMessage("");
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videos = devices.filter((device) => device.kind === "videoinput");
+            if (!cancelled) {
+              onDevicesUpdated?.(videos);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (err) {
+        console.error("取得本機攝影機影像失敗:", err);
+        stopTracks();
+        clearVideo();
+        const message =
+          err instanceof DOMException && err.name === "NotAllowedError"
+            ? "瀏覽器未允許使用攝影機"
+            : "無法開啟本機攝影機";
+        setStatusMessage(message);
       }
     };
 
-    startConnection().catch((err) => {
-      console.error("建立攝影機 WebRTC 連線失敗:", err);
-      if (!cancelled) {
-        setStatusMessage("建立 WebRTC 連線失敗");
-      }
-      cleanup();
-    });
+    startPreview();
 
     return () => {
       cancelled = true;
-      isMounted = false;
-      cleanup();
+      stopTracks();
+      clearVideo();
     };
-  }, [camera?.id, streamInfo?.webrtc_endpoint, streamInfo?.is_active]);
+  }, [
+    camera?.id,
+    camera?.device_index,
+    camera?.device_id,
+    camera?.list_index,
+    availableDevices,
+    onDevicesUpdated,
+  ]);
 
   if (!camera) {
     return (
@@ -220,49 +240,6 @@ function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: V
         <div>
           <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
           <p>選擇攝影機以檢視即時影像</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="text-center text-white h-full flex items-center justify-center">
-        <div>
-          <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
-          <p>載入串流資訊中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !streamInfo) {
-    return (
-      <div className="text-center text-white h-full flex items-center justify-center">
-        <div>
-          <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-          <h3 className="text-lg font-medium mb-2">{camera.name}</h3>
-          <p className="text-sm text-gray-300 mb-2">
-            {error ? "串流載入失敗" : "攝影機離線"}
-          </p>
-          {error && (
-            <p className="text-xs text-red-400 mb-4">{error.message}</p>
-          )}
-          <Badge variant="secondary" className="mb-4">
-            {camera.resolution} • {camera.fps} FPS
-          </Badge>
-          <p className="text-xs text-gray-400 mb-4">
-            狀態: {(camera.status === "active" || camera.status === "online") ? "啟用" : "停用"}
-          </p>
-
-          {(camera.status !== "active" && camera.status !== "online") && onCameraToggle && (
-            <Button
-              onClick={() => onCameraToggle(camera.id)}
-              className="bg-blue-500 hover:bg-blue-600 text-white"
-            >
-              啟用攝影機
-            </Button>
-          )}
         </div>
       </div>
     );
@@ -280,7 +257,7 @@ function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: V
 
       {statusMessage && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-white">
-          {statusMessage.includes("連線") ? (
+          {/中|開啟|啟動/.test(statusMessage) ? (
             <Loader2 className="h-10 w-10 animate-spin opacity-70" />
           ) : (
             <Camera className="h-10 w-10 opacity-70" />
@@ -328,25 +305,101 @@ export function CameraControl() {
   const [editCameraName, setEditCameraName] = useState("");
   const [editCameraLocation, setEditCameraLocation] = useState("");
   const [activeTab, setActiveTab] = useState("device-list");
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+
+  const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
+    const videoOnly = devices.filter((device) => device.kind === "videoinput");
+    setVideoDevices((prev) => {
+      const prevIds = prev.map((d) => d.deviceId);
+      const nextIds = videoOnly.map((d) => d.deviceId);
+      if (
+        prevIds.length === nextIds.length &&
+        prevIds.every((id, idx) => id === nextIds[idx])
+      ) {
+        return prev;
+      }
+      return videoOnly;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => handleDevicesUpdated(devices))
+      .catch(() => {
+        /* ignore */
+      });
+  }, [handleDevicesUpdated]);
 
   // 使用真實的攝影機數據從後端API
   const { data: rawCameras = [], isLoading: camerasLoading, refetch: refetchCameras } = useCameras();
   const toggleCameraMutation = useToggleCamera();
 
+  useEffect(() => {
+    if (!selectedCamera && rawCameras.length > 0) {
+      setSelectedCamera(rawCameras[0].id);
+    }
+  }, [selectedCamera, rawCameras]);
+
   const newlyRegisteredCount = scanResults.filter((item) => item.status !== "error").length;
 
-  // 映射後端數據到前端UI格式
-  const cameras = rawCameras.map(camera => ({
-    ...camera,
-    // 添加前端UI需要的欄位，如果後端沒有則提供預設值
-    location: camera.group_id || "未指定位置",
-    ip: camera.device_index !== undefined ? `本機設備 #${camera.device_index}` : camera.rtsp_url || "未知",
-    model: camera.camera_type === "USB" ? "本機攝影機" : "網路攝影機",
-    recording: false, // 預設值，可以從其他API獲取
-    nightVision: false, // 預設值
-    motionDetection: false, // 預設值
-  }));
+  const cameras: CameraWithMeta[] = rawCameras.map((camera, index) => {
+    const rawDeviceIndex = camera.device_index;
+    let numericIndex: number | undefined;
+    let explicitDeviceId: string | undefined;
+
+    if (typeof rawDeviceIndex === "number" && Number.isFinite(rawDeviceIndex)) {
+      numericIndex = Math.trunc(rawDeviceIndex);
+    } else if (typeof rawDeviceIndex === "string") {
+      const parsed = Number(rawDeviceIndex);
+      if (Number.isFinite(parsed)) {
+        numericIndex = Math.trunc(parsed);
+      } else {
+        explicitDeviceId = rawDeviceIndex;
+      }
+    }
+
+    if (numericIndex === undefined) {
+      numericIndex = index;
+    }
+
+    let targetDevice: MediaDeviceInfo | undefined;
+    if (videoDevices.length) {
+      const boundedIndex =
+        ((numericIndex % videoDevices.length) + videoDevices.length) %
+        videoDevices.length;
+      targetDevice = videoDevices[boundedIndex];
+    }
+
+    const finalDeviceId = targetDevice?.deviceId || explicitDeviceId;
+    const label =
+      targetDevice?.label ||
+      explicitDeviceId ||
+      (camera.camera_type === "USB"
+        ? `本機攝影機 ${numericIndex ?? ""}`.trim()
+        : camera.camera_type);
+
+    return {
+      ...camera,
+      list_index: index,
+      device_index: numericIndex,
+      device_id: finalDeviceId,
+      device_label: label,
+      location: camera.group_id || "未指定位置",
+      ip:
+        targetDevice?.label ||
+        (numericIndex !== undefined
+          ? `本機設備 #${numericIndex}`
+          : camera.rtsp_url || "未知"),
+      model: label,
+      recording: false,
+      nightVision: false,
+      motionDetection: false,
+    } as CameraWithMeta;
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -489,7 +542,6 @@ export function CameraControl() {
   const startLivePreview = (cameraId: string) => {
     setSelectedCamera(cameraId);
     setActiveTab("live-view");
-    setIsStreaming(true);
   };
 
   // 刪除攝影機
@@ -511,13 +563,11 @@ export function CameraControl() {
   };
 
   // 取得選中的攝影機資料
-  const selectedCameraData = selectedCamera 
-    ? cameras.find(cam => cam.id === selectedCamera) 
-    : null;
+  const selectedCameraData: CameraWithMeta | null =
+    (selectedCamera ? cameras.find((cam) => cam.id === selectedCamera) : null) ??
+    null;
 
   // 取得攝影機串流資訊
-  const { data: streamInfo, isLoading: streamLoading, error: streamError } = useCameraStreamInfo(selectedCamera);
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -770,10 +820,8 @@ export function CameraControl() {
                 <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
                   <VideoStream
                     camera={selectedCameraData}
-                    streamInfo={streamInfo}
-                    isLoading={streamLoading}
-                    error={streamError}
-                    onCameraToggle={handleCameraToggle}
+                    availableDevices={videoDevices}
+                    onDevicesUpdated={handleDevicesUpdated}
                   />
                 </div>
                 
@@ -792,7 +840,6 @@ export function CameraControl() {
                       <Label htmlFor="camera-select">選擇攝影機</Label>
                       <Select value={selectedCamera || ""} onValueChange={(value) => {
                         setSelectedCamera(value);
-                        setIsStreaming(false);
                       }}>
                         <SelectTrigger>
                           <SelectValue placeholder="選擇要串流的攝影機" />
