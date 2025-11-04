@@ -241,12 +241,12 @@ export function RecordQuery() {
               />
             </div>
             <div>
-              <Label htmlFor="date-from">開始日期</Label>
-              <Input id="date-from" type="date" />
+              <Label htmlFor="date-from">開始日期時間</Label>
+              <Input id="date-from" type="datetime-local" />
             </div>
             <div>
-              <Label htmlFor="date-to">結束日期</Label>
-              <Input id="date-to" type="date" />
+              <Label htmlFor="date-to">結束日期時間</Label>
+              <Input id="date-to" type="datetime-local" />
             </div>
             <div>
               <Label htmlFor="camera-filter">攝影機</Label>
@@ -293,15 +293,26 @@ export function RecordQuery() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>縮圖</TableHead>
                     <TableHead>時間</TableHead>
                     <TableHead>偵測來源</TableHead>
                     <TableHead>偵測類型</TableHead>
                     <TableHead>信心度</TableHead>
+                    <TableHead>狀態</TableHead>
+                    <TableHead>操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {detectionRecords.map((record) => (
                     <TableRow key={record.id}>
+                      <TableCell>
+                        <img
+                          src={record.thumbnail}
+                          alt="偵測縮圖"
+                          className="w-20 h-15 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => handleViewImage(record)}
+                        />
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Clock className="h-3 w-3 text-muted-foreground" />
@@ -313,6 +324,25 @@ export function RecordQuery() {
                         <Badge variant="outline">{record.type}</Badge>
                       </TableCell>
                       <TableCell>{(record.confidence * 100).toFixed(1)}%</TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusColor(record.status)}>
+                          {getStatusText(record.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewImage(record)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
