@@ -70,33 +70,9 @@ export const useCameras = () => {
     queryKey: ['cameras'],
     queryFn: fetchCameras,
     refetchOnWindowFocus: false,
-    // 每 10 秒自動重新整理攝影機狀態
-    refetchInterval: 10000,
-    staleTime: 5000, // 5 seconds
-  });
-};
-
-// 獲取攝影機列表（帶即時狀態檢測）的非同步函式
-const fetchCamerasWithRealTimeCheck = async (): Promise<CameraInfo[]> => {
-  const { data } = await apiClient.get('/frontend/cameras?real_time_check=true');
-  return data;
-};
-
-// 攝影機列表的 hook（帶即時狀態檢測）
-export const useCamerasWithRealTimeCheck = () => {
-  return useQuery<CameraInfo[], Error>({
-    queryKey: ['cameras', 'realtime'],
-    queryFn: fetchCamerasWithRealTimeCheck,
-    refetchOnWindowFocus: true,
-    // 每 15 秒執行即時檢測（比較慢但更準確）
-    refetchInterval: 15000,
-    staleTime: 0, // 立即過期，確保資料即時更新
-    // 在背景中靜默更新，避免loading狀態影響UI
-    refetchIntervalInBackground: true,
-    // 確保即使有快取也會重新取得資料
-    refetchOnMount: true,
-    // 網路重連時自動重取
-    refetchOnReconnect: true,
+    // 預設不自動輪詢，改由使用者操作或背景任務更新狀態
+    refetchInterval: false,
+    staleTime: 30000,
   });
 };
 
@@ -130,40 +106,45 @@ export const useAddCamera = () => {
 };
 
 // 定義攝影機掃描結果的結構
-export interface CameraDevice {
-  index: number;
-  backend?: string;
-  frame_ok: boolean;
-  width?: number;
-  height?: number;
-  source?: string;
-  attempts?: Array<{
-    backend: string;
-    opened: boolean;
-    frame_ok: boolean;
-    width?: number;
-    height?: number;
-    elapsed_ms: number;
-  }>;
+export interface DiscoveredCameraInfo {
+  device_id: number;
+  name: string;
+  type: string;
+  resolution: string;
+  fps: number;
+  status: string;
+}
+
+export interface RegisteredCameraInfo {
+  id: string;
+  name: string;
+  device_index: number;
+  resolution: string;
+  fps: number;
 }
 
 export interface CameraScanResponse {
-  devices: CameraDevice[];
-  available_indices: number[];
-  count: number;
+  message: string;
+  cameras: DiscoveredCameraInfo[];
+  registered: RegisteredCameraInfo[];
 }
 
 // 攝影機掃描參數
 export interface CameraScanParams {
-  max_index?: number;
-  warmup_frames?: number;
-  force_probe?: boolean;
-  retries?: number;
+  register_new?: boolean;
 }
 
 // 攝影機掃描的非同步函式
 const scanCameras = async (params?: CameraScanParams): Promise<CameraScanResponse> => {
-  const { data } = await apiClient.get('/cameras/scan', { params });
+  const { data } = await apiClient.post(
+    '/frontend/cameras/scan',
+    undefined,
+    {
+      params: {
+        register_new: params?.register_new ?? true,
+      },
+    }
+  );
   return data;
 };
 
@@ -482,7 +463,7 @@ export const useDeleteCamera = () => {
 // 攝影機串流相關介面和Hook
 export interface CameraStreamInfo {
   camera_id: string;
-  stream_url: string;
+  webrtc_endpoint: string;
   is_active: boolean;
   resolution: string;
   fps: number;
@@ -512,10 +493,10 @@ export const useCameraStreamInfo = (cameraId: string | null) => {
         const cameraIndex = camera.device_index !== undefined ? camera.device_index : 0;
         return {
           camera_id: cameraId,
-          stream_url: `/api/v1/frontend/cameras/${cameraIndex}/stream`,
-          is_active: true,
+          webrtc_endpoint: `/frontend/cameras/${cameraId}/webrtc`,
+          is_active: camera.status === 'active' || camera.status === 'online',
           resolution: camera.resolution,
-          fps: camera.fps
+          fps: camera.fps,
         };
       } else {
         throw new Error('僅支援本地USB攝影機串流');
@@ -543,35 +524,57 @@ export const useToggleCamera = () => {
   });
 };
 
-// 即時分析相關介面
-export interface RealtimeAnalysisRequest {
+// Live Person Camera 相關介面
+export interface LivePersonCameraRequest {
   task_name: string;
   camera_id: string;
   model_id: string;
-  confidence?: number;
-  iou_threshold?: number;
+  confidence: number;
+  iou_threshold: number;
   description?: string;
+  client_stream?: boolean;
 }
 
-export interface RealtimeAnalysisResponse {
+export interface LivePersonCameraResponse {
   task_id: string;
   status: string;
   message: string;
   camera_info: any;
   model_info: any;
   created_at: string;
+  websocket_url?: string;
 }
 
-// 開始即時分析的非同步函式
-const startRealtimeAnalysis = async (requestData: RealtimeAnalysisRequest): Promise<RealtimeAnalysisResponse> => {
+export interface StopLivePersonCameraResponse {
+  task_id: string;
+  status: string;
+  message: string;
+  stopped_at: string;
+}
+
+// 開始 Live Person Camera 分析的非同步函式
+const startLivePersonCamera = async (requestData: LivePersonCameraRequest): Promise<LivePersonCameraResponse> => {
   const { data } = await apiClient.post('/frontend/analysis/start-realtime', requestData);
   return data;
 };
 
-// 開始即時分析的Hook
-export const useStartRealtimeAnalysis = () => {
-  return useMutation<RealtimeAnalysisResponse, Error, RealtimeAnalysisRequest>({
-    mutationFn: startRealtimeAnalysis,
+// 開始 Live Person Camera 分析的 Hook
+export const useStartLivePersonCamera = () => {
+  return useMutation<LivePersonCameraResponse, Error, LivePersonCameraRequest>({
+    mutationFn: startLivePersonCamera,
+  });
+};
+
+// 停止 Live Person Camera 分析的非同步函式
+const stopLivePersonCamera = async (taskId: string): Promise<StopLivePersonCameraResponse> => {
+  const { data } = await apiClient.delete(`/frontend/analysis/live-person-camera/${taskId}`);
+  return data;
+};
+
+// 停止 Live Person Camera 分析的 Hook
+export const useStopLivePersonCamera = () => {
+  return useMutation<StopLivePersonCameraResponse, Error, string>({
+    mutationFn: stopLivePersonCamera,
   });
 };
 
@@ -677,3 +680,6 @@ export const useShutdownSystem = () => {
     mutationFn: shutdownSystem,
   });
 };
+
+
+

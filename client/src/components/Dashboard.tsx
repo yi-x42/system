@@ -14,16 +14,16 @@ import {
   XCircle,
   Clock,
 } from "lucide-react";
-import { useSystemStats, useCamerasWithRealTimeCheck } from "../hooks/react-query-hooks";
+import { useSystemStats, useCameras } from "../hooks/react-query-hooks";
 import { Skeleton } from "./ui/skeleton";
 
 export function Dashboard() {
   const { data: systemStats, isLoading, isError, error } = useSystemStats();
-  const { data: realTimeCameras, isLoading: camerasLoading, error: camerasError } = useCamerasWithRealTimeCheck();
+  const { data: camerasData, isLoading: camerasLoading, error: camerasError } = useCameras();
   
   // 添加調試資訊
   console.log('🔍 Dashboard - 攝影機資料更新:', {
-    realTimeCameras,
+    camerasData,
     camerasLoading,
     camerasError: camerasError?.message,
     timestamp: new Date().toISOString()
@@ -73,7 +73,7 @@ export function Dashboard() {
   ];
 
   // 使用真實的攝影機數據，直接使用API返回的即時狀態
-  const cameras = realTimeCameras?.map(camera => {
+  const cameras = camerasData?.map(camera => {
     console.log('🔍 攝影機映射:', {
       原始資料: camera,
       API返回狀態: camera.status,

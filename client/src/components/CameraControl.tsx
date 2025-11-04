@@ -1,15 +1,12 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { 
-  useScanCameras, 
-  CameraDevice, 
+import {
+  useScanCameras,
   useDeleteCamera,
   useCameras,
-  useAddCamera,
-  useCameraStreamInfo,
   useToggleCamera,
   CameraInfo,
-  AddCameraRequest
+  RegisteredCameraInfo,
 } from "../hooks/react-query-hooks";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -36,21 +33,207 @@ import {
   MapPin,
   Search,
   Loader2,
-  CheckCircle,
-  AlertCircle,
 } from "lucide-react";
 
-// 視頻串流組件
+type ScanResultItem = {
+  id: string;
+  name: string;
+  deviceIndex?: number;
+  resolution: string;
+  fps: number;
+  details?: string;
+  status?: "success" | "error";
+};
+
+type CameraWithMeta = CameraInfo & {
+  device_id?: string;
+  device_label?: string;
+  list_index?: number;
+};
+
 interface VideoStreamProps {
-  camera: any | null; // 使用映射後的攝影機數據型別
-  streamInfo: any | null;
-  isLoading: boolean;
-  error: Error | null;
-  onCameraToggle?: (cameraId: string) => void;
+  camera: CameraWithMeta | null;
+  availableDevices: MediaDeviceInfo[];
+  onDevicesUpdated?: (devices: MediaDeviceInfo[]) => void;
 }
 
-function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: VideoStreamProps) {
-  // 如果沒有選擇攝影機
+function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStreamProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const clearVideo = () => {
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = null;
+      }
+    };
+
+    const stopTracks = () => {
+      const current = videoRef.current?.srcObject as MediaStream | null;
+      if (current) {
+        current.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+    };
+
+    if (!camera) {
+      stopTracks();
+      clearVideo();
+      setStatusMessage("選擇攝影機以檢視即時影像");
+      return () => {
+        cancelled = true;
+        stopTracks();
+        clearVideo();
+      };
+    }
+
+    const startPreview = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatusMessage("瀏覽器不支援攝影機存取");
+        return;
+      }
+
+      setStatusMessage("開啟本機攝影機中…");
+
+      try {
+        let constraints: MediaStreamConstraints = {
+          video: true,
+          audio: false,
+        };
+
+        let devicesList = availableDevices;
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            devicesList = devices.filter((device) => device.kind === "videoinput");
+            if (!cancelled) {
+              onDevicesUpdated?.(devicesList);
+            }
+          } catch (err) {
+            console.warn("enumerateDevices failed:", err);
+          }
+        }
+
+        const numericIndex =
+          typeof camera?.device_index === "number" && Number.isFinite(camera.device_index)
+            ? Math.trunc(camera.device_index)
+            : undefined;
+        const listIndex =
+          typeof camera?.list_index === "number" && Number.isFinite(camera.list_index)
+            ? Math.trunc(camera.list_index)
+            : undefined;
+
+        let targetDeviceId = camera?.device_id;
+        let targetDeviceLabel = camera?.device_label;
+
+        if (devicesList.length) {
+          let targetDevice =
+            (targetDeviceId && devicesList.find((d) => d.deviceId === targetDeviceId)) ||
+            undefined;
+
+          const candidateIndices: number[] = [];
+          if (numericIndex !== undefined) {
+            candidateIndices.push(numericIndex);
+          }
+          if (listIndex !== undefined) {
+            candidateIndices.push(listIndex);
+          }
+          if (!candidateIndices.length) {
+            candidateIndices.push(0);
+          }
+
+          for (const candidate of candidateIndices) {
+            if (targetDevice) {
+              break;
+            }
+            const bounded =
+              ((candidate % devicesList.length) + devicesList.length) %
+              devicesList.length;
+            targetDevice = devicesList[bounded];
+          }
+
+          if (targetDevice) {
+            targetDeviceId = targetDevice.deviceId;
+            targetDeviceLabel = targetDevice.label || targetDevice.deviceId;
+          }
+        }
+
+        if (targetDeviceId) {
+          constraints = {
+            video: {
+              deviceId: { exact: targetDeviceId },
+            },
+            audio: false,
+          };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        stopTracks();
+
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          if (typeof video.play === "function") {
+            video.play().catch(() => {
+              /* autoplay blocked */
+            });
+          }
+        }
+        setStatusMessage("");
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videos = devices.filter((device) => device.kind === "videoinput");
+            if (!cancelled) {
+              onDevicesUpdated?.(videos);
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (err) {
+        console.error("取得本機攝影機影像失敗:", err);
+        stopTracks();
+        clearVideo();
+        const message =
+          err instanceof DOMException && err.name === "NotAllowedError"
+            ? "瀏覽器未允許使用攝影機"
+            : "無法開啟本機攝影機";
+        setStatusMessage(message);
+      }
+    };
+
+    startPreview();
+
+    return () => {
+      cancelled = true;
+      stopTracks();
+      clearVideo();
+    };
+  }, [
+    camera?.id,
+    camera?.device_index,
+    camera?.device_id,
+    camera?.list_index,
+    availableDevices,
+    onDevicesUpdated,
+  ]);
+
   if (!camera) {
     return (
       <div className="text-center text-white h-full flex items-center justify-center">
@@ -62,88 +245,53 @@ function VideoStream({ camera, streamInfo, isLoading, error, onCameraToggle }: V
     );
   }
 
-  // 如果正在載入串流資訊
-  if (isLoading) {
-    return (
-      <div className="text-center text-white h-full flex items-center justify-center">
-        <div>
-          <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
-          <p>載入串流資訊中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 如果有錯誤或攝影機離線
-  if (error || !streamInfo) {
-    return (
-      <div className="text-center text-white h-full flex items-center justify-center">
-        <div>
-          <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-          <h3 className="text-lg font-medium mb-2">{camera.name}</h3>
-          <p className="text-sm text-gray-300 mb-2">
-            {error ? "串流載入失敗" : "攝影機離線"}
-          </p>
-          {error && (
-            <p className="text-xs text-red-400 mb-4">{error.message}</p>
-          )}
-          <Badge variant="secondary" className="mb-4">
-            {camera.resolution} • {camera.fps} FPS
-          </Badge>
-          <p className="text-xs text-gray-400 mb-4">
-            狀態: {(camera.status === 'active' || camera.status === 'online') ? '啟用' : '停用'}
-          </p>
-          
-          {/* 啟用攝影機按鈕 */}
-          {(camera.status !== 'active' && camera.status !== 'online') && onCameraToggle && (
-            <Button
-              onClick={() => onCameraToggle(camera.id)}
-              className="bg-blue-500 hover:bg-blue-600 text-white"
-            >
-              啟用攝影機
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // 如果有串流，顯示即時影像
   return (
     <div className="relative h-full">
-      <img
-        src={`http://localhost:8001${streamInfo.stream_url}`}
-        alt={`${camera.name} 即時串流`}
-        className="w-full h-full object-cover"
-        onError={(e) => {
-          console.error('串流載入失敗:', e);
-          e.currentTarget.style.display = 'none';
-        }}
-        onLoad={() => {
-          console.log('串流載入成功');
-        }}
+      <video
+        ref={videoRef}
+        className="w-full h-full object-cover rounded-lg bg-black"
+        autoPlay
+        playsInline
+        muted
       />
-      
-      {/* 串流資訊覆蓋層 */}
+
+      {statusMessage && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-white">
+          {/中|開啟|啟動/.test(statusMessage) ? (
+            <Loader2 className="h-10 w-10 animate-spin opacity-70" />
+          ) : (
+            <Camera className="h-10 w-10 opacity-70" />
+          )}
+          <p className="text-sm">{statusMessage}</p>
+          <p className="text-xs opacity-70">{camera.name}</p>
+        </div>
+      )}
+
       <div className="absolute top-2 left-2 bg-black/70 text-white px-3 py-1 rounded-md text-sm flex items-center gap-2">
-        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-        <span>{camera.name} • {streamInfo.resolution} • {streamInfo.fps}fps</span>
+        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+        <span>{camera.name}</span>
+        <Badge variant="secondary" className="text-xs">
+          {camera.resolution} • {camera.fps} FPS
+        </Badge>
       </div>
-      
-      {/* 串流狀態指示器 */}
-      <div className="absolute top-2 right-2 bg-green-500/80 text-white px-2 py-1 rounded-md text-xs">
-        LIVE
+
+      <div className="absolute bottom-2 left-2 bg-black/60 text-white px-3 py-1 rounded-md text-xs space-y-1">
+        <div>狀態: {(camera.status === "active" || camera.status === "online") ? "啟用" : "停用"}</div>
+        <div>類型: {camera.camera_type}</div>
+        {camera.ip && <div>IP: {camera.ip}</div>}
+        {camera.model && <div>型號: {camera.model}</div>}
       </div>
     </div>
   );
 }
+
 
 export function CameraControl() {
   const [selectedCamera, setSelectedCamera] = useState<string | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
-  const [scanResults, setScanResults] = useState<any[]>([]);
+  const [scanResults, setScanResults] = useState<ScanResultItem[]>([]);
   const [showScanResults, setShowScanResults] = useState(false);
   const [scanConfig, setScanConfig] = useState({
     ipRange: "192.168.1.1-192.168.1.254",
@@ -157,24 +305,114 @@ export function CameraControl() {
   const [editCameraName, setEditCameraName] = useState("");
   const [editCameraLocation, setEditCameraLocation] = useState("");
   const [activeTab, setActiveTab] = useState("device-list");
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+
+  const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
+    const videoOnly = devices.filter((device) => device.kind === "videoinput");
+    setVideoDevices((prev) => {
+      const prevIds = prev.map((d) => d.deviceId);
+      const nextIds = videoOnly.map((d) => d.deviceId);
+      if (
+        prevIds.length === nextIds.length &&
+        prevIds.every((id, idx) => id === nextIds[idx])
+      ) {
+        return prev;
+      }
+      return videoOnly;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => handleDevicesUpdated(devices))
+      .catch(() => {
+        /* ignore */
+      });
+  }, [handleDevicesUpdated]);
 
   // 使用真實的攝影機數據從後端API
   const { data: rawCameras = [], isLoading: camerasLoading, refetch: refetchCameras } = useCameras();
-  const addCameraMutation = useAddCamera();
   const toggleCameraMutation = useToggleCamera();
 
-  // 映射後端數據到前端UI格式
-  const cameras = rawCameras.map(camera => ({
-    ...camera,
-    // 添加前端UI需要的欄位，如果後端沒有則提供預設值
-    location: camera.group_id || "未指定位置",
-    ip: camera.device_index !== undefined ? `本機設備 #${camera.device_index}` : camera.rtsp_url || "未知",
-    model: camera.camera_type === "USB" ? "本機攝影機" : "網路攝影機",
-    recording: false, // 預設值，可以從其他API獲取
-    nightVision: false, // 預設值
-    motionDetection: false, // 預設值
-  }));
+  useEffect(() => {
+    if (!rawCameras.length) {
+      if (selectedCamera !== null) {
+        setSelectedCamera(null);
+      }
+      return;
+    }
+
+    const normalizedSelected = selectedCamera ?? "";
+    const hasSelected = rawCameras.some((camera) => camera.id?.toString() === normalizedSelected);
+
+    if (!hasSelected) {
+      const firstId = rawCameras[0].id?.toString();
+      if (firstId) {
+        setSelectedCamera(firstId);
+      }
+    }
+  }, [selectedCamera, rawCameras]);
+
+  const newlyRegisteredCount = scanResults.filter((item) => item.status !== "error").length;
+
+  const cameras: CameraWithMeta[] = rawCameras.map((camera, index) => {
+    const rawDeviceIndex = camera.device_index;
+    let numericIndex: number | undefined;
+    let explicitDeviceId: string | undefined;
+
+    if (typeof rawDeviceIndex === "number" && Number.isFinite(rawDeviceIndex)) {
+      numericIndex = Math.trunc(rawDeviceIndex);
+    } else if (typeof rawDeviceIndex === "string") {
+      const parsed = Number(rawDeviceIndex);
+      if (Number.isFinite(parsed)) {
+        numericIndex = Math.trunc(parsed);
+      } else {
+        explicitDeviceId = rawDeviceIndex;
+      }
+    }
+
+    if (numericIndex === undefined) {
+      numericIndex = index;
+    }
+
+    let targetDevice: MediaDeviceInfo | undefined;
+    if (videoDevices.length) {
+      const boundedIndex =
+        ((numericIndex % videoDevices.length) + videoDevices.length) %
+        videoDevices.length;
+      targetDevice = videoDevices[boundedIndex];
+    }
+
+    const finalDeviceId = targetDevice?.deviceId || explicitDeviceId;
+    const label =
+      targetDevice?.label ||
+      explicitDeviceId ||
+      (camera.camera_type === "USB"
+        ? `本機攝影機 ${numericIndex ?? ""}`.trim()
+        : camera.camera_type);
+
+    return {
+      ...camera,
+      list_index: index,
+      device_index: numericIndex,
+      device_id: finalDeviceId,
+      device_label: label,
+      location: camera.group_id || "未指定位置",
+      ip:
+        targetDevice?.label ||
+        (numericIndex !== undefined
+          ? `本機設備 #${numericIndex}`
+          : camera.rtsp_url || "未知"),
+      model: label,
+      recording: false,
+      nightVision: false,
+      motionDetection: false,
+    } as CameraWithMeta;
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -231,29 +469,20 @@ export function CameraControl() {
     try {
       // 呼叫真實的攝影機掃描 API
       const scanResult = await scanCamerasMutation.mutateAsync({
-        max_index: 6,        // 掃描 0-5 號攝影機
-        warmup_frames: 3,    // 快速模式
-        force_probe: false,
-        retries: 1
+        register_new: true,
       });
 
       // 將後端回傳的資料轉換為前端需要的格式
-      const formattedResults = scanResult.devices
-        .filter(device => device.frame_ok) // 只顯示能正常工作的攝影機
-        .map((device: CameraDevice, index: number) => ({
-          id: `camera_${device.index}`,
-          ip: `本機攝影機 #${device.index}`,
-          manufacturer: "本機設備",
-          model: `攝影機 ${device.index}`,
-          onvifSupport: true,
-          rtspUrl: `/camera/${device.index}`,
-          status: "detected",
-          description: `解析度: ${device.width}x${device.height}, 後端: ${device.backend}`,
-          cameraIndex: device.index,
-          width: device.width,
-          height: device.height,
-          backend: device.backend
-        }));
+      const registeredDevices = scanResult.registered ?? [];
+      const formattedResults = registeredDevices.map((device: RegisteredCameraInfo) => ({
+        id: device.id,
+        name: device.name || `攝影機 ${device.device_index}`,
+        deviceIndex: device.device_index,
+        resolution: device.resolution || "未知",
+        fps: device.fps || 0,
+        details: "已自動加入設備列表",
+        status: "success",
+      }));
 
       // 等待進度動畫完成
       await progressPromise;
@@ -261,6 +490,7 @@ export function CameraControl() {
 
       // 顯示掃描結果
       setScanResults(formattedResults);
+      await refetchCameras();
       setShowScanResults(true);
       
     } catch (error) {
@@ -273,69 +503,15 @@ export function CameraControl() {
       // 顯示錯誤訊息
       setScanResults([{
         id: "error",
-        ip: "掃描失敗",
-        manufacturer: "系統錯誤",
-        model: "無法掃描攝影機",
-        onvifSupport: false,
-        rtspUrl: null,
+        name: "掃描失敗",
+        resolution: "未知",
+        fps: 0,
+        details: `錯誤訊息: ${error instanceof Error ? error.message : "未知錯誤"}`,
         status: "error",
-        description: `錯誤訊息: ${error instanceof Error ? error.message : '未知錯誤'}`
       }]);
       setShowScanResults(true);
     } finally {
       setIsScanning(false);
-    }
-  };
-
-  const addCameraToSystem = async (device: any) => {
-    // 將掃描到的設備添加到系統中
-    console.log("Adding camera to system:", device);
-    
-    if (device.cameraIndex !== undefined) {
-      // 對於本機攝影機，使用攝影機 index
-      const newCamera = {
-        id: `cam_${Date.now()}`,
-        name: `攝影機 ${device.cameraIndex}`,
-        location: `本機攝影機 #${device.cameraIndex}`,
-        status: "online",
-        resolution: device.width && device.height ? `${device.width}x${device.height}` : "未知",
-        fps: 30,
-        recording: false,
-        nightVision: false,
-        motionDetection: false,
-        ip: `本機設備 #${device.cameraIndex}`,
-        model: device.model || "本機攝影機",
-        cameraIndex: device.cameraIndex,
-        backend: device.backend
-      };
-      
-      // 使用API新增攝影機
-      try {
-        const cameraData: AddCameraRequest = {
-          name: newCamera.name,
-          camera_type: "USB",
-          resolution: newCamera.resolution,
-          fps: newCamera.fps,
-          device_index: device.cameraIndex
-        };
-        
-        await addCameraMutation.mutateAsync(cameraData);
-        // 重新取得攝影機列表
-        refetchCameras();
-        
-        // 關閉掃描結果對話框
-        setShowScanResults(false);
-        // 關閉整個新增配置彈窗並重置掃描狀態
-        setIsAddDialogOpen(false);
-        setScanResults([]);
-        setScanProgress(0);
-      
-        console.log("已新增攝影機:", newCamera);
-      } catch (error) {
-        console.error("新增攝影機失敗:", error);
-      }
-    } else {
-      console.log("設備資料不完整，無法新增");
     }
   };
 
@@ -376,10 +552,13 @@ export function CameraControl() {
   };
 
   // 開始即時預覽
-  const startLivePreview = (cameraId: string) => {
-    setSelectedCamera(cameraId);
+  const startLivePreview = (cameraId: string | number | null | undefined) => {
+    if (cameraId === null || cameraId === undefined) {
+      setSelectedCamera(null);
+    } else {
+      setSelectedCamera(cameraId.toString());
+    }
     setActiveTab("live-view");
-    setIsStreaming(true);
   };
 
   // 刪除攝影機
@@ -390,7 +569,7 @@ export function CameraControl() {
         // 重新取得攝影機列表
         refetchCameras();
         // 如果刪除的是當前選中的攝影機，清除選擇
-        if (selectedCamera === cameraId) {
+        if (selectedCamera === cameraId || selectedCamera === cameraId.toString()) {
           setSelectedCamera(null);
         }
       } catch (error) {
@@ -401,13 +580,10 @@ export function CameraControl() {
   };
 
   // 取得選中的攝影機資料
-  const selectedCameraData = selectedCamera 
-    ? cameras.find(cam => cam.id === selectedCamera) 
-    : null;
+  const selectedCameraData: CameraWithMeta | null =
+    (selectedCamera ? cameras.find((cam) => cam.id?.toString() === selectedCamera) : null) ?? null;
 
   // 取得攝影機串流資訊
-  const { data: streamInfo, isLoading: streamLoading, error: streamError } = useCameraStreamInfo(selectedCamera);
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -452,60 +628,54 @@ export function CameraControl() {
                 </div>
               ) : showScanResults ? (
                 <>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3>掃描結果</h3>
-                      <Badge variant="outline">{scanResults.length} 個設備</Badge>
-                    </div>
-                    
-                    <div className="max-h-96 overflow-auto border rounded-lg">
-                      <div className="space-y-3 p-4">
-                        {scanResults.map((device) => (
-                          <div key={device.id} className="border rounded-lg p-4 space-y-3">
-                            <div className="flex items-start justify-between">
-                              <div className="space-y-1 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <h4 className="text-sm">{device.manufacturer}</h4>
-                                  <Badge variant="secondary" className="text-xs">{device.ip}</Badge>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3>掃描結果</h3>
+                        <Badge variant="outline">{newlyRegisteredCount} 個新設備</Badge>
+                      </div>
+                      
+                      <div className="max-h-96 overflow-auto border rounded-lg">
+                        <div className="space-y-3 p-4">
+                          {scanResults.length === 0 ? (
+                            <div className="text-center text-sm text-muted-foreground py-10">
+                              沒有新的設備需要新增
+                            </div>
+                          ) : (
+                            scanResults.map((device) => (
+                              <div key={device.id} className="border rounded-lg p-4 space-y-3">
+                                <div className="flex items-start justify-between">
+                                  <div className="space-y-1 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="text-sm">{device.name}</h4>
+                                      <Badge variant="secondary" className="text-xs">
+                                        {device.deviceIndex !== undefined
+                                          ? `本機攝影機 #${device.deviceIndex}`
+                                          : "未知設備"}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-sm text-muted-foreground">
+                                      解析度: {device.resolution} | FPS: {device.fps ? device.fps : "未知"}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {device.details ?? "已自動加入設備列表"}
+                                    </p>
+                                  </div>
+                                  {device.status === "error" ? (
+                                    <Badge variant="destructive" className="text-xs">
+                                      失敗
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="default" className="text-xs">
+                                      已新增
+                                    </Badge>
+                                  )}
                                 </div>
-                                <p className="text-sm text-muted-foreground">{device.model}</p>
-                                <p className="text-xs text-muted-foreground">{device.description}</p>
                               </div>
-                              <Button 
-                                size="sm" 
-                                className="ml-4"
-                                onClick={() => addCameraToSystem(device)}
-                                disabled={device.status !== "detected"}
-                              >
-                                新增配置
-                              </Button>
-                            </div>
-                            
-                            <div className="flex items-center justify-between pt-2 border-t">
-                              <div className="flex items-center gap-2">
-                                {device.status === "detected" ? (
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <AlertCircle className="h-4 w-4 text-yellow-500" />
-                                )}
-                                <span className="text-sm">
-                                  {device.status === "detected" ? "已偵測" : "部分資訊"}
-                                </span>
-                              </div>
-                              <div className="flex gap-2">
-                                {device.onvifSupport && (
-                                  <Badge variant="outline" className="text-xs">ONVIF</Badge>
-                                )}
-                                {device.rtspUrl && (
-                                  <Badge variant="outline" className="text-xs">RTSP</Badge>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                            ))
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
                   <div className="flex justify-end gap-2 pt-4">
                     <Button 
@@ -666,10 +836,8 @@ export function CameraControl() {
                 <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
                   <VideoStream
                     camera={selectedCameraData}
-                    streamInfo={streamInfo}
-                    isLoading={streamLoading}
-                    error={streamError}
-                    onCameraToggle={handleCameraToggle}
+                    availableDevices={videoDevices}
+                    onDevicesUpdated={handleDevicesUpdated}
                   />
                 </div>
                 
@@ -688,14 +856,16 @@ export function CameraControl() {
                       <Label htmlFor="camera-select">選擇攝影機</Label>
                       <Select value={selectedCamera || ""} onValueChange={(value) => {
                         setSelectedCamera(value);
-                        setIsStreaming(false);
                       }}>
                         <SelectTrigger>
                           <SelectValue placeholder="選擇要串流的攝影機" />
                         </SelectTrigger>
                         <SelectContent>
-                          {cameras.map((camera) => (
-                            <SelectItem key={camera.id} value={camera.id}>
+                          {cameras.map((camera, index) => (
+                            <SelectItem
+                              key={camera.id?.toString() ?? `${camera.name}-${index}`}
+                              value={camera.id?.toString() ?? `${camera.list_index ?? index}`}
+                            >
                               <div className="flex items-center gap-2">
                                 <div 
                                   className={`w-2 h-2 rounded-full ${
@@ -788,3 +958,4 @@ export function CameraControl() {
     </div>
   );
 }
+

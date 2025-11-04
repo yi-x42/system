@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC 遠端攝影機串流</title>
+    <style>
+      :root {
+        font-family: "Segoe UI", Arial, sans-serif;
+        background-color: #f5f7fb;
+        color: #1d2433;
+        color-scheme: light dark;
+      }
+
+      body {
+        margin: 0;
+        padding: 2.5rem clamp(1.5rem, 4vw, 4rem);
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        min-height: 100vh;
+        background: radial-gradient(
+            circle at 0% 0%,
+            rgba(0, 102, 255, 0.08),
+            transparent 45%
+          ),
+          radial-gradient(
+            circle at 100% 0%,
+            rgba(255, 143, 0, 0.08),
+            transparent 45%
+          ),
+          #f5f7fb;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 2.6rem);
+      }
+
+      header p {
+        margin: 0.4rem 0 0;
+        color: #4a5568;
+      }
+
+      section {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 16px;
+        padding: clamp(1.5rem, 3vw, 2.5rem);
+        box-shadow: 0 24px 48px -18px rgba(15, 23, 42, 0.15);
+        backdrop-filter: blur(6px);
+      }
+
+      .control-row {
+        margin-top: 1.25rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+
+      button {
+        flex: 0 1 auto;
+        padding: 0.85rem 1.8rem;
+        border-radius: 999px;
+        border: none;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button:focus-visible {
+        outline: 3px solid rgba(0, 102, 255, 0.35);
+        outline-offset: 2px;
+      }
+
+      #connectBtn {
+        background: linear-gradient(135deg, #0066ff, #1a8dff);
+        color: #fff;
+        box-shadow: 0 10px 24px -12px rgba(0, 102, 255, 0.65);
+      }
+
+      #connectBtn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 28px -16px rgba(0, 102, 255, 0.45);
+      }
+
+      #disconnectBtn {
+        background: #edf2f7;
+        color: #1d2433;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      #status {
+        margin-top: 1rem;
+        padding: 0.8rem 1rem;
+        background: #edf2ff;
+        border-radius: 12px;
+        font-size: 0.95rem;
+        color: #1b44c5;
+        line-height: 1.5;
+        word-break: break-word;
+      }
+
+      #status.error {
+        background: #ffe6e6;
+        color: #c53030;
+      }
+
+      .video-panel h2 {
+        margin: 0 0 1rem;
+        font-size: 1.3rem;
+      }
+
+      video {
+        width: 100%;
+        max-width: 920px;
+        display: block;
+        border-radius: 18px;
+        background-color: #000;
+        border: 3px solid rgba(0, 102, 255, 0.18);
+        box-shadow: 0 20px 40px -25px rgba(15, 23, 42, 0.6);
+      }
+
+      footer {
+        margin-top: auto;
+        text-align: center;
+        color: #718096;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>WebRTC 遠端攝影機串流</h1>
+      <p>
+        按下「開始串流」後，瀏覽器會透過 FastAPI + aiortc 與伺服器建立
+        WebRTC 連線，取得 OpenCV 管理的攝影機影像。
+      </p>
+    </header>
+
+    <section>
+      <div>
+        <strong>步驟</strong>
+        <ol style="margin: 0.5rem 0 0; padding-left: 1.3rem">
+          <li>點選「開始串流」，前端會建立 SDP Offer 並送至後端。</li>
+          <li>後端使用 aiortc 建立 PeerConnection，回傳 Answer。</li>
+          <li>完成握手後即可看到伺服器端攝影機的畫面。</li>
+        </ol>
+      </div>
+      <div class="control-row">
+        <button id="connectBtn">開始串流</button>
+        <button id="disconnectBtn" disabled>停止串流</button>
+      </div>
+      <div id="status">尚未連線。</div>
+    </section>
+
+    <section class="video-panel">
+      <h2>伺服器攝影機影像</h2>
+      <video id="remoteVideo" playsinline autoplay muted></video>
+    </section>
+
+    <footer>
+      若網頁與伺服器不在同一台主機，請將 fetch API 的位址改為對應的
+      FastAPI 網域。
+    </footer>
+
+    <script>
+      const connectBtn = document.getElementById("connectBtn");
+      const disconnectBtn = document.getElementById("disconnectBtn");
+      const statusEl = document.getElementById("status");
+      const remoteVideo = document.getElementById("remoteVideo");
+
+      let pc = null;
+
+      connectBtn.addEventListener("click", startStreaming);
+      disconnectBtn.addEventListener("click", stopStreaming);
+
+      async function startStreaming() {
+        if (pc) {
+          setStatus("串流已啟動。", false);
+          return;
+        }
+
+        try {
+          connectBtn.disabled = true;
+          setStatus("建立 WebRTC 連線中...");
+
+          pc = new RTCPeerConnection();
+
+          pc.addEventListener("track", (event) => {
+            const [stream] = event.streams;
+            if (stream) {
+              remoteVideo.srcObject = stream;
+            }
+          });
+
+          pc.addEventListener("connectionstatechange", () => {
+            setStatus(`PeerConnection 狀態：${pc.connectionState}`);
+            if (pc.connectionState === "failed") {
+              setStatus("PeerConnection 連線失敗。", true);
+            }
+          });
+
+          pc.addEventListener("iceconnectionstatechange", () => {
+            console.log("ICE 狀態：", pc.iceConnectionState);
+          });
+
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: false,
+            offerToReceiveVideo: true,
+          });
+          await pc.setLocalDescription(offer);
+
+          await waitForIceGathering(pc);
+
+          const response = await fetch("/offer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sdp: pc.localDescription.sdp,
+              type: pc.localDescription.type,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`後端回應碼 ${response.status}`);
+          }
+
+          const answer = await response.json();
+          await pc.setRemoteDescription(answer);
+
+          disconnectBtn.disabled = false;
+          setStatus("串流已啟動，等待影像載入...");
+        } catch (error) {
+          console.error(error);
+          setStatus(`啟動串流失敗：${error.message}`, true);
+          stopStreaming();
+        } finally {
+          if (!pc) {
+            connectBtn.disabled = false;
+          }
+        }
+      }
+
+      function stopStreaming() {
+        disconnectBtn.disabled = true;
+
+        if (pc) {
+          pc.getSenders().forEach((sender) => {
+            try {
+              sender.track?.stop();
+            } catch (err) {
+              console.warn("停止 sender track 失敗", err);
+            }
+          });
+          pc.close();
+          pc = null;
+        }
+
+        remoteVideo.srcObject = null;
+        connectBtn.disabled = false;
+        setStatus("串流已停止。");
+      }
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.className = isError ? "error" : "";
+      }
+
+      function waitForIceGathering(peerConnection) {
+        if (peerConnection.iceGatheringState === "complete") {
+          return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+          function checkState() {
+            if (peerConnection.iceGatheringState === "complete") {
+              peerConnection.removeEventListener(
+                "icegatheringstatechange",
+                checkState
+              );
+              resolve();
+            }
+          }
+
+          peerConnection.addEventListener(
+            "icegatheringstatechange",
+            checkState
+          );
+          // 若因某些原因事件未觸發，在 2 秒後強制繼續。
+          setTimeout(() => {
+            peerConnection.removeEventListener(
+              "icegatheringstatechange",
+              checkState
+            );
+            resolve();
+          }, 2000);
+        });
+      }
+    </script>
+  </body>
+</html>

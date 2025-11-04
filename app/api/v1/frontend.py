@@ -7,10 +7,21 @@ import asyncio
 import json
 import os
 import time
+import base64
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, File, UploadFile, Query
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Depends,
+    BackgroundTasks,
+    File,
+    UploadFile,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +36,7 @@ from app.services.task_service import TaskService, get_task_service
 from app.services.analytics_service import AnalyticsService
 from app.services.new_database_service import DatabaseService
 from app.services.camera_status_monitor import get_camera_monitor
+from app.services.realtime_detection_service import realtime_detection_service
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
@@ -232,6 +244,7 @@ class RealtimeAnalysisRequest(BaseModel):
     confidence: float = Field(0.5, description="信心度閾值", ge=0.0, le=1.0)
     iou_threshold: float = Field(0.45, description="IoU閾值", ge=0.0, le=1.0)
     description: str = Field("", description="任務描述")
+    client_stream: bool = Field(False, description="是否由客戶端上傳影像進行分析")
 
 class RealtimeAnalysisResponse(BaseModel):
     """即時分析回應模型"""
@@ -241,6 +254,8 @@ class RealtimeAnalysisResponse(BaseModel):
     camera_info: Dict[str, Any] = Field(..., description="攝影機資訊")
     model_info: Dict[str, Any] = Field(..., description="模型資訊")
     created_at: datetime = Field(..., description="創建時間")
+    websocket_url: Optional[str] = Field(None, description="即時預覽 WebSocket URL")
+    client_stream: bool = Field(False, description="是否需要客戶端上傳影像")
 
 class TaskInfo(BaseModel):
     """任務資訊模型"""
@@ -928,7 +943,8 @@ async def start_realtime_analysis(
                 "model_id": request.model_id,
                 "model_path": model_info["path"],
                 "confidence": request.confidence,
-                "iou_threshold": request.iou_threshold
+                "iou_threshold": request.iou_threshold,
+                "client_stream": request.client_stream
             }
             
             analysis_task = AnalysisTask(
@@ -984,7 +1000,9 @@ async def start_realtime_analysis(
                 "confidence": request.confidence,
                 "iou_threshold": request.iou_threshold
             },
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
+            websocket_url=f"/api/v1/frontend/analysis/live-person-camera/{task_id}/ws",
+            client_stream=request.client_stream,
         )
         
     except HTTPException:
@@ -994,6 +1012,94 @@ async def start_realtime_analysis(
         raise HTTPException(status_code=500, detail=f"啟動即時分析失敗: {str(e)}")
 
 # ===== 攝影機管理 API =====
+@router.websocket("/analysis/live-person-camera/{task_id}/ws")
+async def live_person_camera_websocket(websocket: WebSocket, task_id: str):
+    """Live Person Camera 即時預覽 WebSocket"""
+    await realtime_detection_service.register_preview_client(task_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await realtime_detection_service.unregister_preview_client(task_id, websocket)
+    except Exception:
+        await realtime_detection_service.unregister_preview_client(task_id, websocket)
+
+
+@router.websocket("/analysis/live-person-camera/{task_id}/upload")
+async def live_person_camera_upload(websocket: WebSocket, task_id: str):
+    """接收前端上傳的即時分析影像"""
+    await websocket.accept()
+
+    try:
+        while True:
+            try:
+                data = await websocket.receive()
+            except RuntimeError as exc:
+                api_logger.info(f"Live Person Camera 上傳連線終止: {task_id} - {exc}")
+                break
+
+            message_type = data.get("type")
+
+            if message_type == "websocket.disconnect":
+                api_logger.info(f"Live Person Camera 上傳連線關閉: {task_id}")
+                break
+
+            if message_type == "websocket.ping":
+                await websocket.send_bytes(b"")
+                continue
+
+            if message_type not in {"websocket.receive", None}:
+                continue
+
+            message: Optional[str] = data.get("text")
+            if message is None:
+                raw_bytes = data.get("bytes")
+                if raw_bytes is None:
+                    continue
+                try:
+                    message = raw_bytes.decode("utf-8")
+                except Exception:
+                    continue
+
+            try:
+                payload = json.loads(message)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({"type": "error", "message": "invalid_json"}))
+                continue
+
+            if payload.get("type") != "frame":
+                continue
+
+            image_data = payload.get("image")
+            if not isinstance(image_data, str):
+                await websocket.send_text(json.dumps({"type": "error", "message": "missing_image"}))
+                continue
+
+            if image_data.startswith("data:"):
+                image_data = image_data.split(",", 1)[-1]
+
+            try:
+                frame_bytes = base64.b64decode(image_data)
+            except Exception:
+                await websocket.send_text(json.dumps({"type": "error", "message": "decode_failed"}))
+                continue
+
+            if not frame_bytes:
+                await websocket.send_text(json.dumps({"type": "error", "message": "empty_frame"}))
+                continue
+
+            success = await realtime_detection_service.ingest_external_frame(task_id, frame_bytes)
+            if not success:
+                await websocket.send_text(json.dumps({"type": "error", "message": "frame_rejected"}))
+    except WebSocketDisconnect:
+        api_logger.info(f"Live Person Camera 上傳連線結束: {task_id}")
+    except Exception as e:
+        api_logger.error(f"Live Person Camera 上傳處理錯誤: {e}")
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
 
 @router.get("/cameras")
 async def get_cameras(
@@ -1247,17 +1353,68 @@ async def check_all_cameras_status():
         raise HTTPException(status_code=500, detail=f"攝影機狀態檢測失敗: {str(e)}")
 
 @router.post("/cameras/scan")
-async def scan_cameras():
-    """超快速掃描可用攝影機 (使用攝影機流管理器避免衝突)"""
+async def scan_cameras(
+    register_new: bool = Query(
+        True,
+        description="是否將掃描到的新攝影機自動加入設備列表"
+    )
+):
+    """掃描可用攝影機，必要時自動註冊為設備列表"""
     try:
-        from app.services.camera_stream_manager import camera_stream_manager
-        cameras = camera_stream_manager.detect_available_cameras()
-        
-        return {
-            "message": f"掃描完成，發現 {len(cameras)} 個攝影機",
-            "cameras": cameras
+        camera_service = CameraService()
+
+        # 先取得現有設備，用於比對是否已註冊
+        existing_cameras = await camera_service.get_cameras()
+        existing_indices = {
+            cam.device_index for cam in existing_cameras if cam.device_index is not None
         }
-        
+
+        # 掃描本機可用攝影機
+        discovered = await camera_service.scan_cameras()
+        registered_devices: List[Dict[str, Any]] = []
+
+        if register_new:
+            for device in discovered:
+                device_index = device.get("device_index")
+                if device_index is None:
+                    continue
+
+                if device_index in existing_indices:
+                    continue
+
+                camera_name = device.get("name") or f"USB Camera {device_index}"
+                resolution = device.get("resolution") or "640x480"
+                fps_value = device.get("fps") or 30
+                try:
+                    fps = int(fps_value)
+                except (TypeError, ValueError):
+                    fps = 30
+
+                new_id = await camera_service.add_camera(
+                    name=camera_name,
+                    camera_type="USB",
+                    resolution=resolution,
+                    fps=fps,
+                    device_index=device_index,
+                )
+
+                existing_indices.add(device_index)
+                registered_devices.append(
+                    {
+                        "id": new_id,
+                        "name": camera_name,
+                        "device_index": device_index,
+                        "resolution": resolution,
+                        "fps": fps,
+                    }
+                )
+
+        return {
+            "message": f"掃描完成，發現 {len(discovered)} 個攝影機",
+            "cameras": discovered,
+            "registered": registered_devices,
+        }
+
     except Exception as e:
         api_logger.error(f"掃描攝影機失敗: {e}")
         raise HTTPException(status_code=500, detail=f"攝影機掃描失敗: {str(e)}")
@@ -3000,8 +3157,11 @@ async def run_realtime_detection(
         # 3. 建立資料庫服務實例
         db_service = DatabaseService()
         
-        # 4. 使用共享視訊流開始實時檢測
-        api_logger.info(f"使用共享視訊流啟動實時檢測: {camera_id}, 裝置索引: {device_index}")
+        # 4. 使用共享視訊流或客戶端影像開始實時檢測
+        if request.client_stream:
+            api_logger.info(f"啟動實時檢測 (客戶端影像上傳): {camera_id}")
+        else:
+            api_logger.info(f"使用共享視訊流啟動實時檢測: {camera_id}, 裝置索引: {device_index}")
         
         success = await realtime_detection_service.start_realtime_detection(
             task_id=str(task_id),
@@ -3010,7 +3170,8 @@ async def run_realtime_detection(
             db_service=db_service,
             confidence_threshold=request.confidence,
             iou_threshold=request.iou_threshold,
-            model_path=model_info.get("path")
+            model_path=model_info.get("path"),
+            external_source=request.client_stream,
         )
         
         if success:
@@ -3021,3 +3182,7 @@ async def run_realtime_detection(
     except Exception as e:
         api_logger.error(f"即時檢測任務失敗: {e}")
         await update_task_status("failed", str(e))
+
+
+
+
