@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -30,9 +30,12 @@ import {
   useDeleteVideo,
   useCameras,
   useStartLivePersonCamera,
+  useStopLivePersonCamera,
   LivePersonCameraRequest,
   useVideoAnalysis,
+  CameraInfo,
 } from "../hooks/react-query-hooks";
+import apiClient from "../lib/api";
 import {
   Brain,
   Upload,
@@ -53,6 +56,26 @@ import {
   Save,
 } from "lucide-react";
 
+type CameraWithMeta = CameraInfo & {
+  device_index?: number;
+  device_id?: string;
+  list_index?: number;
+};
+
+type LiveDetection = {
+  bbox: [number, number, number, number];
+  label?: string;
+  confidence?: number;
+  tracker_id?: number;
+};
+
+type LiveDetectionFrame = {
+  detections: LiveDetection[];
+  width: number;
+  height: number;
+  image?: string;
+  timestamp?: number;
+};
 export function DetectionAnalysisOriginal() {
   console.log("DetectionAnalysisOriginal 開始渲染");
 
@@ -75,7 +98,185 @@ export function DetectionAnalysisOriginal() {
   const [blurEnabled, setBlurEnabled] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(false);
   const [heatmapEnabled, setHeatmapEnabled] = useState(false);
-  const commandSenderRef = useRef<((name: string, value: boolean) => void) | null>(null);
+
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [liveDetections, setLiveDetections] = useState<LiveDetectionFrame | null>(null);
+  const [detectionError, setDetectionError] = useState<string | null>(null);
+
+  const closeLivePersonWebSocket = useCallback(() => {
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch (error) {
+        console.warn("關閉 Live Person Camera WebSocket 失敗:", error);
+      }
+      wsRef.current = null;
+    }
+  }, []);
+
+  const openLivePersonWebSocket = useCallback((taskId: string, websocketPath?: string) => {
+    closeLivePersonWebSocket();
+    setDetectionError(null);
+    setLiveDetections(null);
+
+    const httpBase = apiClient.defaults.baseURL || `${window.location.origin}/api/v1`;
+    let baseUrl: URL;
+    try {
+      baseUrl = new URL(httpBase);
+    } catch (error) {
+      console.warn("無法解析 API 基底網址，改用 window.location:", error);
+      baseUrl = new URL(`${window.location.origin}/api/v1`);
+    }
+    const origin = baseUrl.origin;
+    const apiPrefix = baseUrl.pathname.replace(/\/$/, "");
+
+    const buildWebSocketUrl = (targetPath: string) => {
+      const ensureLeadingSlash = (value: string) => (value.startsWith("/") ? value : `/${value}`);
+      const normalizePath = (value: string) => {
+        const withSlash = ensureLeadingSlash(value);
+        if (!apiPrefix || withSlash.startsWith(apiPrefix)) {
+          return withSlash;
+        }
+        return `${apiPrefix}${withSlash}`.replace(/\/{2,}/g, "/");
+      };
+
+      try {
+        if (/^wss?:\/\//i.test(targetPath)) {
+          return targetPath;
+        }
+        if (/^https?:\/\//i.test(targetPath)) {
+          const directUrl = new URL(targetPath);
+          directUrl.protocol = directUrl.protocol === "https:" ? "wss:" : "ws:";
+          directUrl.search = "";
+          directUrl.hash = "";
+          return directUrl.toString();
+        }
+        const url = new URL(normalizePath(targetPath), origin);
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        url.search = "";
+        url.hash = "";
+        return url.toString();
+      } catch (error) {
+        console.warn("建構 WebSocket URL 失敗，改用預設路徑:", error);
+        const fallback = new URL(normalizePath(`/frontend/analysis/live-person-camera/${taskId}/ws`), origin);
+        fallback.protocol = fallback.protocol === "https:" ? "wss:" : "ws:";
+        fallback.search = "";
+        fallback.hash = "";
+        return fallback.toString();
+      }
+    };
+
+    const socketUrl = buildWebSocketUrl(
+      websocketPath ?? `/frontend/analysis/live-person-camera/${taskId}/ws`
+    );
+    console.log("Live Person Camera WebSocket 連線中:", socketUrl);
+    const socket = new WebSocket(socketUrl);
+    wsRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload?.type === "frame") {
+          const rawDetections = Array.isArray(payload.detections) ? payload.detections : [];
+          const normalizedDetections: LiveDetection[] = rawDetections
+            .filter((item: any) => Array.isArray(item?.bbox) && item.bbox.length === 4)
+            .map((item: any) => ({
+              bbox: [
+                Number(item.bbox[0]) || 0,
+                Number(item.bbox[1]) || 0,
+                Number(item.bbox[2]) || 0,
+                Number(item.bbox[3]) || 0,
+              ],
+              label: typeof item.label === "string" ? item.label : undefined,
+              confidence: typeof item.confidence === "number" ? item.confidence : undefined,
+              tracker_id:
+                typeof item.tracker_id === "number" || typeof item.tracker_id === "string"
+                  ? Number(item.tracker_id)
+                  : undefined,
+            }));
+
+          setLiveDetections({
+            detections: normalizedDetections,
+            width: typeof payload.width === "number" ? payload.width : 0,
+            height: typeof payload.height === "number" ? payload.height : 0,
+            image: typeof payload.image === "string" ? payload.image : undefined,
+            timestamp: typeof payload.timestamp === "number" ? payload.timestamp : undefined,
+          });
+          setDetectionError(null);
+        } else if (payload?.type === "error") {
+          setDetectionError(payload.message || "Live Person Camera 傳回錯誤");
+        }
+      } catch (error) {
+        console.error("解析 Live Person Camera 訊息失敗:", error);
+      }
+    };
+
+    socket.onerror = () => {
+      setDetectionError("Live Person Camera WebSocket 發生錯誤");
+      socket.close();
+    };
+
+    socket.onclose = () => {
+      if (wsRef.current === socket) {
+        wsRef.current = null;
+      }
+    };
+  }, [closeLivePersonWebSocket]);
+
+  const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
+    const videoOnly = devices.filter((device) => device.kind === "videoinput");
+    setVideoDevices((previous) => {
+      const prevIds = previous.map((device) => device.deviceId);
+      const nextIds = videoOnly.map((device) => device.deviceId);
+      if (
+        prevIds.length === nextIds.length &&
+        prevIds.every((id, index) => id === nextIds[index])
+      ) {
+        return previous;
+      }
+      return videoOnly;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => handleDevicesUpdated(devices))
+      .catch(() => {
+        /* ignore */
+      });
+  }, [handleDevicesUpdated]);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener || !navigator.mediaDevices?.removeEventListener) {
+      return;
+    }
+
+    const listener = () => {
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => handleDevicesUpdated(devices))
+        .catch(() => {
+          /* ignore */
+        });
+    };
+
+    navigator.mediaDevices.addEventListener("devicechange", listener);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", listener);
+    };
+  }, [handleDevicesUpdated]);
+
+  useEffect(() => {
+    return () => {
+      closeLivePersonWebSocket();
+    };
+  }, [closeLivePersonWebSocket]);
 
   // 獲取所有分析任務（不限制狀態，包含所有任務）
   const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
@@ -94,6 +295,7 @@ export function DetectionAnalysisOriginal() {
   const createAndExecuteTaskMutation = useCreateAndExecuteAnalysisTask();
   const deleteVideoMutation = useDeleteVideo();
   const startLivePersonCameraMutation = useStartLivePersonCamera();
+  const stopLivePersonCameraMutation = useStopLivePersonCamera();
   const videoAnalysisMutation = useVideoAnalysis();
   const stopTaskMutation = useStopAnalysisTask();
   const deleteTaskMutation = useDeleteAnalysisTask();
@@ -102,48 +304,106 @@ export function DetectionAnalysisOriginal() {
   console.log("YOLO 模型數據:", yoloModels);
   console.log("啟用的模型:", activeModels);
   console.log("攝影機數據:", cameras);
+  console.log("本機可用攝影機裝置:", videoDevices);
 
-  const selectedCameraInfo = cameras?.find((camera) => {
-    const cameraId = camera.id?.toString();
-    return cameraId === selectedCamera;
-  });
+  const cameraOptions: CameraWithMeta[] = useMemo(() => {
+    return (cameras ?? []).map((camera, index) => {
+      const rawDeviceIndex = camera.device_index;
+      let numericIndex: number | undefined;
+      let explicitDeviceId: string | undefined;
 
-  const handleCommandReady = (
-    sender: ((name: string, value: boolean) => void) | null
-  ) => {
-    commandSenderRef.current = sender;
-    if (sender) {
-      sender("blur_enabled", blurEnabled);
-      sender("trace_enabled", traceEnabled);
-      sender("heatmap_enabled", heatmapEnabled);
-      sender("line_enabled", entranceExitEnabled);
-      sender("zone_enabled", dwellTimeEnabled);
+      if (typeof rawDeviceIndex === "number" && Number.isFinite(rawDeviceIndex)) {
+        numericIndex = Math.trunc(rawDeviceIndex);
+      } else if (typeof rawDeviceIndex === "string") {
+        const parsedIndex = Number(rawDeviceIndex);
+        if (Number.isFinite(parsedIndex)) {
+          numericIndex = Math.trunc(parsedIndex);
+        } else {
+          explicitDeviceId = rawDeviceIndex;
+        }
+      }
+
+      if (numericIndex === undefined) {
+        numericIndex = index;
+      }
+
+      let targetDevice: MediaDeviceInfo | undefined;
+      if (videoDevices.length > 0) {
+        const boundedIndex =
+          ((numericIndex % videoDevices.length) + videoDevices.length) % videoDevices.length;
+        targetDevice = videoDevices[boundedIndex];
+      }
+
+      const finalDeviceId = targetDevice?.deviceId || explicitDeviceId;
+      const label =
+        targetDevice?.label ||
+        explicitDeviceId ||
+        (camera.camera_type === "USB"
+          ? `本機攝影機 ${numericIndex ?? ""}`.trim()
+          : camera.camera_type);
+
+      return {
+        ...camera,
+        list_index: index,
+        device_index: numericIndex,
+        device_id: finalDeviceId,
+        device_label: label,
+        location: camera.group_id || "未指定位置",
+        ip:
+          targetDevice?.label ||
+          (numericIndex !== undefined
+            ? `本機設備 #${numericIndex}`
+            : camera.rtsp_url || "未知"),
+        model: label,
+        recording: false,
+        nightVision: false,
+        motionDetection: false,
+      };
+    });
+  }, [cameras, videoDevices]);
+
+  useEffect(() => {
+    if (!cameraOptions.length) {
+      if (selectedCamera !== "") {
+        setSelectedCamera("");
+      }
+      return;
     }
-  };
+
+    const hasSelected = cameraOptions.some(
+      (camera) => camera.id?.toString() === selectedCamera
+    );
+
+    if (!hasSelected) {
+      const firstId = cameraOptions[0].id?.toString();
+      if (firstId) {
+        setSelectedCamera(firstId);
+      }
+    }
+  }, [cameraOptions, selectedCamera]);
+
+  const selectedCameraInfo = cameraOptions.find(
+    (camera) => camera.id?.toString() === selectedCamera
+  );
 
   const handleBlurToggle = (value: boolean) => {
     setBlurEnabled(value);
-    commandSenderRef.current?.("blur_enabled", value);
   };
 
   const handleTraceToggle = (value: boolean) => {
     setTraceEnabled(value);
-    commandSenderRef.current?.("trace_enabled", value);
   };
 
   const handleHeatmapToggle = (value: boolean) => {
     setHeatmapEnabled(value);
-    commandSenderRef.current?.("heatmap_enabled", value);
   };
 
   const handleLineToggle = (value: boolean) => {
     setEntranceExitEnabled(value);
-    commandSenderRef.current?.("line_enabled", value);
   };
 
   const handleZoneToggle = (value: boolean) => {
     setDwellTimeEnabled(value);
-    commandSenderRef.current?.("zone_enabled", value);
   };
 
   // 模擬分析結果數據
@@ -402,54 +662,63 @@ export function DetectionAnalysisOriginal() {
       return;
     }
 
-    const selectedModelInfo = activeModels?.find((model) => model.id === realtimeModel);
-    const modelPath = selectedModelInfo?.path || selectedModelInfo?.name || realtimeModel;
-    if (!modelPath) {
-      alert('無法取得模型路徑，請確認模型設定');
+    const hasSelectedModel = activeModels?.some((model) => model.id === realtimeModel);
+    if (!hasSelectedModel) {
+      alert('無法取得模型設定，請確認模型狀態');
       return;
     }
 
     try {
       setLivePersonTaskId(null);
       setIsLivePersonCameraRunning(false);
-      
-      
+      setLiveDetections(null);
+      setDetectionError(null);
+      closeLivePersonWebSocket();
+
       const requestData: LivePersonCameraRequest = {
         task_name: `LivePerson_${new Date().toLocaleString()}`,
         camera_id: selectedCamera,
-        model_path: modelPath,
-        confidence_threshold: confidenceThreshold,
-        imgsz: 640,
-        trace_length: 30,
-        heatmap_radius: 40,
-        heatmap_opacity: 0.5,
-        blur_kernel: 25,
-        corner_enabled: true,
-        blur_enabled: blurEnabled,
-        trace_enabled: traceEnabled,
-        heatmap_enabled: heatmapEnabled,
-        line_enabled: entranceExitEnabled,
-        zone_enabled: dwellTimeEnabled,
-        line_start_x: null,
-        line_start_y: null,
-        line_end_x: null,
-        line_end_y: null,
+        model_id: realtimeModel,
+        confidence: confidenceThreshold,
+        iou_threshold: 0.45,
         description: "前端發起的 Live Person Camera 任務",
+        client_stream: true,
       };
 
       console.log('開始 Live Person Camera 分析:', requestData);
-      
+
       const result = await startLivePersonCameraMutation.mutateAsync(requestData);
       console.log('Live Person Camera 分析已開始:', result);
       setIsLivePersonCameraRunning(true);
       setLivePersonTaskId(result.task_id ?? null);
-      alert(`即時分析已開始！\n任務 ID: ${result.task_id}\n狀態: ${result.status}\n${result.message}`);
-      
+      if (result.task_id) {
+        openLivePersonWebSocket(result.task_id, result.websocket_url ?? undefined);
+      }
+      setDetectionError(null);
     } catch (error) {
       console.error('開始 Live Person Camera 失敗:', error);
-      alert('開始即時分析失敗，請稍後重試');
       setIsLivePersonCameraRunning(false);
       setLivePersonTaskId(null);
+      setDetectionError('開始即時分析失敗，請稍後重試');
+    }
+  };
+
+  const handleStopLivePersonCamera = async () => {
+    if (!livePersonTaskId) {
+      return;
+    }
+
+    try {
+      await stopLivePersonCameraMutation.mutateAsync(livePersonTaskId);
+      setDetectionError(null);
+    } catch (error) {
+      console.error('停止 Live Person Camera 失敗:', error);
+      setDetectionError('停止即時分析失敗，請稍後重試');
+    } finally {
+      setIsLivePersonCameraRunning(false);
+      setLivePersonTaskId(null);
+      setLiveDetections(null);
+      closeLivePersonWebSocket();
     }
   };
 
@@ -777,7 +1046,10 @@ export function DetectionAnalysisOriginal() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="camera-select">選擇攝影機</Label>
-                    <Select value={selectedCamera} onValueChange={setSelectedCamera}>
+                    <Select
+                      value={selectedCamera}
+                      onValueChange={(value) => setSelectedCamera(value)}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder={isCamerasLoading ? "載入攝影機列表中..." : "選擇要分析的攝影機"} />
                       </SelectTrigger>
@@ -786,13 +1058,18 @@ export function DetectionAnalysisOriginal() {
                           <SelectItem value="loading" disabled>載入中...</SelectItem>
                         ) : isCamerasError ? (
                           <SelectItem value="error" disabled>載入攝影機列表失敗</SelectItem>
-                        ) : cameras && cameras.length > 0 ? (
-                          cameras.map((camera) => (
-                            <SelectItem 
-                              key={camera.id} 
-                              value={camera.id?.toString() || `camera-${camera.name}`}
+                        ) : cameraOptions.length > 0 ? (
+                          cameraOptions.map((camera, index) => (
+                            <SelectItem
+                              key={camera.id?.toString() ?? `${camera.name}-${index}`}
+                              value={camera.id?.toString() ?? `${camera.list_index ?? index}`}
                             >
-                              {camera.name} ({camera.status})
+                              <div className="flex flex-col gap-0.5">
+                                <span>{camera.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {camera.camera_type} • {camera.resolution} • {camera.status}
+                                </span>
+                              </div>
                             </SelectItem>
                           ))
                         ) : (
@@ -850,24 +1127,47 @@ export function DetectionAnalysisOriginal() {
                     
                   </div>
 
-                  <Button 
-                    className="w-full" 
-                    onClick={handleStartLivePersonCamera}
-                    disabled={isLivePersonCameraRunning || startLivePersonCameraMutation.isPending}
-                  >
-                    <Activity className="h-4 w-4 mr-2" />
-                    {isLivePersonCameraRunning || startLivePersonCameraMutation.isPending ? '分析中...' : '開始即時分析'}
-                  </Button>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button 
+                      className="w-full sm:w-auto" 
+                      onClick={handleStartLivePersonCamera}
+                      disabled={isLivePersonCameraRunning || startLivePersonCameraMutation.isPending}
+                    >
+                      <Activity className="h-4 w-4 mr-2" />
+                      {isLivePersonCameraRunning || startLivePersonCameraMutation.isPending ? '分析中...' : '開始即時分析'}
+                    </Button>
+                    <Button
+                      className="w-full sm:w-auto"
+                      variant="outline"
+                      onClick={handleStopLivePersonCamera}
+                      disabled={!isLivePersonCameraRunning || stopLivePersonCameraMutation.isPending}
+                    >
+                      <Square className="h-4 w-4 mr-2" />
+                      {stopLivePersonCameraMutation.isPending ? '停止中...' : '停止即時分析'}
+                    </Button>
+                  </div>
+                  {isLivePersonCameraRunning && liveDetections && (
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>目前偵測物件</span>
+                      <span>{liveDetections.detections.length}</span>
+                    </div>
+                  )}
+                  {detectionError && (
+                    <p className="text-xs text-destructive">{detectionError}</p>
+                  )}
                 </div>
 
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <h4 className="font-medium">即時分析預覽</h4>
                     <RealtimePreview
-                      taskId={livePersonTaskId}
                       running={isLivePersonCameraRunning}
                       cameraName={selectedCameraInfo?.name}
-                      onCommandReady={handleCommandReady}
+                      cameraInfo={selectedCameraInfo ?? null}
+                      detectionFrame={isLivePersonCameraRunning ? liveDetections : null}
+                      taskId={livePersonTaskId}
+                      onDevicesUpdated={handleDevicesUpdated}
+                      onUploadError={(message) => setDetectionError(message)}
                     />
                   </div>
 
@@ -1417,3 +1717,6 @@ export function DetectionAnalysisOriginal() {
     </div>
   );
 }
+
+
+

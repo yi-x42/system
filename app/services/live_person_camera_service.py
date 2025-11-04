@@ -300,37 +300,6 @@ class LivePersonCameraService:
             # 處理區域停留時間
             zone_stats = self._process_zone_dwell(detections, current_time)
 
-            # 建立廣播訊息
-            should_broadcast = False
-            encoded_success = False
-            jpeg_buffer = None
-            try:
-                ok, buffer = cv2.imencode(".jpg", frame)
-                if ok:
-                    encoded_success = True
-                    jpeg_buffer = buffer
-                    should_broadcast = current_time - self.last_broadcast_time >= self.broadcast_interval
-            except Exception as encode_error:
-                detection_logger.error(f"影像編碼失敗: {encode_error}")
-
-            if should_broadcast and encoded_success and jpeg_buffer is not None:
-                detections_payload = self._build_detections_payload(detections, object_types)
-                payload = {
-                    "type": "frame",
-                    "timestamp": current_time,
-                    "width": frame.shape[1],
-                    "height": frame.shape[0],
-                    "image": base64.b64encode(jpeg_buffer).decode("ascii"),
-                    "detections": detections_payload,
-                }
-                self.latest_frame_payload = payload
-                self.last_broadcast_time = current_time
-                if self._loop and self.broadcast_queue:
-                    try:
-                        asyncio.run_coroutine_threadsafe(self._enqueue_frame(payload), self._loop)
-                    except RuntimeError as enqueue_error:
-                        detection_logger.error(f"排入影像佇列失敗: {enqueue_error}")
-
             # 應用註解器
             annotated = self._apply_annotators(frame, detections, object_types, zone_stats)
             contiguous_bgr = np.ascontiguousarray(annotated, dtype=np.uint8)
@@ -349,6 +318,31 @@ class LivePersonCameraService:
             with self._latest_frame_lock:
                 self.latest_frame = contiguous_bgr.copy()
                 self.latest_frame_timestamp = current_time
+
+            # 建立廣播訊息（使用標註後影像）
+            should_broadcast = current_time - self.last_broadcast_time >= self.broadcast_interval
+            if should_broadcast:
+                try:
+                    ok, buffer = cv2.imencode(".jpg", contiguous_bgr)
+                    if ok:
+                        detections_payload = self._build_detections_payload(detections, object_types)
+                        payload = {
+                            "type": "frame",
+                            "timestamp": current_time,
+                            "width": contiguous_bgr.shape[1],
+                            "height": contiguous_bgr.shape[0],
+                            "image": base64.b64encode(buffer).decode("ascii"),
+                            "detections": detections_payload,
+                        }
+                        self.latest_frame_payload = payload
+                        self.last_broadcast_time = current_time
+                        if self._loop and self.broadcast_queue:
+                            try:
+                                asyncio.run_coroutine_threadsafe(self._enqueue_frame(payload), self._loop)
+                            except RuntimeError as enqueue_error:
+                                detection_logger.error(f"排入影像佇列失敗: {enqueue_error}")
+                except Exception as encode_error:
+                    detection_logger.error(f"影像編碼失敗: {encode_error}")
 
             try:
                 video_frame = av.VideoFrame.from_ndarray(contiguous_bgr, format="bgr24")

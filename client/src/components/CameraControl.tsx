@@ -339,8 +339,21 @@ export function CameraControl() {
   const toggleCameraMutation = useToggleCamera();
 
   useEffect(() => {
-    if (!selectedCamera && rawCameras.length > 0) {
-      setSelectedCamera(rawCameras[0].id);
+    if (!rawCameras.length) {
+      if (selectedCamera !== null) {
+        setSelectedCamera(null);
+      }
+      return;
+    }
+
+    const normalizedSelected = selectedCamera ?? "";
+    const hasSelected = rawCameras.some((camera) => camera.id?.toString() === normalizedSelected);
+
+    if (!hasSelected) {
+      const firstId = rawCameras[0].id?.toString();
+      if (firstId) {
+        setSelectedCamera(firstId);
+      }
     }
   }, [selectedCamera, rawCameras]);
 
@@ -539,8 +552,12 @@ export function CameraControl() {
   };
 
   // 開始即時預覽
-  const startLivePreview = (cameraId: string) => {
-    setSelectedCamera(cameraId);
+  const startLivePreview = (cameraId: string | number | null | undefined) => {
+    if (cameraId === null || cameraId === undefined) {
+      setSelectedCamera(null);
+    } else {
+      setSelectedCamera(cameraId.toString());
+    }
     setActiveTab("live-view");
   };
 
@@ -552,7 +569,7 @@ export function CameraControl() {
         // 重新取得攝影機列表
         refetchCameras();
         // 如果刪除的是當前選中的攝影機，清除選擇
-        if (selectedCamera === cameraId) {
+        if (selectedCamera === cameraId || selectedCamera === cameraId.toString()) {
           setSelectedCamera(null);
         }
       } catch (error) {
@@ -564,8 +581,7 @@ export function CameraControl() {
 
   // 取得選中的攝影機資料
   const selectedCameraData: CameraWithMeta | null =
-    (selectedCamera ? cameras.find((cam) => cam.id === selectedCamera) : null) ??
-    null;
+    (selectedCamera ? cameras.find((cam) => cam.id?.toString() === selectedCamera) : null) ?? null;
 
   // 取得攝影機串流資訊
   return (
@@ -845,8 +861,11 @@ export function CameraControl() {
                           <SelectValue placeholder="選擇要串流的攝影機" />
                         </SelectTrigger>
                         <SelectContent>
-                          {cameras.map((camera) => (
-                            <SelectItem key={camera.id} value={camera.id}>
+                          {cameras.map((camera, index) => (
+                            <SelectItem
+                              key={camera.id?.toString() ?? `${camera.name}-${index}`}
+                              value={camera.id?.toString() ?? `${camera.list_index ?? index}`}
+                            >
                               <div className="flex items-center gap-2">
                                 <div 
                                   className={`w-2 h-2 rounded-full ${

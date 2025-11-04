@@ -528,27 +528,11 @@ export const useToggleCamera = () => {
 export interface LivePersonCameraRequest {
   task_name: string;
   camera_id: string;
-  model_path: string;
-  confidence_threshold?: number;
-  imgsz?: number;
-  device?: string;
-  trace_length?: number;
-  heatmap_radius?: number;
-  heatmap_opacity?: number;
-  blur_kernel?: number;
-  csv_path?: string;
-  csv_append?: boolean;
-  corner_enabled?: boolean;
-  blur_enabled?: boolean;
-  trace_enabled?: boolean;
-  heatmap_enabled?: boolean;
-  line_enabled?: boolean;
-  zone_enabled?: boolean;
-  line_start_x?: number | null;
-  line_start_y?: number | null;
-  line_end_x?: number | null;
-  line_end_y?: number | null;
+  model_id: string;
+  confidence: number;
+  iou_threshold: number;
   description?: string;
+  client_stream?: boolean;
 }
 
 export interface LivePersonCameraResponse {
@@ -556,13 +540,21 @@ export interface LivePersonCameraResponse {
   status: string;
   message: string;
   camera_info: any;
-  config: any;
+  model_info: any;
   created_at: string;
+  websocket_url?: string;
+}
+
+export interface StopLivePersonCameraResponse {
+  task_id: string;
+  status: string;
+  message: string;
+  stopped_at: string;
 }
 
 // 開始 Live Person Camera 分析的非同步函式
 const startLivePersonCamera = async (requestData: LivePersonCameraRequest): Promise<LivePersonCameraResponse> => {
-  const { data } = await apiClient.post('/frontend/analysis/start-live-person-camera', requestData);
+  const { data } = await apiClient.post('/frontend/analysis/start-realtime', requestData);
   return data;
 };
 
@@ -570,6 +562,19 @@ const startLivePersonCamera = async (requestData: LivePersonCameraRequest): Prom
 export const useStartLivePersonCamera = () => {
   return useMutation<LivePersonCameraResponse, Error, LivePersonCameraRequest>({
     mutationFn: startLivePersonCamera,
+  });
+};
+
+// 停止 Live Person Camera 分析的非同步函式
+const stopLivePersonCamera = async (taskId: string): Promise<StopLivePersonCameraResponse> => {
+  const { data } = await apiClient.delete(`/frontend/analysis/live-person-camera/${taskId}`);
+  return data;
+};
+
+// 停止 Live Person Camera 分析的 Hook
+export const useStopLivePersonCamera = () => {
+  return useMutation<StopLivePersonCameraResponse, Error, string>({
+    mutationFn: stopLivePersonCamera,
   });
 };
 
@@ -675,3 +680,6 @@ export const useShutdownSystem = () => {
     mutationFn: shutdownSystem,
   });
 };
+
+
+
