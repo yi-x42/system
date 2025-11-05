@@ -306,3 +306,14 @@ project/
   - 需要跳過模型初始化時，可在環境變數設定 `SKIP_YOLO_INIT=true`。
 
 ---
+已幫你在專案底下新增一套 Docker 化的資料庫配置，路徑在 deployment/db/：
+
+docker-compose.yml：使用 postgres:16-alpine，自動載入初始化 SQL，並把資料掛在 volume yolo_pgdata。
+.env.db：預設帳號 yolo_user、密碼 please_change_me、資料庫 yolo_analysis（記得改成自己要的值）。
+init.sql：照你調整後的 schema 產生所有資料表（analysis_tasks、detection_results、line_crossing_events、zone_dwell_events、speed_events、data_sources、users、system_config 等）以及常用索引。
+使用方式：
+
+轉到 deployment/db 目錄。
+執行 docker compose up -d 就會啟動新的 PostgreSQL。
+若要進入資料庫，可用 docker exec -it yolo_analysis_db psql -U yolo_user -d yolo_analysis。
+將應用程式的連線字串改成 postgresql://yolo_user:please_change_me@localhost:5432/yolo_analysis（或依你修改 .env.db 的設定）。
