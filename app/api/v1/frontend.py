@@ -37,6 +37,7 @@ from app.services.analytics_service import AnalyticsService
 from app.services.new_database_service import DatabaseService
 from app.services.camera_status_monitor import get_camera_monitor
 from app.services.realtime_detection_service import realtime_detection_service
+from app.services.gui_launcher import realtime_gui_manager
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
@@ -256,6 +257,24 @@ class RealtimeAnalysisResponse(BaseModel):
     created_at: datetime = Field(..., description="創建時間")
     websocket_url: Optional[str] = Field(None, description="即時預覽 WebSocket URL")
     client_stream: bool = Field(False, description="是否需要客戶端上傳影像")
+
+
+class PreviewLaunchRequest(BaseModel):
+    """GUI 預覽啟動請求"""
+    source_override: Optional[str] = Field(None, description="手動指定影像來源（USB index 或 RTSP URL）")
+    model_override: Optional[str] = Field(None, description="覆寫模型路徑")
+    imgsz: Optional[int] = Field(None, description="推論影像尺寸")
+    confidence: Optional[float] = Field(None, description="信心閾值")
+    device: Optional[str] = Field(None, description="推論裝置，例如 cpu 或 cuda:0")
+
+
+class PreviewLaunchResponse(BaseModel):
+    """GUI 預覽啟動回應"""
+    task_id: int
+    pid: int
+    already_running: bool
+    message: str
+    log_path: Optional[str] = Field(None, description="GUI 子行程輸出日誌路徑")
 
 class TaskInfo(BaseModel):
     """任務資訊模型"""
@@ -3182,6 +3201,126 @@ async def run_realtime_detection(
     except Exception as e:
         api_logger.error(f"即時檢測任務失敗: {e}")
         await update_task_status("failed", str(e))
+
+
+@router.post(
+    "/analysis/live-person-camera/{task_id}/preview",
+    response_model=PreviewLaunchResponse,
+)
+async def launch_live_person_preview_gui(
+    task_id: int,
+    request: PreviewLaunchRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """啟動 PySide6 GUI 預覽視窗"""
+    try:
+        # 取得任務資訊
+        query = select(AnalysisTask).where(AnalysisTask.id == int(task_id))
+        result = await db.execute(query)
+        task = result.scalar_one_or_none()
+
+        if not task:
+            raise HTTPException(status_code=404, detail="任務不存在")
+        if task.task_type != "realtime_camera":
+            raise HTTPException(status_code=400, detail="僅支援即時攝影機任務")
+        if task.status not in {"running", "pending"}:
+            raise HTTPException(status_code=400, detail=f"任務狀態為 {task.status}，無法開啟預覽")
+
+        source_info = task.source_info or {}
+        if source_info.get("client_stream"):
+            api_logger.warning(
+                f"任務 {task_id} 標記為 client_stream，但仍嘗試啟動本地 GUI 預覽，將依影像來源推測處理"
+            )
+
+        payload = request or PreviewLaunchRequest()
+
+        # 解析影像來源
+        source_value: Optional[str] = None
+        if payload.source_override:
+            source_value = payload.source_override
+        else:
+            device_index = source_info.get("device_index")
+            if device_index is not None:
+                source_value = str(device_index)
+            else:
+                rtsp_url = (
+                    source_info.get("rtsp_url")
+                    or source_info.get("camera_url")
+                    or source_info.get("stream_url")
+                )
+                if rtsp_url:
+                    source_value = str(rtsp_url)
+
+        if not source_value and source_info.get("camera_id"):
+            camera_service = CameraService()
+            camera = await camera_service.get_camera_by_id(str(source_info["camera_id"]))
+            if camera:
+                if getattr(camera, "device_index", None) is not None:
+                    source_value = str(camera.device_index)
+                elif getattr(camera, "rtsp_url", None):
+                    source_value = camera.rtsp_url
+
+        if not source_value:
+            raise HTTPException(status_code=400, detail="找不到可用的影像來源，請先確認攝影機設定")
+
+        # 解析模型路徑
+        model_path = payload.model_override or source_info.get("model_path")
+        if model_path and not os.path.exists(model_path):
+            api_logger.warning("指定的模型檔不存在，改用預設值: %s", model_path)
+            model_path = None
+
+        imgsz_value: Optional[int] = None
+        if payload.imgsz:
+            imgsz_value = payload.imgsz
+        elif source_info.get("imgsz"):
+            imgsz_value = int(source_info["imgsz"])
+
+        confidence_value = (
+            payload.confidence
+            if payload.confidence is not None
+            else task.confidence_threshold
+        )
+
+        window_name = (
+            task.task_name
+            or source_info.get("camera_name")
+            or f"Live Task {task_id}"
+        )
+
+        try:
+            launch_result = realtime_gui_manager.launch_preview(
+                task_id=str(task_id),
+                source=source_value,
+                model_path=model_path,
+                window_name=window_name,
+                confidence=confidence_value,
+                imgsz=imgsz_value,
+                device=payload.device or source_info.get("device"),
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        message = (
+            f"{window_name} 的 GUI 預覽已啟動 (PID {launch_result['pid']})"
+            if not launch_result["already_running"]
+            else f"{window_name} 的 GUI 預覽已在執行 (PID {launch_result['pid']})"
+        )
+
+        return PreviewLaunchResponse(
+            task_id=task.id,
+            pid=int(launch_result["pid"]),
+            already_running=bool(launch_result["already_running"]),
+            message=message,
+            log_path=launch_result.get("log_path"),
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        api_logger.error(f"GUI 腳本不存在: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        api_logger.error(f"啟動 GUI 預覽失敗: {exc}")
+        raise HTTPException(status_code=500, detail=f"啟動 GUI 預覽失敗: {exc}")
 
 
 

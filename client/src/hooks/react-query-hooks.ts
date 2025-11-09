@@ -552,6 +552,13 @@ export interface StopLivePersonCameraResponse {
   stopped_at: string;
 }
 
+export interface LaunchPreviewResponse {
+  task_id: number;
+  pid: number;
+  already_running: boolean;
+  message: string;
+}
+
 // 開始 Live Person Camera 分析的非同步函式
 const startLivePersonCamera = async (requestData: LivePersonCameraRequest): Promise<LivePersonCameraResponse> => {
   const { data } = await apiClient.post('/frontend/analysis/start-realtime', requestData);
@@ -575,6 +582,17 @@ const stopLivePersonCamera = async (taskId: string): Promise<StopLivePersonCamer
 export const useStopLivePersonCamera = () => {
   return useMutation<StopLivePersonCameraResponse, Error, string>({
     mutationFn: stopLivePersonCamera,
+  });
+};
+
+const launchLivePersonPreview = async (taskId: string): Promise<LaunchPreviewResponse> => {
+  const { data } = await apiClient.post(`/frontend/analysis/live-person-camera/${taskId}/preview`);
+  return data;
+};
+
+export const useLaunchLivePersonPreview = () => {
+  return useMutation<LaunchPreviewResponse, Error, string>({
+    mutationFn: launchLivePersonPreview,
   });
 };
 
