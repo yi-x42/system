@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -9,7 +9,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
-import RealtimePreview from "./RealtimePreview";
 import {
   useYoloModelList,
   useToggleModelStatus,
@@ -35,7 +34,6 @@ import {
   useVideoAnalysis,
   CameraInfo,
 } from "../hooks/react-query-hooks";
-import apiClient from "../lib/api";
 import {
   Brain,
   Upload,
@@ -54,6 +52,10 @@ import {
   Minus,
   RotateCcw,
   Save,
+  Users,
+  ArrowLeftRight,
+  Timer,
+  Monitor,
 } from "lucide-react";
 
 type CameraWithMeta = CameraInfo & {
@@ -62,20 +64,20 @@ type CameraWithMeta = CameraInfo & {
   list_index?: number;
 };
 
-type LiveDetection = {
-  bbox: [number, number, number, number];
-  label?: string;
-  confidence?: number;
-  tracker_id?: number;
+const formatDuration = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "0s";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && !Number.isNaN(value)) {
+    return `${value.toFixed(1)}s`;
+  }
+  return "0s";
 };
 
-type LiveDetectionFrame = {
-  detections: LiveDetection[];
-  width: number;
-  height: number;
-  image?: string;
-  timestamp?: number;
-};
+
 export function DetectionAnalysisOriginal() {
   console.log("DetectionAnalysisOriginal 開始渲染");
 
@@ -93,136 +95,8 @@ export function DetectionAnalysisOriginal() {
   const [realtimeModel, setRealtimeModel] = useState<string>("");
   const [isLivePersonCameraRunning, setIsLivePersonCameraRunning] = useState(false);
   const [livePersonTaskId, setLivePersonTaskId] = useState<string | null>(null);
-  const [entranceExitEnabled, setEntranceExitEnabled] = useState(false);
-  const [dwellTimeEnabled, setDwellTimeEnabled] = useState(false);
-  const [blurEnabled, setBlurEnabled] = useState(false);
-  const [traceEnabled, setTraceEnabled] = useState(false);
-  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
 
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const [liveDetections, setLiveDetections] = useState<LiveDetectionFrame | null>(null);
-  const [detectionError, setDetectionError] = useState<string | null>(null);
-
-  const closeLivePersonWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch (error) {
-        console.warn("關閉 Live Person Camera WebSocket 失敗:", error);
-      }
-      wsRef.current = null;
-    }
-  }, []);
-
-  const openLivePersonWebSocket = useCallback((taskId: string, websocketPath?: string) => {
-    closeLivePersonWebSocket();
-    setDetectionError(null);
-    setLiveDetections(null);
-
-    const httpBase = apiClient.defaults.baseURL || `${window.location.origin}/api/v1`;
-    let baseUrl: URL;
-    try {
-      baseUrl = new URL(httpBase);
-    } catch (error) {
-      console.warn("無法解析 API 基底網址，改用 window.location:", error);
-      baseUrl = new URL(`${window.location.origin}/api/v1`);
-    }
-    const origin = baseUrl.origin;
-    const apiPrefix = baseUrl.pathname.replace(/\/$/, "");
-
-    const buildWebSocketUrl = (targetPath: string) => {
-      const ensureLeadingSlash = (value: string) => (value.startsWith("/") ? value : `/${value}`);
-      const normalizePath = (value: string) => {
-        const withSlash = ensureLeadingSlash(value);
-        if (!apiPrefix || withSlash.startsWith(apiPrefix)) {
-          return withSlash;
-        }
-        return `${apiPrefix}${withSlash}`.replace(/\/{2,}/g, "/");
-      };
-
-      try {
-        if (/^wss?:\/\//i.test(targetPath)) {
-          return targetPath;
-        }
-        if (/^https?:\/\//i.test(targetPath)) {
-          const directUrl = new URL(targetPath);
-          directUrl.protocol = directUrl.protocol === "https:" ? "wss:" : "ws:";
-          directUrl.search = "";
-          directUrl.hash = "";
-          return directUrl.toString();
-        }
-        const url = new URL(normalizePath(targetPath), origin);
-        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-        url.search = "";
-        url.hash = "";
-        return url.toString();
-      } catch (error) {
-        console.warn("建構 WebSocket URL 失敗，改用預設路徑:", error);
-        const fallback = new URL(normalizePath(`/frontend/analysis/live-person-camera/${taskId}/ws`), origin);
-        fallback.protocol = fallback.protocol === "https:" ? "wss:" : "ws:";
-        fallback.search = "";
-        fallback.hash = "";
-        return fallback.toString();
-      }
-    };
-
-    const socketUrl = buildWebSocketUrl(
-      websocketPath ?? `/frontend/analysis/live-person-camera/${taskId}/ws`
-    );
-    console.log("Live Person Camera WebSocket 連線中:", socketUrl);
-    const socket = new WebSocket(socketUrl);
-    wsRef.current = socket;
-
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload?.type === "frame") {
-          const rawDetections = Array.isArray(payload.detections) ? payload.detections : [];
-          const normalizedDetections: LiveDetection[] = rawDetections
-            .filter((item: any) => Array.isArray(item?.bbox) && item.bbox.length === 4)
-            .map((item: any) => ({
-              bbox: [
-                Number(item.bbox[0]) || 0,
-                Number(item.bbox[1]) || 0,
-                Number(item.bbox[2]) || 0,
-                Number(item.bbox[3]) || 0,
-              ],
-              label: typeof item.label === "string" ? item.label : undefined,
-              confidence: typeof item.confidence === "number" ? item.confidence : undefined,
-              tracker_id:
-                typeof item.tracker_id === "number" || typeof item.tracker_id === "string"
-                  ? Number(item.tracker_id)
-                  : undefined,
-            }));
-
-          setLiveDetections({
-            detections: normalizedDetections,
-            width: typeof payload.width === "number" ? payload.width : 0,
-            height: typeof payload.height === "number" ? payload.height : 0,
-            image: typeof payload.image === "string" ? payload.image : undefined,
-            timestamp: typeof payload.timestamp === "number" ? payload.timestamp : undefined,
-          });
-          setDetectionError(null);
-        } else if (payload?.type === "error") {
-          setDetectionError(payload.message || "Live Person Camera 傳回錯誤");
-        }
-      } catch (error) {
-        console.error("解析 Live Person Camera 訊息失敗:", error);
-      }
-    };
-
-    socket.onerror = () => {
-      setDetectionError("Live Person Camera WebSocket 發生錯誤");
-      socket.close();
-    };
-
-    socket.onclose = () => {
-      if (wsRef.current === socket) {
-        wsRef.current = null;
-      }
-    };
-  }, [closeLivePersonWebSocket]);
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -272,17 +146,44 @@ export function DetectionAnalysisOriginal() {
     };
   }, [handleDevicesUpdated]);
 
-  useEffect(() => {
-    return () => {
-      closeLivePersonWebSocket();
-    };
-  }, [closeLivePersonWebSocket]);
-
   // 獲取所有分析任務（不限制狀態，包含所有任務）
   const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
   
   // 獲取運行中的任務
   const runningTasks = allTasksData?.tasks || [];
+
+  const realtimeAnalysisTasks = useMemo(() => {
+    return (runningTasks ?? [])
+      .filter((task) => task.task_type === "realtime_camera")
+      .map((task) => {
+        const sourceInfo = task.source_info || {};
+        const stats = sourceInfo.statistics || {};
+        const lineStats = stats.line || stats.crossing || {};
+        const dwellStats = stats.zone || stats.dwell || {};
+        return {
+          id: task.id,
+          camera:
+            sourceInfo.camera_name ||
+            sourceInfo.camera_id ||
+            task.task_name ||
+            `任務 ${task.id}`,
+          detectedPeople:
+            stats.detected_people ??
+            stats.people_count ??
+            0,
+          crossingLine: {
+            in: lineStats.in ?? lineStats.enter ?? 0,
+            out: lineStats.out ?? lineStats.leave ?? 0,
+          },
+          dwellArea: {
+            current: dwellStats.current ?? dwellStats.count ?? 0,
+            avgDuration: formatDuration(dwellStats.avg ?? dwellStats.avg_duration ?? dwellStats.average),
+            maxDuration: formatDuration(dwellStats.max ?? dwellStats.max_duration),
+          },
+        };
+      });
+  }, [runningTasks]);
+
 
   // 真實數據獲取
   const { data: yoloModels, isLoading: modelsLoading, error: modelsError, refetch: refetchModels } = useYoloModelList();
@@ -385,26 +286,6 @@ export function DetectionAnalysisOriginal() {
   const selectedCameraInfo = cameraOptions.find(
     (camera) => camera.id?.toString() === selectedCamera
   );
-
-  const handleBlurToggle = (value: boolean) => {
-    setBlurEnabled(value);
-  };
-
-  const handleTraceToggle = (value: boolean) => {
-    setTraceEnabled(value);
-  };
-
-  const handleHeatmapToggle = (value: boolean) => {
-    setHeatmapEnabled(value);
-  };
-
-  const handleLineToggle = (value: boolean) => {
-    setEntranceExitEnabled(value);
-  };
-
-  const handleZoneToggle = (value: boolean) => {
-    setDwellTimeEnabled(value);
-  };
 
   // 模擬分析結果數據
   const analysisResults = [
@@ -669,11 +550,8 @@ export function DetectionAnalysisOriginal() {
     }
 
     try {
-      setLivePersonTaskId(null);
       setIsLivePersonCameraRunning(false);
-      setLiveDetections(null);
-      setDetectionError(null);
-      closeLivePersonWebSocket();
+      setLivePersonTaskId(null);
 
       const requestData: LivePersonCameraRequest = {
         task_name: `LivePerson_${new Date().toLocaleString()}`,
@@ -691,34 +569,35 @@ export function DetectionAnalysisOriginal() {
       console.log('Live Person Camera 分析已開始:', result);
       setIsLivePersonCameraRunning(true);
       setLivePersonTaskId(result.task_id ?? null);
-      if (result.task_id) {
-        openLivePersonWebSocket(result.task_id, result.websocket_url ?? undefined);
-      }
-      setDetectionError(null);
+      refetchTasks();
     } catch (error) {
       console.error('開始 Live Person Camera 失敗:', error);
       setIsLivePersonCameraRunning(false);
       setLivePersonTaskId(null);
-      setDetectionError('開始即時分析失敗，請稍後重試');
+      alert('開始即時分析失敗，請稍後重試');
     }
+  };
+
+  const handleOpenPreviewWindow = (taskId: number) => {
+    console.log("請於本機查看 OpenCV 預覽視窗", taskId);
+    alert("請於本機查看 OpenCV 預覽視窗。若未自動開啟，請確認即時分析任務已啟動。");
   };
 
   const handleStopLivePersonCamera = async () => {
     if (!livePersonTaskId) {
+      alert('目前沒有運行中的即時分析');
       return;
     }
 
     try {
       await stopLivePersonCameraMutation.mutateAsync(livePersonTaskId);
-      setDetectionError(null);
+      refetchTasks();
     } catch (error) {
       console.error('停止 Live Person Camera 失敗:', error);
-      setDetectionError('停止即時分析失敗，請稍後重試');
+      alert('停止即時分析失敗，請稍後重試');
     } finally {
       setIsLivePersonCameraRunning(false);
       setLivePersonTaskId(null);
-      setLiveDetections(null);
-      closeLivePersonWebSocket();
     }
   };
 
@@ -1046,18 +925,19 @@ export function DetectionAnalysisOriginal() {
                 <div className="space-y-4">
                   <div>
                     <Label htmlFor="camera-select">選擇攝影機</Label>
-                    <Select
-                      value={selectedCamera}
-                      onValueChange={(value) => setSelectedCamera(value)}
-                    >
+                    <Select value={selectedCamera} onValueChange={setSelectedCamera}>
                       <SelectTrigger>
                         <SelectValue placeholder={isCamerasLoading ? "載入攝影機列表中..." : "選擇要分析的攝影機"} />
                       </SelectTrigger>
                       <SelectContent>
                         {isCamerasLoading ? (
-                          <SelectItem value="loading" disabled>載入中...</SelectItem>
+                          <SelectItem value="loading" disabled>
+                            載入中...
+                          </SelectItem>
                         ) : isCamerasError ? (
-                          <SelectItem value="error" disabled>載入攝影機列表失敗</SelectItem>
+                          <SelectItem value="error" disabled>
+                            載入攝影機列表失敗
+                          </SelectItem>
                         ) : cameraOptions.length > 0 ? (
                           cameraOptions.map((camera, index) => (
                             <SelectItem
@@ -1095,7 +975,9 @@ export function DetectionAnalysisOriginal() {
                             </SelectItem>
                           ))
                         ) : (
-                          <SelectItem value="no-models" disabled>無可用模型</SelectItem>
+                          <SelectItem value="no-models" disabled>
+                            無可用模型
+                          </SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -1105,11 +987,13 @@ export function DetectionAnalysisOriginal() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label htmlFor="confidence-threshold-realtime">信心度閾值</Label>
-                        <span className="text-sm text-muted-foreground">{confidenceThreshold.toFixed(1)}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {confidenceThreshold.toFixed(1)}
+                        </span>
                       </div>
                       <input
-                        type="range"
                         id="confidence-threshold-realtime"
+                        type="range"
                         min="0.1"
                         max="1"
                         step="0.1"
@@ -1118,269 +1002,105 @@ export function DetectionAnalysisOriginal() {
                         className="w-full"
                       />
                     </div>
-                    
+
                     <div className="flex items-center justify-between">
                       <Label htmlFor="auto-alert">自動警報</Label>
                       <Switch id="auto-alert" />
                     </div>
-                    
-                    
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <Button 
-                      className="w-full sm:w-auto" 
+                    <Button
+                      className="w-full sm:w-auto"
                       onClick={handleStartLivePersonCamera}
                       disabled={isLivePersonCameraRunning || startLivePersonCameraMutation.isPending}
                     >
                       <Activity className="h-4 w-4 mr-2" />
-                      {isLivePersonCameraRunning || startLivePersonCameraMutation.isPending ? '分析中...' : '開始即時分析'}
-                    </Button>
-                    <Button
-                      className="w-full sm:w-auto"
-                      variant="outline"
-                      onClick={handleStopLivePersonCamera}
-                      disabled={!isLivePersonCameraRunning || stopLivePersonCameraMutation.isPending}
-                    >
-                      <Square className="h-4 w-4 mr-2" />
-                      {stopLivePersonCameraMutation.isPending ? '停止中...' : '停止即時分析'}
+                      {isLivePersonCameraRunning || startLivePersonCameraMutation.isPending
+                        ? "分析中..."
+                        : "開始即時分析"}
                     </Button>
                   </div>
-                  {isLivePersonCameraRunning && liveDetections && (
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>目前偵測物件</span>
-                      <span>{liveDetections.detections.length}</span>
-                    </div>
-                  )}
-                  {detectionError && (
-                    <p className="text-xs text-destructive">{detectionError}</p>
-                  )}
                 </div>
 
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <h4 className="font-medium">即時分析預覽</h4>
-                    <RealtimePreview
-                      running={isLivePersonCameraRunning}
-                      cameraName={selectedCameraInfo?.name}
-                      cameraInfo={selectedCameraInfo ?? null}
-                      detectionFrame={isLivePersonCameraRunning ? liveDetections : null}
-                      taskId={livePersonTaskId}
-                      onDevicesUpdated={handleDevicesUpdated}
-                      onUploadError={(message) => setDetectionError(message)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <h4 className="font-medium">顯示功能</h4>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="mosaic-toggle">馬賽克</Label>
-                        <Switch 
-                          id="mosaic-toggle"
-                          checked={blurEnabled}
-                          onCheckedChange={handleBlurToggle}
-                        />
+                <div className="space-y-6">
+                  <section className="space-y-3">
+                    <h4 className="font-medium">即時分析任務</h4>
+                    {realtimeAnalysisTasks.length === 0 ? (
+                      <div className="rounded-lg border border-dashed py-10 text-center text-muted-foreground">
+                        <Activity className="h-10 w-10 mx-auto mb-3 opacity-60" />
+                        目前沒有運行中的即時分析任務
                       </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="trajectory-toggle">移動軌跡</Label>
-                        <Switch 
-                          id="trajectory-toggle"
-                          checked={traceEnabled}
-                          onCheckedChange={handleTraceToggle}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="heatmap-toggle">熱力圖</Label>
-                        <Switch 
-                          id="heatmap-toggle"
-                          checked={heatmapEnabled}
-                          onCheckedChange={handleHeatmapToggle}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="entrance-exit-toggle">出入計數</Label>
-                        <div className="flex items-center gap-2">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button variant="outline" size="sm">
-                                <Settings className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-4xl">
-                              <DialogHeader>
-                                <DialogTitle>配置出入計數偵測線</DialogTitle>
-                              </DialogHeader>
-                              <div className="flex gap-4 h-96">
-                                <div className="flex-1 bg-black rounded-lg flex items-center justify-center">
-                                  <div className="text-center text-white">
-                                    <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                                    <p>攝影機畫面</p>
-                                    <p className="text-sm opacity-75">在此處劃設偵測線</p>
-                                  </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {realtimeAnalysisTasks.map((task) => (
+                          <div key={task.id} className="border rounded-lg p-4 space-y-4">
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-2">
+                                <Camera className="h-5 w-5 text-primary" />
+                                <div>
+                                  <p className="font-medium">{task.camera}</p>
+                                  <Badge variant="outline" className="mt-1">
+                                    <Activity className="h-3 w-3 mr-1" />
+                                    運行中
+                                  </Badge>
                                 </div>
-                                <div className="w-48 space-y-4">
-                                  <div>
-                                    <h4 className="font-medium mb-2">繪圖工具</h4>
-                                    <div className="space-y-2">
-                                      <Button variant="outline" className="w-full justify-start">
-                                        <MousePointer className="h-4 w-4 mr-2" />
-                                        選擇
-                                      </Button>
-                                      <Button variant="outline" className="w-full justify-start">
-                                        <Minus className="h-4 w-4 mr-2" />
-                                        劃線
-                                      </Button>
-                                    </div>
+                              </div>
+                              <Button variant="outline" size="sm" onClick={() => handleOpenPreviewWindow(task.id)}>
+                                <Monitor className="h-4 w-4 mr-2" />
+                                打開預覽
+                              </Button>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <Users className="h-4 w-4" />
+                                  偵測人數
+                                </div>
+                                <p className="text-2xl">{task.detectedPeople}</p>
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <ArrowLeftRight className="h-4 w-4" />
+                                  穿越線
+                                </div>
+                                <div className="flex items-baseline gap-2">
+                                  <span className="text-sm text-muted-foreground">進:</span>
+                                  <span className="text-lg">{task.crossingLine.in}</span>
+                                  <span className="text-sm text-muted-foreground">出:</span>
+                                  <span className="text-lg">{task.crossingLine.out}</span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <Timer className="h-4 w-4" />
+                                  停留區
+                                </div>
+                                <div className="space-y-0.5">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">目前:</span>
+                                    <span>{task.dwellArea.current}人</span>
                                   </div>
-                                  <div>
-                                    <h4 className="font-medium mb-2">線條設定</h4>
-                                    <div className="space-y-2">
-                                      <div>
-                                        <Label htmlFor="line-name">線條名稱</Label>
-                                        <Input id="line-name" placeholder="入口線" />
-                                      </div>
-                                      <div>
-                                        <Label htmlFor="line-direction">計數方向</Label>
-                                        <Select>
-                                          <SelectTrigger>
-                                            <SelectValue placeholder="選擇方向" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="both">雙向</SelectItem>
-                                            <SelectItem value="in">僅進入</SelectItem>
-                                            <SelectItem value="out">僅離開</SelectItem>
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                    </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">平均:</span>
+                                    <span>{task.dwellArea.avgDuration}</span>
                                   </div>
-                                  <div className="flex gap-2">
-                                    <Button variant="outline" size="sm">
-                                      <RotateCcw className="h-4 w-4 mr-1" />
-                                      重置
-                                    </Button>
-                                    <Button size="sm">
-                                      <Save className="h-4 w-4 mr-1" />
-                                      儲存
-                                    </Button>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">最長:</span>
+                                    <span>{task.dwellArea.maxDuration}</span>
                                   </div>
                                 </div>
                               </div>
-                            </DialogContent>
-                          </Dialog>
-                          <Switch 
-                            id="entrance-exit-toggle" 
-                            checked={entranceExitEnabled}
-                            onCheckedChange={handleLineToggle}
-                          />
-                        </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="dwell-time-toggle">區域停留時間</Label>
-                        <div className="flex items-center gap-2">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button variant="outline" size="sm">
-                                <Settings className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-4xl">
-                              <DialogHeader>
-                                <DialogTitle>配置區域停留時間偵測區域</DialogTitle>
-                              </DialogHeader>
-                              <div className="flex gap-4 h-96">
-                                <div className="flex-1 bg-black rounded-lg flex items-center justify-center">
-                                  <div className="text-center text-white">
-                                    <Camera className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                                    <p>攝影機畫面</p>
-                                    <p className="text-sm opacity-75">在此處劃設偵測區域</p>
-                                  </div>
-                                </div>
-                                <div className="w-48 space-y-4">
-                                  <div>
-                                    <h4 className="font-medium mb-2">繪圖工具</h4>
-                                    <div className="space-y-2">
-                                      <Button variant="outline" className="w-full justify-start">
-                                        <MousePointer className="h-4 w-4 mr-2" />
-                                        選擇
-                                      </Button>
-                                      <Button variant="outline" className="w-full justify-start">
-                                        <Square className="h-4 w-4 mr-2" />
-                                        矩形區域
-                                      </Button>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <h4 className="font-medium mb-2">區域設定</h4>
-                                    <div className="space-y-2">
-                                      <div>
-                                        <Label htmlFor="area-name">區域名稱</Label>
-                                        <Input id="area-name" placeholder="等候區域" />
-                                      </div>
-                                      <div>
-                                        <Label htmlFor="min-dwell-time">最短停留時間（秒）</Label>
-                                        <Input id="min-dwell-time" type="number" placeholder="5" />
-                                      </div>
-                                      <div>
-                                        <Label htmlFor="max-dwell-time">警報時間（秒）</Label>
-                                        <Input id="max-dwell-time" type="number" placeholder="300" />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <Button variant="outline" size="sm">
-                                      <RotateCcw className="h-4 w-4 mr-1" />
-                                      重置
-                                    </Button>
-                                    <Button size="sm">
-                                      <Save className="h-4 w-4 mr-1" />
-                                      儲存
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            </DialogContent>
-                          </Dialog>
-                          <Switch 
-                            id="dwell-time-toggle" 
-                            checked={dwellTimeEnabled}
-                            onCheckedChange={handleZoneToggle}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                    )}
+                  </section>
 
-                  <div className="space-y-2">
-                    <h4 className="font-medium">即時偵測統計</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">人員數量</span>
-                        <p className="text-xl">0</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">平均信心度</span>
-                        <p className="text-xl">0%</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">處理速度</span>
-                        <p className="text-xl">0 FPS</p>
-                      </div>
-                      {entranceExitEnabled && (
-                        <div>
-                          <span className="text-muted-foreground">進入/離開</span>
-                          <p className="text-xl">0/0</p>
-                        </div>
-                      )}
-                      {dwellTimeEnabled && (
-                        <div>
-                          <span className="text-muted-foreground">平均停留時間</span>
-                          <p className="text-xl">0分鐘</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
             </CardContent>
