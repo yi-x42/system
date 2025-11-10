@@ -98,6 +98,12 @@ export function DetectionAnalysisOriginal() {
   const [livePersonTaskId, setLivePersonTaskId] = useState<string | null>(null);
 
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  // 模型檔案選取狀態
+  const [selectedModelFile, setSelectedModelFile] = useState<File | null>(null);
+  const [selectedModelType, setSelectedModelType] = useState<string>("detection");
+  // 模型上傳進度 / 錯誤狀態
+  const [modelUploadPending, setModelUploadPending] = useState<boolean>(false);
+  const [modelUploadError, setModelUploadError] = useState<string | null>(null);
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -398,7 +404,7 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
-  // 文件處理函數
+  // 文件處理函式
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('video/')) {
@@ -433,6 +439,45 @@ export function DetectionAnalysisOriginal() {
     setIsDragging(false);
   };
 
+  // 模型檔案選取 (開啟檔案總管並儲存選擇)
+  const handleModelFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (file) {
+      setSelectedModelFile(file);
+    }
+  };
+
+  // 確認對話框
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<() => Promise<void> | null>(null);
+
+  const handleConfirmOpen = (taskId: string, action: () => Promise<void>) => {
+    setPendingTaskId(taskId);
+    setPendingAction(() => action);
+    setIsConfirmOpen(true);
+  };
+
+  const handleConfirmClose = () => {
+    setPendingTaskId(null);
+    setPendingAction(null);
+    setIsConfirmOpen(false);
+  };
+
+  const handleConfirm = async () => {
+    if (pendingAction) {
+      try {
+        await pendingAction();
+      } catch (error) {
+        console.error('確認操作失敗:', error);
+        alert('操作失敗，請稍後重試');
+      } finally {
+        handleConfirmClose();
+      }
+    }
+  };
+
+  // 影片上傳（被 UI 按鈕呼叫）
   const handleUpload = async () => {
     if (!selectedFile) {
       alert('請選擇影片檔案');
@@ -442,16 +487,50 @@ export function DetectionAnalysisOriginal() {
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
-      
       const result = await uploadVideoMutation.mutateAsync(formData);
       setUploadResult(result);
-      console.log('上傳成功:', result);
-      
-      // 重新載入影片列表
+      console.log('影片上傳成功:', result);
       refetchVideoList();
     } catch (error) {
-      console.error('上傳失敗:', error);
-      alert('上傳失敗，請稍後重試');
+      console.error('影片上傳失敗:', error);
+      alert('影片上傳失敗，請稍後重試');
+    }
+  };
+
+  // 模型上傳（會開啟檔案總管選擇檔案後由此函式上傳到後端）
+  const handleModelUpload = async () => {
+    if (!selectedModelFile) {
+      alert('請選擇模型檔案');
+      return;
+    }
+
+    setModelUploadPending(true);
+    setModelUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedModelFile);
+      formData.append('model_type', selectedModelType);
+
+      const resp = await fetch('/api/models/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText);
+        throw new Error(`上傳失敗: ${resp.status} ${text}`);
+      }
+
+      await resp.json().catch(() => null);
+      alert('模型上傳成功');
+      setSelectedModelFile(null);
+      refetchModels();
+    } catch (err: unknown) {
+      console.error('模型上傳失敗:', err);
+      setModelUploadError(String(err));
+      alert('模型上傳失敗，請稍後重試');
+    } finally {
+      setModelUploadPending(false);
     }
   };
 
@@ -719,7 +798,7 @@ export function DetectionAnalysisOriginal() {
                         // 重置 mutation 狀態
                         uploadVideoMutation.reset();
                         // 重置檔案輸入元素
-                        const fileInput = document.getElementById('video-file') as HTMLInputElement;
+                        const fileInput = document.getElementById('video-file') as HTMLInputElement | null;
                         if (fileInput) {
                           fileInput.value = '';
                         }
@@ -1407,45 +1486,62 @@ export function DetectionAnalysisOriginal() {
                     <Label>模型文件</Label>
                     <div className="border-2 border-dashed border-border rounded-lg p-6 text-center mt-2 hover:border-primary/50 transition-colors">
                       <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground mb-2">
-                        拖拽文件到此處或點擊選擇
-                      </p>
-                      <p className="text-xs text-muted-foreground mb-3">
-                        支援格式: .pt, .onnx, .engine (最大 500MB)
-                      </p>
-                      <Button variant="outline" size="sm">
-                        選擇文件
-                      </Button>
+                      <p className="text-sm text-muted-foreground mb-2">拖拽或選擇模型檔案</p>
+                      <p className="text-xs text-muted-foreground mb-3">支援格式: .pt, .onnx, .engine (最大 500MB)</p>
+
+                      {/* 隱藏 input，按鈕觸發開啟檔案總管 */}
+                      <input
+                        id="model-file"
+                        type="file"
+                        accept=".pt,.onnx,.engine"
+                        onChange={handleModelFileSelect}
+                        className="hidden"
+                      />
+                      <div className="flex items-center justify-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => document.getElementById("model-file")?.click()}
+                        >
+                          選擇文件
+                        </Button>
+                        <div>
+                          <Select value={selectedModelType} onValueChange={setSelectedModelType}>
+                            <SelectTrigger className="h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="detection">物體偵測</SelectItem>
+                              <SelectItem value="classification">分類</SelectItem>
+                              <SelectItem value="segmentation">語義分割</SelectItem>
+                              <SelectItem value="pose">姿態估計</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      {selectedModelFile && (
+                        <div className="mt-3 text-sm">
+                          已選擇: {selectedModelFile.name} ({(selectedModelFile.size / (1024 * 1024)).toFixed(2)} MB)
+                        </div>
+                      )}
                     </div>
                   </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    
-                    <div>
-                      <Label htmlFor="model-type">模型類型</Label>
-                      <Select>
-                        <SelectTrigger className="mt-2">
-                          <SelectValue placeholder="選擇模型類型" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="detection">物體偵測</SelectItem>
-                          <SelectItem value="classification">分類</SelectItem>
-                          <SelectItem value="segmentation">語義分割</SelectItem>
-                          <SelectItem value="pose">姿態估計</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  
-
-                  
 
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline">取消</Button>
-                    <Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedModelFile(null);
+                        setModelUploadError(null);
+                      }}
+                      disabled={modelUploadPending}
+                    >
+                      取消
+                    </Button>
+                    <Button onClick={handleModelUpload} disabled={modelUploadPending || !selectedModelFile}>
                       <Upload className="h-4 w-4 mr-2" />
-                      上傳模型
+                      {modelUploadPending ? '上傳中...' : '上傳模型'}
                     </Button>
                   </div>
                 </div>
