@@ -862,8 +862,7 @@ async def get_task_stats(db: AsyncSession = Depends(get_db), task_service: TaskS
 @router.post("/analysis/start-realtime", response_model=RealtimeAnalysisResponse)
 async def start_realtime_analysis(
     request: RealtimeAnalysisRequest,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """開始即時分析任務"""
     try:
@@ -991,18 +990,38 @@ async def start_realtime_analysis(
             api_logger.error(f"創建任務記錄失敗: {e}")
             raise HTTPException(status_code=500, detail=f"創建任務記錄失敗: {str(e)}")
         
-        # 5. 啟動背景即時檢測任務
-        background_tasks.add_task(
-            run_realtime_detection,
-            task_id=task_id,
-            camera_info=camera_info,
-            model_info=model_info,
-            request=request,
-            db_session_factory=AsyncSessionLocal
-        )
-        
+        # 5. 啟動 PySide6 偵測程式（預設隱藏）
+        if camera_info.get("camera_type") == "USB":
+            source_value = str(camera_info.get("device_index", 0))
+        else:
+            source_value = camera_info.get("rtsp_url") or camera_info.get("id")
+
+        if not source_value:
+            raise HTTPException(status_code=400, detail="無法解析攝影機來源")
+
+        try:
+            realtime_gui_manager.start_detection(
+                task_id=str(task_id),
+                source=source_value,
+                model_path=model_info["path"],
+                window_name=request.task_name or camera_info.get("name"),
+                confidence=request.confidence,
+                imgsz=camera_width,
+                device=None,
+                start_hidden=True,
+            )
+        except Exception as exc:
+            api_logger.error(f"啟動 PySide6 偵測程式失敗: {exc}")
+            raise HTTPException(
+                status_code=500, detail=f"偵測程式啟動失敗：{exc}"
+            ) from exc
+
+        analysis_task.status = "running"
+        analysis_task.start_time = datetime.utcnow()
+        await db.commit()
+
         api_logger.info(f"即時分析任務 {task_id} 已啟動")
-        
+
         return RealtimeAnalysisResponse(
             task_id=str(task_id),
             status="started",
@@ -1011,17 +1030,17 @@ async def start_realtime_analysis(
                 "id": camera_info["id"],
                 "name": camera_info.get("name", ""),
                 "resolution": f"{camera_width}x{camera_height}",
-                "fps": camera_fps
+                "fps": camera_fps,
             },
             model_info={
                 "id": model_info["id"],
                 "filename": model_info["filename"],
                 "confidence": request.confidence,
-                "iou_threshold": request.iou_threshold
+                "iou_threshold": request.iou_threshold,
             },
             created_at=datetime.utcnow(),
-            websocket_url=f"/api/v1/frontend/analysis/live-person-camera/{task_id}/ws",
-            client_stream=request.client_stream,
+            websocket_url=None,
+            client_stream=False,
         )
         
     except HTTPException:
@@ -3227,29 +3246,24 @@ async def launch_live_person_preview_gui(
             raise HTTPException(status_code=400, detail=f"任務狀態為 {task.status}，無法開啟預覽")
 
         source_info = task.source_info or {}
-        if source_info.get("client_stream"):
-            api_logger.warning(
-                f"任務 {task_id} 標記為 client_stream，但仍嘗試啟動本地 GUI 預覽，將依影像來源推測處理"
-            )
-
         payload = request or PreviewLaunchRequest()
 
-        # 解析影像來源
-        source_value: Optional[str] = None
         if payload.source_override:
             source_value = payload.source_override
         else:
+            source_value = None
             device_index = source_info.get("device_index")
+            rtsp_url = (
+                source_info.get("rtsp_url")
+                or source_info.get("camera_url")
+                or source_info.get("stream_url")
+            )
             if device_index is not None:
                 source_value = str(device_index)
-            else:
-                rtsp_url = (
-                    source_info.get("rtsp_url")
-                    or source_info.get("camera_url")
-                    or source_info.get("stream_url")
-                )
-                if rtsp_url:
-                    source_value = str(rtsp_url)
+            elif rtsp_url:
+                source_value = str(rtsp_url)
+            elif source_info.get("camera_type") == "USB":
+                source_value = str(source_info.get("camera_id"))
 
         if not source_value and source_info.get("camera_id"):
             camera_service = CameraService()
@@ -3263,24 +3277,22 @@ async def launch_live_person_preview_gui(
         if not source_value:
             raise HTTPException(status_code=400, detail="找不到可用的影像來源，請先確認攝影機設定")
 
-        # 解析模型路徑
         model_path = payload.model_override or source_info.get("model_path")
         if model_path and not os.path.exists(model_path):
-            api_logger.warning("指定的模型檔不存在，改用預設值: %s", model_path)
+            api_logger.warning(f"指定的模型檔不存在，改用預設值: {model_path}")
             model_path = None
 
-        imgsz_value: Optional[int] = None
-        if payload.imgsz:
-            imgsz_value = payload.imgsz
-        elif source_info.get("imgsz"):
-            imgsz_value = int(source_info["imgsz"])
-
+        imgsz_value = payload.imgsz or source_info.get("imgsz")
+        if imgsz_value is not None:
+            try:
+                imgsz_value = int(imgsz_value)
+            except (TypeError, ValueError):
+                imgsz_value = None
         confidence_value = (
             payload.confidence
             if payload.confidence is not None
             else task.confidence_threshold
         )
-
         window_name = (
             task.task_name
             or source_info.get("camera_name")
@@ -3288,30 +3300,38 @@ async def launch_live_person_preview_gui(
         )
 
         try:
-            launch_result = realtime_gui_manager.launch_preview(
-                task_id=str(task_id),
+            detection_status = realtime_gui_manager.start_detection(
+                task_id=str(task.id),
                 source=source_value,
                 model_path=model_path,
                 window_name=window_name,
                 confidence=confidence_value,
                 imgsz=imgsz_value,
                 device=payload.device or source_info.get("device"),
+                start_hidden=False,
             )
-        except RuntimeError as exc:
+        except Exception as exc:
+            api_logger.error(f"啟動/確認偵測子行程失敗: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc))
+
+        try:
+            show_result = realtime_gui_manager.show_window(str(task.id))
+        except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+        already_running = detection_status.get("already_running", False)
         message = (
-            f"{window_name} 的 GUI 預覽已啟動 (PID {launch_result['pid']})"
-            if not launch_result["already_running"]
-            else f"{window_name} 的 GUI 預覽已在執行 (PID {launch_result['pid']})"
+            f"{window_name} 的 GUI 預覽已在執行 (PID {show_result['pid']})"
+            if already_running
+            else f"{window_name} 的 GUI 預覽已啟動 (PID {show_result['pid']})"
         )
 
         return PreviewLaunchResponse(
             task_id=task.id,
-            pid=int(launch_result["pid"]),
-            already_running=bool(launch_result["already_running"]),
+            pid=int(show_result["pid"]),
+            already_running=already_running,
             message=message,
-            log_path=launch_result.get("log_path"),
+            log_path=show_result.get("log_path"),
         )
     except HTTPException:
         raise
@@ -3322,6 +3342,32 @@ async def launch_live_person_preview_gui(
         api_logger.error(f"啟動 GUI 預覽失敗: {exc}")
         raise HTTPException(status_code=500, detail=f"啟動 GUI 預覽失敗: {exc}")
 
+
+@router.delete("/analysis/live-person-camera/{task_id}")
+async def stop_live_person_camera(task_id: int, db: AsyncSession = Depends(get_db)):
+    """停止指定即時偵測任務與其 PySide6 子行程"""
+    try:
+        stopped = realtime_gui_manager.stop_process(str(task_id))
+        if not stopped:
+            raise HTTPException(status_code=404, detail="找不到對應的偵測行程")
+
+        await db.execute(
+            update(AnalysisTask)
+            .where(AnalysisTask.id == int(task_id))
+            .values(status="stopped", end_time=datetime.utcnow())
+        )
+        await db.commit()
+
+        return {
+            "task_id": task_id,
+            "status": "stopped",
+            "message": "偵測任務與 GUI 子行程已停止",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        api_logger.error(f"停止偵測任務失敗: {exc}")
+        raise HTTPException(status_code=500, detail=f"停止偵測失敗: {exc}")
 
 
 

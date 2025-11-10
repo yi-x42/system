@@ -1,36 +1,35 @@
 """
-PySide6 即時預覽 GUI 啟動管理器
+PySide6 即時偵測子行程管理器
 
-負責從後端觸發 `app/gui/realtime_detection_gui.py`，並記錄
-各任務對應的 GUI 子行程，避免重複啟動。
+負責啟動 `app/gui/realtime_detection_gui.py`，並透過控制通道
+顯示/隱藏視窗或關閉偵測。
 """
 
 from __future__ import annotations
 
+import json
 import os
+import secrets
+import socket
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
 from app.core.logger import detection_logger
 
 
+@dataclass
 class PreviewProcessRecord:
-    """簡易容器，記錄 GUI 行程資訊與啟動指令。"""
-
-    def __init__(
-        self,
-        process: subprocess.Popen,
-        command: list[str],
-        log_path: Optional[Path] = None,
-    ) -> None:
-        self.process = process
-        self.command = command
-        self.started_at = time.time()
-        self.log_path = log_path
+    process: subprocess.Popen
+    command: list[str]
+    log_path: Path
+    control_port: Optional[int] = None
+    control_token: Optional[str] = None
+    start_hidden: bool = True
 
     @property
     def pid(self) -> int:
@@ -40,15 +39,17 @@ class PreviewProcessRecord:
         return self.process.poll() is None
 
 
-class RealtimePreviewGuiManager:
-    """管理 PySide6 即時預覽 GUI 的子行程。"""
+class RealtimeDetectionProcessManager:
+    """管理 PySide6 偵測程式（隱藏 + GUI 預覽）。"""
 
     def __init__(self) -> None:
         self._processes: Dict[str, PreviewProcessRecord] = {}
         self._lock = threading.Lock()
 
     def _script_path(self) -> Path:
-        script_path = Path(__file__).resolve().parents[1] / "gui" / "realtime_detection_gui.py"
+        script_path = (
+            Path(__file__).resolve().parents[1] / "gui" / "realtime_detection_gui.py"
+        )
         if not script_path.exists():
             raise FileNotFoundError(f"找不到 GUI 腳本：{script_path}")
         return script_path
@@ -69,43 +70,26 @@ class RealtimePreviewGuiManager:
             data = fp.read().decode("utf-8", errors="ignore")
         return data.strip()
 
-    def _cleanup_if_needed(self, task_id: str) -> None:
-        record = self._processes.get(task_id)
-        if record and not record.is_running():
-            detection_logger.info(
-                f"移除已結束的 GUI 子行程: task_id={task_id} pid={record.pid}"
-            )
-            self._processes.pop(task_id, None)
+    @staticmethod
+    def _reserve_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
 
-    def launch_preview(
+    def _build_command(
         self,
-        task_id: str,
-        source: str,
-        model_path: Optional[str] = None,
         *,
-        window_name: Optional[str] = None,
-        confidence: Optional[float] = None,
-        imgsz: Optional[int] = None,
-        device: Optional[str] = None,
-    ) -> Dict[str, object]:
-        """
-        啟動（或返回既有）GUI 預覽視窗。
-        """
-        with self._lock:
-            self._cleanup_if_needed(task_id)
-            existing = self._processes.get(task_id)
-            if existing and existing.is_running():
-                detection_logger.info(
-                    f"GUI 已在執行，直接返回: task_id={task_id} pid={existing.pid}"
-                )
-                return {
-                    "pid": existing.pid,
-                    "already_running": True,
-                    "command": existing.command,
-                }
-
-        script_path = self._script_path()
-        command: list[str] = [sys.executable, str(script_path), "--source", str(source)]
+        source: str,
+        model_path: Optional[str],
+        window_name: Optional[str],
+        confidence: Optional[float],
+        imgsz: Optional[int],
+        device: Optional[str],
+        start_hidden: bool,
+        control_port: Optional[int],
+        control_token: Optional[str],
+    ) -> list[str]:
+        command: list[str] = [sys.executable, str(self._script_path()), "--source", str(source)]
 
         if model_path:
             command += ["--model", str(model_path)]
@@ -117,12 +101,26 @@ class RealtimePreviewGuiManager:
             command += ["--device", str(device)]
         if window_name:
             command += ["--window-name", window_name]
+        if start_hidden:
+            command.append("--start-hidden")
+        if control_port:
+            command += [
+                "--control-host",
+                "127.0.0.1",
+                "--control-port",
+                str(control_port),
+            ]
+        if control_token:
+            command += ["--control-token", control_token]
+        return command
 
-        detection_logger.info(f"啟動 GUI 子行程: {' '.join(command)}")
-
+    def _spawn_process(
+        self,
+        task_id: str,
+        command: list[str],
+    ) -> PreviewProcessRecord:
         log_path = self._logs_dir() / f"task_{task_id}.log"
         log_handle = log_path.open("wb")
-
         creationflags = 0
         startupinfo = None
         if os.name == "nt":
@@ -130,6 +128,7 @@ class RealtimePreviewGuiManager:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
+        detection_logger.info(f"啟動偵測子行程: {' '.join(command)}")
         process = subprocess.Popen(  # noqa: S603
             command,
             stdout=log_handle,
@@ -140,48 +139,132 @@ class RealtimePreviewGuiManager:
         )
         log_handle.close()
 
-        # 確認是否順利啟動；若立即結束，回報錯誤並檢視日誌
         time.sleep(0.5)
         if process.poll() is not None:
             log_excerpt = self._read_log_tail(log_path)
             detection_logger.error(
-                f"GUI 子行程啟動失敗 (exit={process.returncode})，詳見 {log_path}"
+                f"偵測子行程啟動失敗 (exit={process.returncode})，詳見 {log_path}"
             )
             raise RuntimeError(
-                f"GUI 子行程啟動失敗，請查看 {log_path}。\n"
+                f"偵測子行程啟動失敗，請查看 {log_path}。\n"
                 f"最近訊息：{log_excerpt or '無'}"
             )
 
-        record = PreviewProcessRecord(process, command, log_path=log_path)
+        return PreviewProcessRecord(
+            process=process,
+            command=command,
+            log_path=log_path,
+        )
+
+    def _cleanup_if_needed(self, task_id: str) -> None:
+        record = self._processes.get(task_id)
+        if record and not record.is_running():
+            detection_logger.info(
+                f"移除已結束的偵測子行程: task_id={task_id} pid={record.pid}"
+            )
+            self._processes.pop(task_id, None)
+
+    def start_detection(
+        self,
+        task_id: str,
+        *,
+        source: str,
+        model_path: Optional[str] = None,
+        window_name: Optional[str] = None,
+        confidence: Optional[float] = None,
+        imgsz: Optional[int] = None,
+        device: Optional[str] = None,
+        start_hidden: bool = True,
+    ) -> Dict[str, object]:
+        """啟動（或返回已存在的）偵測子行程。"""
         with self._lock:
+            self._cleanup_if_needed(task_id)
+            existing = self._processes.get(task_id)
+            if existing and existing.is_running():
+                return {
+                    "pid": existing.pid,
+                    "already_running": True,
+                    "log_path": str(existing.log_path),
+                }
+
+            control_port = self._reserve_port()
+            control_token = secrets.token_hex(16)
+            command = self._build_command(
+                source=source,
+                model_path=model_path,
+                window_name=window_name,
+                confidence=confidence,
+                imgsz=imgsz,
+                device=device,
+                start_hidden=start_hidden,
+                control_port=control_port,
+                control_token=control_token,
+            )
+            record = self._spawn_process(task_id, command)
+            record.control_port = control_port
+            record.control_token = control_token
+            record.start_hidden = start_hidden
             self._processes[task_id] = record
 
         return {
             "pid": record.pid,
             "already_running": False,
-            "command": record.command,
-            "log_path": str(log_path),
+            "log_path": str(record.log_path),
+            "control_port": control_port,
+            "control_token": control_token,
         }
 
-    def stop_preview(self, task_id: str) -> bool:
-        """結束指定任務的 GUI 行程。"""
+    def _send_control_command(self, record: PreviewProcessRecord, action: str) -> None:
+        if not record.control_port:
+            raise RuntimeError("此子行程未啟用控制通道，無法切換顯示狀態")
+
+        payload = json.dumps(
+            {"action": action, "token": record.control_token}
+        ).encode("utf-8")
+
+        with socket.create_connection(("127.0.0.1", record.control_port), timeout=3) as conn:
+            conn.sendall(payload)
+            try:
+                conn.recv(1024)
+            except socket.timeout:
+                pass
+
+    def show_window(self, task_id: str) -> Dict[str, object]:
+        with self._lock:
+            record = self._processes.get(task_id)
+
+        if not record or not record.is_running():
+            raise RuntimeError("找不到對應的偵測子行程，請重新啟動任務")
+
+        self._send_control_command(record, "show")
+        return {
+            "pid": record.pid,
+            "log_path": str(record.log_path),
+        }
+
+    def stop_process(self, task_id: str) -> bool:
         with self._lock:
             record = self._processes.pop(task_id, None)
 
         if not record:
             return False
 
-        process = record.process
-        if process.poll() is None:
-            detection_logger.info(
-                f"結束 GUI 子行程: task_id={task_id} pid={process.pid}"
-            )
-            process.terminate()
+        if record.is_running():
             try:
-                process.wait(timeout=5)
+                self._send_control_command(record, "shutdown")
+                record.process.wait(timeout=5)
+            except Exception:
+                detection_logger.warning(
+                    f"透過控制通道結束子行程失敗，嘗試強制終止 task_id={task_id}"
+                )
+
+        if record.process.poll() is None:
+            record.process.terminate()
+            try:
+                record.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
+                record.process.kill()
         return True
 
 
-realtime_gui_manager = RealtimePreviewGuiManager()
+realtime_gui_manager = RealtimeDetectionProcessManager()

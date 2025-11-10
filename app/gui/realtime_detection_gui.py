@@ -10,7 +10,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
+import secrets
+import socket
 import sys
 import threading
 import time
@@ -86,6 +89,80 @@ def _to_qimage(frame: np.ndarray) -> QtGui.QImage:
         rgb.data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888
     )
     return image.copy()
+
+
+class ControlCommandServer(threading.Thread):
+    """接收後端指令以顯示/隱藏/關閉 GUI 視窗。"""
+
+    def __init__(
+        self,
+        window: "MainWindow",
+        host: str,
+        port: int,
+        token: str | None = None,
+    ) -> None:
+        super().__init__(daemon=True)
+        self._window = window
+        self._host = host
+        self._port = port
+        self._token = token
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        try:
+            with socket.create_connection((self._host, self._port), timeout=1):
+                pass
+        except Exception:
+            pass
+
+    def run(self) -> None:  # noqa: D401
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind((self._host, self._port))
+            server.listen(2)
+
+            while not self._stop_event.is_set():
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    break
+                with conn:
+                    try:
+                        payload_raw = conn.recv(4096)
+                        if not payload_raw:
+                            continue
+                        payload = json.loads(payload_raw.decode("utf-8"))
+                    except Exception:
+                        continue
+
+                    if self._token and payload.get("token") != self._token:
+                        continue
+
+                    action = payload.get("action")
+                    if action == "show":
+                        QtCore.QMetaObject.invokeMethod(
+                            self._window,
+                            "handle_control_show",
+                            QtCore.Qt.QueuedConnection,
+                        )
+                        conn.sendall(b"OK")
+                    elif action == "hide":
+                        QtCore.QMetaObject.invokeMethod(
+                            self._window,
+                            "handle_control_hide",
+                            QtCore.Qt.QueuedConnection,
+                        )
+                        conn.sendall(b"OK")
+                    elif action == "shutdown":
+                        QtCore.QMetaObject.invokeMethod(
+                            self._window,
+                            "handle_control_shutdown",
+                            QtCore.Qt.QueuedConnection,
+                        )
+                        conn.sendall(b"OK")
+                    else:
+                        conn.sendall(b"UNKNOWN")
 
 
 class LineConfigDialog(QtWidgets.QDialog):
@@ -1062,6 +1139,10 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._args = args
         self._current_pixmap: QtGui.QPixmap | None = None
+        self._start_hidden = bool(getattr(args, "start_hidden", False))
+        self._allow_window_close = bool(getattr(args, "allow_window_close", False))
+        self._shutdown_requested = False
+        self._control_server: ControlCommandServer | None = None
 
         self.worker = DetectionWorker(args)
         self.worker.frameReady.connect(self.update_image)
@@ -1075,6 +1156,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self.worker.request_scale_status()
         self.worker.start()
+
+    def attach_control_server(self, server: ControlCommandServer) -> None:
+        self._control_server = server
 
     def _build_ui(self) -> None:
         self.setWindowTitle(self._args.window_name or "Supervision Live")
@@ -1437,14 +1521,49 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.critical(self, "執行錯誤", message)
         self.close()
 
+    @QtCore.Slot()
+    def handle_control_show(self) -> None:
+        if self.isVisible():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+    @QtCore.Slot()
+    def handle_control_hide(self) -> None:
+        self.hide()
+        if self.status_bar:
+            self.status_bar.showMessage("視窗已隱藏，偵測仍在運行。", 5000)
+
+    @QtCore.Slot()
+    def handle_control_shutdown(self) -> None:
+        self._shutdown_requested = True
+        self.close()
+
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         if self._current_pixmap is not None:
             self._set_video_pixmap(self._current_pixmap)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802
+        if (
+            self._control_server
+            and not self._shutdown_requested
+            and self._start_hidden
+            and not self._allow_window_close
+        ):
+            event.ignore()
+            self.hide()
+            if self.status_bar:
+                self.status_bar.showMessage("視窗已隱藏，偵測仍在運行。", 5000)
+            return
+
         self.worker.stop()
         self.worker.wait()
+        if self._control_server:
+            self._control_server.stop()
+            self._control_server = None
         super().closeEvent(event)
 
 
@@ -1512,6 +1631,34 @@ def parse_args() -> argparse.Namespace:
         default="Supervision Live",
         help="GUI 視窗標題。",
     )
+    parser.add_argument(
+        "--start-hidden",
+        action="store_true",
+        help="啟動時不顯示 GUI 視窗，但持續執行偵測。",
+    )
+    parser.add_argument(
+        "--control-host",
+        type=str,
+        default="127.0.0.1",
+        help="控制指令伺服器綁定位址（預設 127.0.0.1）。",
+    )
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=None,
+        help="控制指令伺服器埠號；指定後可遠端顯示/隱藏視窗或結束偵測。",
+    )
+    parser.add_argument(
+        "--control-token",
+        type=str,
+        default=None,
+        help="控制指令認證 token，若設定需在指令中提供相同值。",
+    )
+    parser.add_argument(
+        "--allow-window-close",
+        action="store_true",
+        help="允許使用者關閉視窗並終止偵測（預設會改為隱藏）。",
+    )
     return parser.parse_args()
 
 
@@ -1519,7 +1666,19 @@ def main() -> None:
     args = parse_args()
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow(args)
-    window.show()
+    if args.control_port:
+        control_server = ControlCommandServer(
+            window,
+            host=args.control_host,
+            port=args.control_port,
+            token=args.control_token,
+        )
+        window.attach_control_server(control_server)
+        control_server.start()
+    if not args.start_hidden:
+        window.show()
+    else:
+        window.hide()
     sys.exit(app.exec())
 
 
