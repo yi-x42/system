@@ -30,6 +30,7 @@ import {
   useCameras,
   useStartLivePersonCamera,
   useStopLivePersonCamera,
+  useLaunchLivePersonPreview,
   LivePersonCameraRequest,
   useVideoAnalysis,
   CameraInfo,
@@ -197,6 +198,7 @@ export function DetectionAnalysisOriginal() {
   const deleteVideoMutation = useDeleteVideo();
   const startLivePersonCameraMutation = useStartLivePersonCamera();
   const stopLivePersonCameraMutation = useStopLivePersonCamera();
+  const launchLivePersonPreviewMutation = useLaunchLivePersonPreview();
   const videoAnalysisMutation = useVideoAnalysis();
   const stopTaskMutation = useStopAnalysisTask();
   const deleteTaskMutation = useDeleteAnalysisTask();
@@ -578,9 +580,19 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
-  const handleOpenPreviewWindow = (taskId: number) => {
-    console.log("請於本機查看 OpenCV 預覽視窗", taskId);
-    alert("請於本機查看 OpenCV 預覽視窗。若未自動開啟，請確認即時分析任務已啟動。");
+  const handleOpenPreviewWindow = async (taskId: number) => {
+    try {
+      const response = await launchLivePersonPreviewMutation.mutateAsync(String(taskId));
+      const message =
+        response?.message ||
+        (response?.already_running
+          ? "GUI 預覽已在執行。"
+          : "已嘗試開啟 GUI 預覽視窗，請稍候。");
+      alert(message);
+    } catch (error) {
+      console.error("啟動 GUI 預覽失敗:", error);
+      alert("開啟 GUI 預覽失敗，請確認後端服務可顯示視窗後再試一次。");
+    }
   };
 
   const handleStopLivePersonCamera = async () => {
@@ -1046,7 +1058,17 @@ export function DetectionAnalysisOriginal() {
                                   </Badge>
                                 </div>
                               </div>
-                              <Button variant="outline" size="sm" onClick={() => handleOpenPreviewWindow(task.id)}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={
+                                  launchLivePersonPreviewMutation.isPending &&
+                                  launchLivePersonPreviewMutation.variables === String(task.id)
+                                }
+                                onClick={() => {
+                                  void handleOpenPreviewWindow(task.id);
+                                }}
+                              >
                                 <Monitor className="h-4 w-4 mr-2" />
                                 打開預覽
                               </Button>
