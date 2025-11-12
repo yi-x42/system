@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 
 from sqlalchemy import (
     JSON,
@@ -18,7 +19,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, reconstructor
 
 Base = declarative_base()
 
@@ -76,6 +77,17 @@ class AnalysisTask(Base):
         cascade="all, delete-orphan",
     )
 
+    def __init__(self, *args, **kwargs):
+        source_info_payload = kwargs.pop("source_info", None)
+        super().__init__(*args, **kwargs)
+        self._source_info_cache: dict | None = None
+        if source_info_payload is not None:
+            self.source_info = source_info_payload
+
+    @reconstructor
+    def _init_on_load(self):
+        self._source_info_cache = None
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -97,7 +109,69 @@ class AnalysisTask(Base):
             "model_id": self.model_id,
             "confidence_threshold": self.confidence_threshold,
             "iou_threshold": self.iou_threshold,
+            "source_info": self.source_info,
         }
+
+    def _normalize_source_info(self, payload):
+        if payload is None:
+            return {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:  # noqa: BLE001
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        return payload
+
+    def _apply_source_info(self, info: dict) -> None:
+        source_id = info.get("source_id")
+        if source_id is not None:
+            try:
+                self.source_id = int(source_id)
+            except (TypeError, ValueError):
+                pass
+        self.camera_id = info.get("camera_id", self.camera_id)
+        self.camera_name = info.get("camera_name", self.camera_name)
+        self.camera_type = info.get("camera_type", self.camera_type)
+        self.device_index = info.get("device_index", self.device_index)
+        self.model_path = info.get("model_path", self.model_path)
+        self.model_id = info.get("model_id", self.model_id)
+        self.confidence_threshold = info.get(
+            "confidence", info.get("confidence_threshold", self.confidence_threshold)
+        )
+        self.iou_threshold = info.get("iou_threshold", self.iou_threshold)
+        self.source_width = info.get("source_width", self.source_width)
+        self.source_height = info.get("source_height", self.source_height)
+        self.source_fps = info.get("source_fps", self.source_fps)
+        if "task_name" in info and not self.task_name:
+            self.task_name = info.get("task_name")
+
+    @property
+    def source_info(self) -> dict:
+        if self._source_info_cache is None:
+            self._source_info_cache = {
+                "source_id": self.source_id,
+                "camera_id": self.camera_id,
+                "camera_name": self.camera_name,
+                "camera_type": self.camera_type,
+                "device_index": self.device_index,
+                "model_path": self.model_path,
+                "model_id": self.model_id,
+                "confidence_threshold": self.confidence_threshold,
+                "iou_threshold": self.iou_threshold,
+                "source_width": self.source_width,
+                "source_height": self.source_height,
+                "source_fps": self.source_fps,
+                "task_name": self.task_name,
+            }
+        return dict(self._source_info_cache)
+
+    @source_info.setter
+    def source_info(self, payload) -> None:
+        info = self._normalize_source_info(payload)
+        self._source_info_cache = info
+        self._apply_source_info(info)
 
 
 class DetectionResult(Base):

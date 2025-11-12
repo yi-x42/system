@@ -217,6 +217,15 @@ class TaskService:
                     api_logger.warning(f"實時檢測服務停止失敗或任務不存在: {task_id}")
             except Exception as e:
                 api_logger.error(f"停止實時檢測服務失敗: {e}")
+
+            # 停止對應的 PySide6 GUI 子行程（若有）
+            try:
+                from app.services.gui_launcher import realtime_gui_manager
+
+                if realtime_gui_manager.stop_process(str(task_id)):
+                    api_logger.info(f"PySide6 子行程已停止: {task_id}")
+            except Exception as e:
+                api_logger.error(f"停止 PySide6 子行程失敗: {e}")
             
             # 更新內存中的任務狀態（如果存在）
             if task_id in self.active_tasks:

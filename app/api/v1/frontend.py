@@ -900,6 +900,16 @@ async def start_realtime_analysis(
         #     raise HTTPException(status_code=400, detail=f"攝影機 {request.camera_id} 離線，無法啟動即時分析")
         
         api_logger.info(f"使用攝影機: {camera_info['name']} (狀態: {camera_info['status']})")
+
+        # 1.1 驗證資料來源（與攝影機對應）
+        try:
+            source_id = int(camera_info["id"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="攝影機來源 ID 無效")
+
+        data_source = await db.get(DataSource, source_id)
+        if data_source is None:
+            raise HTTPException(status_code=404, detail=f"資料來源 {source_id} 未找到，請重新建立攝影機")
         
         # 2. 驗證模型：統一使用專案 uploads/models
         model_files = []
@@ -954,6 +964,7 @@ async def start_realtime_analysis(
         task_id = None
         try:
             source_info = {
+                "source_id": source_id,
                 "camera_id": request.camera_id,
                 "camera_name": camera_info.get("name", f"Camera-{request.camera_id}"),
                 "camera_type": camera_info.get("camera_type", "USB"),
@@ -968,6 +979,7 @@ async def start_realtime_analysis(
             analysis_task = AnalysisTask(
                 task_type="realtime_camera",
                 status="pending",
+                source_id=source_id,
                 source_info=source_info,
                 source_width=camera_width,
                 source_height=camera_height,

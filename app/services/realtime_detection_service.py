@@ -566,8 +566,9 @@ class RealtimeDetectionService:
         try:
             session = self.active_sessions.get(task_id)
             if not session:
-                detection_logger.warning(f"未找到會話: {task_id}")
-                return False
+                detection_logger.info(f"停止請求時未找到會話 {task_id}，表示已經停止，執行清理流程")
+                await self._close_preview_clients(task_id)
+                return True
             
             # 標記會話為停止狀態
             session.running = False

@@ -10,21 +10,40 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import math
+import os
 import secrets
 import socket
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Iterable
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from PySide6 import QtCore, QtGui, QtWidgets
+from ultralytics import YOLO
 
 import cv2
 import numpy as np
 import supervision as sv
-from PySide6 import QtCore, QtGui, QtWidgets
-from ultralytics import YOLO
+
+from app.core.database import SyncSessionLocal
+from app.core.logger import detection_logger
+from app.models.database import (
+    DetectionResult,
+    LineCrossingEvent,
+    SpeedEvent,
+    TaskStatistics,
+    ZoneDwellEvent,
+)
 
 
 def resolve_labels(
@@ -89,6 +108,50 @@ def _to_qimage(frame: np.ndarray) -> QtGui.QImage:
         rgb.data, width, height, bytes_per_line, QtGui.QImage.Format_RGB888
     )
     return image.copy()
+
+
+class ParentWatcher(threading.Thread):
+    """監控父行程狀態，確保後端終止時釋放攝影機。"""
+
+    _STILL_ACTIVE = 259
+
+    def __init__(self, parent_pid: int, window: "MainWindow", interval: float = 5.0) -> None:
+        super().__init__(daemon=True)
+        self._parent_pid = parent_pid
+        self._window = window
+        self._interval = interval
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        if self._parent_pid <= 0:
+            return
+        while not self._stop_event.wait(self._interval):
+            if not self._is_parent_alive():
+                QtCore.QMetaObject.invokeMethod(
+                    self._window,
+                    "handle_control_shutdown",
+                    QtCore.Qt.QueuedConnection,
+                )
+                break
+
+    def _is_parent_alive(self) -> bool:
+        if os.name == "nt":
+            access = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
+            handle = ctypes.windll.kernel32.OpenProcess(access, False, self._parent_pid)
+            if handle == 0:
+                return False
+            exit_code = ctypes.c_ulong()
+            success = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return bool(success) and exit_code.value == self._STILL_ACTIVE
+        try:
+            os.kill(self._parent_pid, 0)
+        except OSError:
+            return False
+        return True
 
 
 class ControlCommandServer(threading.Thread):
@@ -527,6 +590,191 @@ class SpeedState:
     speed_mps: float = 0.0
 
 
+class DatabaseWriter:
+    """負責將偵測資料寫入資料庫。"""
+
+    def __init__(self, task_id: int) -> None:
+        self._task_id = task_id
+        self._session = None
+        self._lock = threading.Lock()
+        self._disabled = False
+        self._last_person_count = 0
+        self._confidence_sum = 0.0
+        self._confidence_count = 0
+        self._last_avg_confidence = 0.0
+        self._speed_sum = 0.0
+        self._speed_count = 0
+        self._speed_max = 0.0
+
+    def _get_session(self):
+        if self._disabled:
+            return None
+        if self._session is None:
+            try:
+                self._session = SyncSessionLocal()
+            except Exception as exc:  # noqa: BLE001
+                detection_logger.error(f"建立資料庫連線失敗: {exc}")
+                self._disabled = True
+                return None
+        return self._session
+
+    def close(self) -> None:
+        with self._lock:
+            if self._session is not None:
+                self._session.close()
+                self._session = None
+
+    def persist_frame(
+        self,
+        *,
+        frame_number: int,
+        frame_timestamp: datetime,
+        detections: list[dict],
+        line_events: list[dict],
+        zone_events: list[dict],
+        speed_events: list[dict],
+        stats_payload: dict,
+    ) -> None:
+        session = self._get_session()
+        if session is None:
+            return
+
+        try:
+            if detections:
+                session.add_all(
+                    [
+                        DetectionResult(
+                            task_id=self._task_id,
+                            tracker_id=row.get("tracker_id"),
+                            object_speed=row.get("object_speed"),
+                            zones=row.get("zones"),
+                            frame_number=frame_number,
+                            frame_timestamp=frame_timestamp,
+                            object_type=row.get("object_type"),
+                            confidence=row.get("confidence"),
+                            bbox_x1=row["bbox"][0],
+                            bbox_y1=row["bbox"][1],
+                            bbox_x2=row["bbox"][2],
+                            bbox_y2=row["bbox"][3],
+                            center_x=row["center"][0],
+                            center_y=row["center"][1],
+                        )
+                        for row in detections
+                    ]
+                )
+                frame_confidences = [
+                    row.get("confidence")
+                    for row in detections
+                    if row.get("confidence") is not None
+                ]
+                if frame_confidences:
+                    self._confidence_sum += sum(frame_confidences)
+                    self._confidence_count += len(frame_confidences)
+                    self._last_avg_confidence = (
+                        self._confidence_sum / self._confidence_count
+                    )
+
+            if line_events:
+                session.add_all(
+                    [
+                        LineCrossingEvent(
+                            task_id=self._task_id,
+                            tracker_id=event.get("tracker_id"),
+                            line_id=event.get("line_id"),
+                            direction=event.get("direction"),
+                            frame_number=event.get("frame_number"),
+                            frame_timestamp=event.get("frame_timestamp"),
+                            extra=event.get("extra"),
+                        )
+                        for event in line_events
+                    ]
+                )
+
+            if zone_events:
+                session.add_all(
+                    [
+                        ZoneDwellEvent(
+                            task_id=self._task_id,
+                            tracker_id=event.get("tracker_id"),
+                            zone_id=event.get("zone_id"),
+                            entered_at=event.get("entered_at"),
+                            exited_at=event.get("exited_at"),
+                            dwell_seconds=event.get("dwell_seconds"),
+                            frame_number=event.get("frame_number"),
+                            event_timestamp=event.get("event_timestamp"),
+                            extra=event.get("extra"),
+                        )
+                        for event in zone_events
+                    ]
+                )
+
+            if speed_events:
+                session.add_all(
+                    [
+                        SpeedEvent(
+                            task_id=self._task_id,
+                            tracker_id=event.get("tracker_id"),
+                            speed_avg=event.get("speed_avg"),
+                            speed_max=event.get("speed_max"),
+                            threshold=event.get("threshold"),
+                            frame_number=event.get("frame_number"),
+                            event_timestamp=event.get("event_timestamp"),
+                            extra=event.get("extra"),
+                        )
+                        for event in speed_events
+                    ]
+                )
+                speed_values = [
+                    float(event.get("speed_avg"))
+                    for event in speed_events
+                    if event.get("speed_avg") is not None
+                ]
+                if speed_values:
+                    self._speed_sum += sum(speed_values)
+                    self._speed_count += len(speed_values)
+                    self._speed_max = max(self._speed_max, max(speed_values))
+
+            stats = session.get(TaskStatistics, self._task_id)
+            if not stats:
+                stats = TaskStatistics(task_id=self._task_id)
+                session.add(stats)
+            stats.updated_at = frame_timestamp
+            stats.fps = stats_payload.get("fps")
+            current_person_count = int(stats_payload.get("person_count") or 0)
+            if current_person_count > 0 or self._last_person_count == 0:
+                self._last_person_count = current_person_count
+            stats.person_count = (
+                self._last_person_count if self._last_person_count else current_person_count
+            )
+            aggregated_avg_confidence = (
+                self._last_avg_confidence
+                if self._confidence_count
+                else stats_payload.get("avg_confidence")
+            )
+            stats.avg_confidence = aggregated_avg_confidence or 0.0
+            stats.line_stats = stats_payload.get("line_stats")
+            stats.zone_stats = stats_payload.get("zone_stats")
+            speed_stats_payload = dict(stats_payload.get("speed_stats") or {})
+            unit = speed_stats_payload.get("unit") or "m/s"
+            configured = bool(speed_stats_payload.get("configured"))
+            if configured and self._speed_count:
+                factor = 3.6 if unit.lower() == "km/h" else 1.0
+                speed_stats_payload["avg_speed"] = (
+                    self._speed_sum / self._speed_count
+                ) * factor
+                speed_stats_payload["max_speed"] = self._speed_max * factor
+            stats.speed_stats = speed_stats_payload
+            extra_payload = dict(stats_payload.get("extra") or {})
+            extra_payload["current_person_count"] = current_person_count
+            extra_payload["last_person_count"] = self._last_person_count
+            stats.extra = extra_payload
+
+            session.commit()
+        except Exception as exc:  # noqa: BLE001
+            session.rollback()
+            detection_logger.error(f"寫入即時辨識資料失敗: {exc}")
+            self._disabled = True
+
 def _draw_line_overlay(scene: np.ndarray, line_state: LineState) -> np.ndarray:
     color = line_state.color or sv.ColorPalette.DEFAULT.by_idx(0)
     bgr = tuple(int(v) for v in color.as_bgr())
@@ -574,6 +822,9 @@ class DetectionWorker(QtCore.QThread):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__()
         self._args = args
+        if not hasattr(args, "task_id") or args.task_id is None:
+            raise ValueError("啟動即時偵測時必須提供 --task-id 參數")
+        self._task_id = int(args.task_id)
         self._toggle_lock = threading.Lock()
         self._frame_lock = threading.Lock()
         self._config_lock = threading.Lock()
@@ -596,6 +847,8 @@ class DetectionWorker(QtCore.QThread):
         self._speed_states: dict[int, SpeedState] = {}
         self._next_line_id = 1
         self._next_zone_id = 1
+        self._frame_index = 0
+        self._db_writer = DatabaseWriter(self._task_id)
         self._emit_lines_changed()
         self._emit_zones_changed()
         self._emit_scale_changed()
@@ -894,6 +1147,22 @@ class DetectionWorker(QtCore.QThread):
                 else:
                     self._tracker_warning_sent = False
 
+                self._frame_index += 1
+                frame_number = self._frame_index
+                frame_timestamp = datetime.utcnow()
+                num_detections = len(detections)
+                if num_detections and detections.tracker_id is not None:
+                    tracker_ids = [
+                        int(tracker_id) if tracker_id is not None else None
+                        for tracker_id in detections.tracker_id
+                    ]
+                else:
+                    tracker_ids = [None] * num_detections
+                zone_labels_per_detection = [[] for _ in range(num_detections)]
+                line_event_records: list[dict[str, object]] = []
+                zone_event_records: list[dict[str, object]] = []
+                speed_event_records: list[dict[str, object]] = []
+
                 with self._toggle_lock:
                     toggles_snapshot = dict(self._toggles)
 
@@ -958,11 +1227,25 @@ class DetectionWorker(QtCore.QThread):
                     for tracker_id in stale_ids:
                         self._speed_states.pop(tracker_id, None)
 
+                if speed_lookup:
+                    for tracker_id, speed_value in speed_lookup.items():
+                        speed_event_records.append(
+                            {
+                                "tracker_id": tracker_id,
+                                "speed_avg": speed_value,
+                                "speed_max": speed_value,
+                                "threshold": None,
+                                "frame_number": frame_number,
+                                "event_timestamp": frame_timestamp,
+                                "extra": None,
+                            }
+                        )
+
                 line_total_in = 0
                 line_total_out = 0
                 line_summaries: list[dict[str, int]] = []
                 for line_state in lines_snapshot:
-                    line_state.zone.trigger(detections=detections)
+                    crossed_in, crossed_out = line_state.zone.trigger(detections=detections)
                     in_count = int(line_state.zone.in_count)
                     out_count = int(line_state.zone.out_count)
                     line_total_in += in_count
@@ -974,6 +1257,30 @@ class DetectionWorker(QtCore.QThread):
                             "out": out_count,
                         }
                     )
+                    if num_detections:
+                        for detection_idx, tracker_int in enumerate(tracker_ids):
+                            if detection_idx < len(crossed_in) and crossed_in[detection_idx]:
+                                line_event_records.append(
+                                    {
+                                        "line_id": line_state.label,
+                                        "direction": "in",
+                                        "tracker_id": tracker_int,
+                                        "frame_number": frame_number,
+                                        "frame_timestamp": frame_timestamp,
+                                        "extra": None,
+                                    }
+                                )
+                            if detection_idx < len(crossed_out) and crossed_out[detection_idx]:
+                                line_event_records.append(
+                                    {
+                                        "line_id": line_state.label,
+                                        "direction": "out",
+                                        "tracker_id": tracker_int,
+                                        "frame_number": frame_number,
+                                        "frame_timestamp": frame_timestamp,
+                                        "extra": None,
+                                    }
+                                )
                     annotated = line_state.annotator.annotate(
                         frame=annotated, line_counter=line_state.zone
                     )
@@ -983,6 +1290,27 @@ class DetectionWorker(QtCore.QThread):
                 zone_summaries: list[dict[str, float]] = []
                 dwell_lookup: dict[int, float] = {}
                 now_wall = time.time()
+
+                def append_zone_event_record(
+                    zone_label: str,
+                    tracker_int: int,
+                    entered_at_wall: float | None,
+                    dwell_seconds: float,
+                ) -> None:
+                    if tracker_int is None or entered_at_wall is None or dwell_seconds <= 0:
+                        return
+                    zone_event_records.append(
+                        {
+                            "tracker_id": tracker_int,
+                            "zone_id": zone_label,
+                            "entered_at": datetime.utcfromtimestamp(entered_at_wall),
+                            "exited_at": frame_timestamp,
+                            "dwell_seconds": dwell_seconds,
+                            "frame_number": frame_number,
+                            "event_timestamp": frame_timestamp,
+                            "extra": None,
+                        }
+                    )
 
                 for zone_state in zones_snapshot:
                     zone = zone_state.zone
@@ -1007,24 +1335,47 @@ class DetectionWorker(QtCore.QThread):
                                 detection_idx < len(zone_mask) and zone_mask[detection_idx]
                             )
                             if in_zone:
+                                if detection_idx < len(zone_labels_per_detection):
+                                    zone_labels_per_detection[detection_idx].append(
+                                        zone_state.label
+                                    )
                                 current_inside_ids.add(tracker_int)
                                 if not state.is_inside:
                                     state.entered_at = now_wall
                                 state.is_inside = True
                             else:
-                                if state.is_inside and state.entered_at is not None:
-                                    state.total_time += now_wall - state.entered_at
-                                    state.entered_at = None
-                                state.is_inside = False
+                                if state.is_inside:
+                                    dwell_increment = 0.0
+                                    if state.entered_at is not None:
+                                        dwell_increment = max(
+                                            0.0, now_wall - state.entered_at
+                                        )
+                                        append_zone_event_record(
+                                            zone_state.label,
+                                            tracker_int,
+                                            state.entered_at,
+                                            dwell_increment,
+                                        )
+                                        state.total_time += dwell_increment
+                                        state.entered_at = None
+                                    state.is_inside = False
 
                     for tracker_id, state in list(dwell_states.items()):
                         if tracker_id not in current_detection_ids and state.is_inside:
+                            dwell_increment = 0.0
                             if state.entered_at is not None:
-                                state.total_time += now_wall - state.entered_at
+                                dwell_increment = max(0.0, now_wall - state.entered_at)
+                                append_zone_event_record(
+                                    zone_state.label,
+                                    tracker_id,
+                                    state.entered_at,
+                                    dwell_increment,
+                                )
+                                state.total_time += dwell_increment
                                 state.entered_at = None
                             state.is_inside = False
                         if (not state.is_inside) and (now_wall - state.last_seen > 30.0):
-                            del dwell_states[tracker_id]
+                            dwell_states.pop(tracker_id, None)
 
                     inside_durations = [
                         _current_dwell_seconds(dwell_states[tracker_id], now_wall)
@@ -1055,7 +1406,58 @@ class DetectionWorker(QtCore.QThread):
                         }
                     )
 
-                    annotated = zone_state.annotator.annotate(scene=annotated, label=zone_state.label)
+                    annotated = zone_state.annotator.annotate(scene=annotated)
+
+                detection_rows: list[dict[str, object]] = []
+                if num_detections:
+                    xyxy = detections.xyxy
+                    confidence_values = (
+                        detections.confidence
+                        if detections.confidence is not None
+                        else [None] * num_detections
+                    )
+                    for detection_idx in range(num_detections):
+                        bbox = xyxy[detection_idx]
+                        center_x = float(bbox[0] + bbox[2]) / 2.0
+                        center_y = float(bbox[1] + bbox[3]) / 2.0
+                        tracker_int = (
+                            tracker_ids[detection_idx]
+                            if detection_idx < len(tracker_ids)
+                            else None
+                        )
+                        confidence_val = (
+                            float(confidence_values[detection_idx])
+                            if detection_idx < len(confidence_values)
+                            and confidence_values[detection_idx] is not None
+                            else None
+                        )
+                        zones_for_detection = (
+                            zone_labels_per_detection[detection_idx]
+                            if detection_idx < len(zone_labels_per_detection)
+                            else []
+                        )
+                        detection_rows.append(
+                            {
+                                "tracker_id": tracker_int,
+                                "object_type": (
+                                    object_types[detection_idx]
+                                    if object_types and detection_idx < len(object_types)
+                                    else "person"
+                                ),
+                                "confidence": confidence_val,
+                                "bbox": [
+                                    float(bbox[0]),
+                                    float(bbox[1]),
+                                    float(bbox[2]),
+                                    float(bbox[3]),
+                                ],
+                                "center": [center_x, center_y],
+                                "zones": zones_for_detection,
+                                "object_speed": speed_lookup.get(tracker_int)
+                                if tracker_int is not None
+                                else None,
+                            }
+                        )
 
                 if toggles_snapshot["corner"] and len(detections):
                     annotated = box_annotator.annotate(
@@ -1118,6 +1520,45 @@ class DetectionWorker(QtCore.QThread):
                     "max_speed": max_speed * speed_factor,
                 }
                 self.statsUpdated.emit(stats_payload)
+                db_stats_payload = {
+                    "fps": fps_value,
+                    "person_count": person_count,
+                    "avg_confidence": avg_confidence,
+                    "line_stats": {
+                        summary["label"]: {"in": summary["in"], "out": summary["out"]}
+                        for summary in line_summaries
+                    },
+                    "zone_stats": {
+                        summary["label"]: {
+                            "current": summary["current"],
+                            "average": summary["average"],
+                            "max": summary["max"],
+                        }
+                        for summary in zone_summaries
+                    },
+                    "speed_stats": {
+                        "configured": meters_per_pixel is not None,
+                        "unit": speed_unit,
+                        "avg_speed": stats_payload["avg_speed"],
+                        "max_speed": stats_payload["max_speed"],
+                    },
+                    "extra": {
+                        "line_total_in": line_total_in,
+                        "line_total_out": line_total_out,
+                        "zone_total_current": zone_total_current,
+                        "toggles": toggles_snapshot,
+                    },
+                }
+                if self._db_writer:
+                    self._db_writer.persist_frame(
+                        frame_number=frame_number,
+                        frame_timestamp=frame_timestamp,
+                        detections=detection_rows,
+                        line_events=line_event_records,
+                        zone_events=zone_event_records,
+                        speed_events=speed_event_records,
+                        stats_payload=db_stats_payload,
+                    )
 
                 if self._reset_heatmap_event.is_set():
                     heatmap_annotator.heat_mask = None
@@ -1132,6 +1573,8 @@ class DetectionWorker(QtCore.QThread):
         finally:
             capture.release()
             cv2.destroyAllWindows()
+            if self._db_writer:
+                self._db_writer.close()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -1143,6 +1586,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._allow_window_close = bool(getattr(args, "allow_window_close", False))
         self._shutdown_requested = False
         self._control_server: ControlCommandServer | None = None
+        self._parent_watcher: ParentWatcher | None = None
 
         self.worker = DetectionWorker(args)
         self.worker.frameReady.connect(self.update_image)
@@ -1157,8 +1601,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.request_scale_status()
         self.worker.start()
 
+        parent_pid = getattr(args, "parent_pid", None)
+        if parent_pid:
+            self._start_parent_watchdog(int(parent_pid))
+
     def attach_control_server(self, server: ControlCommandServer) -> None:
         self._control_server = server
+
+    def _start_parent_watchdog(self, parent_pid: int) -> None:
+        watcher = ParentWatcher(parent_pid, self)
+        watcher.start()
+        self._parent_watcher = watcher
 
     def _build_ui(self) -> None:
         self.setWindowTitle(self._args.window_name or "Supervision Live")
@@ -1564,6 +2017,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._control_server:
             self._control_server.stop()
             self._control_server = None
+        if self._parent_watcher:
+            self._parent_watcher.stop()
+            self._parent_watcher = None
         super().closeEvent(event)
 
 
@@ -1630,6 +2086,18 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="Supervision Live",
         help="GUI 視窗標題。",
+    )
+    parser.add_argument(
+        "--task-id",
+        type=int,
+        required=True,
+        help="分析任務的 ID（analysis_tasks.id）。",
+    )
+    parser.add_argument(
+        "--parent-pid",
+        type=int,
+        default=None,
+        help="負責啟動偵測程式的後端行程 PID，用於意外終止時自動釋放資源。",
     )
     parser.add_argument(
         "--start-hidden",

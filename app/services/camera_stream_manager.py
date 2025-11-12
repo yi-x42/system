@@ -309,6 +309,11 @@ class CameraStream:
                 detection_logger.info(f"移除消費者: {consumer_id} 從攝影機 {self.camera_id}")
                 return True
             return False
+
+    def consumer_count(self) -> int:
+        """目前活躍消費者數量"""
+        with self._lock:
+            return len(self.consumers)
     
     def get_stats(self) -> Dict[str, Any]:
         """獲取流統計信息"""
@@ -399,7 +404,12 @@ class CameraStreamManager:
         if camera_id not in self.streams:
             return False
         
-        return self.streams[camera_id].remove_consumer(consumer_id)
+        stream = self.streams[camera_id]
+        removed = stream.remove_consumer(consumer_id)
+        if removed and stream.consumer_count() == 0:
+            detection_logger.info(f"攝影機 {camera_id} 已無消費者，釋放攝影機資源")
+            self.stop_stream(camera_id)
+        return removed
     
     def get_stream_stats(self, camera_id: str) -> Optional[Dict[str, Any]]:
         """獲取指定攝影機流的統計信息"""

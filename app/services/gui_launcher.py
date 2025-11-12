@@ -79,6 +79,8 @@ class RealtimeDetectionProcessManager:
     def _build_command(
         self,
         *,
+        task_id: str,
+        parent_pid: Optional[int],
         source: str,
         model_path: Optional[str],
         window_name: Optional[str],
@@ -89,7 +91,14 @@ class RealtimeDetectionProcessManager:
         control_port: Optional[int],
         control_token: Optional[str],
     ) -> list[str]:
-        command: list[str] = [sys.executable, str(self._script_path()), "--source", str(source)]
+        command: list[str] = [
+            sys.executable,
+            str(self._script_path()),
+            "--task-id",
+            str(task_id),
+            "--source",
+            str(source),
+        ]
 
         if model_path:
             command += ["--model", str(model_path)]
@@ -112,6 +121,8 @@ class RealtimeDetectionProcessManager:
             ]
         if control_token:
             command += ["--control-token", control_token]
+        if parent_pid:
+            command += ["--parent-pid", str(parent_pid)]
         return command
 
     def _spawn_process(
@@ -190,6 +201,8 @@ class RealtimeDetectionProcessManager:
             control_port = self._reserve_port()
             control_token = secrets.token_hex(16)
             command = self._build_command(
+                task_id=task_id,
+                parent_pid=os.getpid(),
                 source=source,
                 model_path=model_path,
                 window_name=window_name,
