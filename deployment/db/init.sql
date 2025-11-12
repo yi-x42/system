@@ -1,16 +1,30 @@
--- YOLOv11 數位雙生分析系統 - 基礎資料庫 Schema
--- 啟動容器時會自動執行此 SQL 建立資料表與索引
+-- YOLOv11 數位雙生分析系統 - 資料庫 Schema
+-- docker-compose 啟動時會執行此 SQL 初始化資料表
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 ------------------------------------------------------------------------------
--- 1. analysis_tasks (分析任務表)
+-- 1. data_sources (資料來源表)
+------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS data_sources (
+    id          BIGSERIAL PRIMARY KEY,
+    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('camera','video_file')),
+    name        VARCHAR(100) NOT NULL,
+    config      JSONB,
+    status      VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','error')),
+    last_check  TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_data_sources_status ON data_sources(status);
+
+------------------------------------------------------------------------------
+-- 2. analysis_tasks (分析任務表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS analysis_tasks (
     id                   BIGSERIAL PRIMARY KEY,
     task_type            VARCHAR(20) NOT NULL CHECK (task_type IN ('realtime_camera', 'video_file')),
     status               VARCHAR(20) NOT NULL CHECK (status IN ('pending','running','paused','completed','failed')),
-    source_info          JSONB,
+    source_id            BIGINT REFERENCES data_sources(id),
     source_width         INTEGER,
     source_height        INTEGER,
     source_fps           FLOAT,
@@ -18,14 +32,21 @@ CREATE TABLE IF NOT EXISTS analysis_tasks (
     end_time             TIMESTAMPTZ,
     created_at           TIMESTAMPTZ DEFAULT NOW(),
     task_name            VARCHAR(200),
+    camera_id            VARCHAR(100),
+    camera_name          VARCHAR(200),
+    camera_type          VARCHAR(50),
+    device_index         INTEGER,
+    model_path           VARCHAR(255),
     model_id             VARCHAR(100),
-    confidence_threshold FLOAT DEFAULT 0.5
+    confidence_threshold FLOAT DEFAULT 0.5,
+    iou_threshold        FLOAT DEFAULT 0.4
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at);
+CREATE INDEX IF NOT EXISTS idx_analysis_tasks_source ON analysis_tasks(source_id);
 
 ------------------------------------------------------------------------------
--- 2. detection_results (檢測結果表)
+-- 3. detection_results (檢測結果表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS detection_results (
     id               BIGSERIAL PRIMARY KEY,
@@ -49,26 +70,24 @@ CREATE INDEX IF NOT EXISTS idx_detection_results_tracker ON detection_results(tr
 CREATE INDEX IF NOT EXISTS idx_detection_results_timestamp ON detection_results(frame_timestamp);
 
 ------------------------------------------------------------------------------
--- 3. line_crossing_events (穿越線事件表)
+-- 4. line_crossing_events (穿越線事件表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS line_crossing_events (
-    id            BIGSERIAL PRIMARY KEY,
-    is_enabled    BOOLEAN DEFAULT TRUE,
-    task_id       BIGINT NOT NULL REFERENCES analysis_tasks(id) ON DELETE CASCADE,
-    tracker_id    BIGINT,
-    line_id       VARCHAR(50) NOT NULL,
-    direction     VARCHAR(20),
-    crossed_at    TIMESTAMPTZ DEFAULT NOW(),
-    frame_number  INTEGER,
-    enter_count   INTEGER DEFAULT 0,
-    leave_count   INTEGER DEFAULT 0,
-    extra         JSONB
+    id              BIGSERIAL PRIMARY KEY,
+    is_enabled      BOOLEAN DEFAULT TRUE,
+    task_id         BIGINT NOT NULL REFERENCES analysis_tasks(id) ON DELETE CASCADE,
+    tracker_id      BIGINT,
+    line_id         VARCHAR(50) NOT NULL,
+    direction       VARCHAR(20),
+    frame_number    INTEGER,
+    frame_timestamp TIMESTAMPTZ DEFAULT NOW(),
+    extra           JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_line_events_task_line ON line_crossing_events(task_id, line_id);
 CREATE INDEX IF NOT EXISTS idx_line_events_tracker ON line_crossing_events(tracker_id);
 
 ------------------------------------------------------------------------------
--- 4. zone_dwell_events (區域停留事件表)
+-- 5. zone_dwell_events (區域停留事件表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS zone_dwell_events (
     id              BIGSERIAL PRIMARY KEY,
@@ -79,9 +98,7 @@ CREATE TABLE IF NOT EXISTS zone_dwell_events (
     entered_at      TIMESTAMPTZ,
     exited_at       TIMESTAMPTZ,
     dwell_seconds   FLOAT,
-    current_count   INTEGER,
-    average_seconds FLOAT,
-    max_seconds     FLOAT,
+    frame_number    INTEGER,
     event_timestamp TIMESTAMPTZ DEFAULT NOW(),
     extra           JSONB
 );
@@ -89,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_zone_events_task_zone ON zone_dwell_events(task_i
 CREATE INDEX IF NOT EXISTS idx_zone_events_tracker ON zone_dwell_events(tracker_id);
 
 ------------------------------------------------------------------------------
--- 5. speed_events (速度事件表)
+-- 6. speed_events (速度事件表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS speed_events (
     id              BIGSERIAL PRIMARY KEY,
@@ -99,25 +116,12 @@ CREATE TABLE IF NOT EXISTS speed_events (
     speed_avg       FLOAT,
     speed_max       FLOAT,
     threshold       FLOAT,
+    frame_number    INTEGER,
     event_timestamp TIMESTAMPTZ DEFAULT NOW(),
     extra           JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_speed_events_task ON speed_events(task_id);
 CREATE INDEX IF NOT EXISTS idx_speed_events_tracker ON speed_events(tracker_id);
-
-------------------------------------------------------------------------------
--- 6. data_sources (資料來源表)
-------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS data_sources (
-    id          BIGSERIAL PRIMARY KEY,
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('camera','video_file')),
-    name        VARCHAR(100) NOT NULL,
-    config      JSONB,
-    status      VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','error')),
-    last_check  TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_data_sources_status ON data_sources(status);
 
 ------------------------------------------------------------------------------
 -- 7. users (使用者表)  - 規劃中，可視需要啟用
@@ -142,3 +146,19 @@ CREATE TABLE IF NOT EXISTS system_config (
     description  TEXT,
     updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
+
+------------------------------------------------------------------------------
+-- 9. task_statistics (任務統計表)
+------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS task_statistics (
+    task_id        BIGINT PRIMARY KEY REFERENCES analysis_tasks(id) ON DELETE CASCADE,
+    updated_at     TIMESTAMPTZ DEFAULT NOW(),
+    fps            FLOAT,
+    person_count   INTEGER,
+    avg_confidence FLOAT,
+    line_stats     JSONB,
+    zone_stats     JSONB,
+    speed_stats    JSONB,
+    extra          JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_task_statistics_updated_at ON task_statistics(updated_at);
