@@ -169,6 +169,7 @@ export function DetectionAnalysisOriginal() {
         const dwellStats = stats.zone || stats.dwell || {};
         return {
           id: task.id,
+          status: task.status ?? task.task_status ?? "unknown",
           camera:
             sourceInfo.camera_name ||
             sourceInfo.camera_id ||
@@ -1131,26 +1132,28 @@ export function DetectionAnalysisOriginal() {
                                 <Camera className="h-5 w-5 text-primary" />
                                 <div>
                                   <p className="font-medium">{task.camera}</p>
-                                  <Badge variant="outline" className="mt-1">
+                                  <Badge variant={getTaskStatusColor(task.status)} className="mt-1">
                                     <Activity className="h-3 w-3 mr-1" />
-                                    運行中
+                                    {getTaskStatusText(task.status)}
                                   </Badge>
                                 </div>
                               </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={
-                                  launchLivePersonPreviewMutation.isPending &&
-                                  launchLivePersonPreviewMutation.variables === String(task.id)
-                                }
-                                onClick={() => {
-                                  void handleOpenPreviewWindow(task.id);
-                                }}
-                              >
-                                <Monitor className="h-4 w-4 mr-2" />
-                                打開預覽
-                              </Button>
+                              {task.status === 'running' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={
+                                    launchLivePersonPreviewMutation.isPending &&
+                                    launchLivePersonPreviewMutation.variables === String(task.id)
+                                  }
+                                  onClick={() => {
+                                    void handleOpenPreviewWindow(task.id);
+                                  }}
+                                >
+                                  <Monitor className="h-4 w-4 mr-2" />
+                                  打開預覽
+                                </Button>
+                              )}
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
