@@ -643,22 +643,23 @@ class DatabaseWriter:
             if detections:
                 session.add_all(
                     [
-                        DetectionResult(
-                            task_id=self._task_id,
-                            tracker_id=row.get("tracker_id"),
-                            object_speed=row.get("object_speed"),
-                            zones=row.get("zones"),
-                            frame_number=frame_number,
-                            frame_timestamp=frame_timestamp,
-                            object_type=row.get("object_type"),
-                            confidence=row.get("confidence"),
-                            bbox_x1=row["bbox"][0],
-                            bbox_y1=row["bbox"][1],
-                            bbox_x2=row["bbox"][2],
-                            bbox_y2=row["bbox"][3],
-                            center_x=row["center"][0],
-                            center_y=row["center"][1],
-                        )
+                            DetectionResult(
+                                task_id=self._task_id,
+                                tracker_id=row.get("tracker_id"),
+                                object_speed=row.get("object_speed"),
+                                zones=row.get("zones"),
+                                frame_number=frame_number,
+                                frame_timestamp=frame_timestamp,
+                                object_type=row.get("object_type"),
+                                confidence=row.get("confidence"),
+                                bbox_x1=row["bbox"][0],
+                                bbox_y1=row["bbox"][1],
+                                bbox_x2=row["bbox"][2],
+                                bbox_y2=row["bbox"][3],
+                                center_x=row["center"][0],
+                                center_y=row["center"][1],
+                                thumbnail_path=row.get("thumbnail_path"),
+                            )
                         for row in detections
                     ]
                 )
@@ -849,6 +850,7 @@ class DetectionWorker(QtCore.QThread):
         self._next_zone_id = 1
         self._frame_index = 0
         self._db_writer = DatabaseWriter(self._task_id)
+        self._thumbnails_dir = PROJECT_ROOT / "uploads" / "detections" / str(self._task_id)
         self._emit_lines_changed()
         self._emit_zones_changed()
         self._emit_scale_changed()
@@ -877,6 +879,43 @@ class DetectionWorker(QtCore.QThread):
     @QtCore.Slot()
     def request_scale_status(self) -> None:
         self._emit_scale_changed()
+
+    def _save_detection_thumbnail(
+        self,
+        frame: np.ndarray,
+        bbox: Iterable[float],
+        tracker_id: int | None,
+        frame_number: int,
+        frame_timestamp: datetime,
+    ) -> str | None:
+        """裁切目前幀的偵測區域並儲存縮圖，回傳相對 uploads 的路徑。"""
+        try:
+            if frame is None:
+                return None
+            x1, y1, x2, y2 = bbox
+            height, width = frame.shape[:2]
+            x1_i = max(0, min(width, int(x1)))
+            y1_i = max(0, min(height, int(y1)))
+            x2_i = max(0, min(width, int(x2)))
+            y2_i = max(0, min(height, int(y2)))
+            if x2_i <= x1_i or y2_i <= y1_i:
+                return None
+            crop = frame[y1_i:y2_i, x1_i:x2_i]
+            if crop.size == 0:
+                return None
+            self._thumbnails_dir.mkdir(parents=True, exist_ok=True)
+            tracker_part = f"{tracker_id}" if tracker_id is not None else "det"
+            timestamp_part = frame_timestamp.strftime("%Y%m%d%H%M%S%f")
+            filename = f"{tracker_part}_f{frame_number}_{timestamp_part}.jpg"
+            save_path = self._thumbnails_dir / filename
+            success = cv2.imwrite(str(save_path), crop)
+            if not success:
+                return None
+            relative = Path("detections") / str(self._task_id) / filename
+            return relative.as_posix()
+        except Exception as exc:  # noqa: BLE001
+            detection_logger.error(f"儲存縮圖失敗: {exc}")
+            return None
 
     @QtCore.Slot(str, bool)
     def set_toggle(self, name: str, value: bool) -> None:
@@ -1436,6 +1475,13 @@ class DetectionWorker(QtCore.QThread):
                             if detection_idx < len(zone_labels_per_detection)
                             else []
                         )
+                        thumbnail_path = self._save_detection_thumbnail(
+                            frame,
+                            bbox,
+                            tracker_int,
+                            frame_number,
+                            frame_timestamp,
+                        )
                         detection_rows.append(
                             {
                                 "tracker_id": tracker_int,
@@ -1456,6 +1502,7 @@ class DetectionWorker(QtCore.QThread):
                                 "object_speed": speed_lookup.get(tracker_int)
                                 if tracker_int is not None
                                 else None,
+                                "thumbnail_path": thumbnail_path,
                             }
                         )
 

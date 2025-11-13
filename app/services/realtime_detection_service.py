@@ -11,6 +11,7 @@ import base64
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
+from pathlib import Path
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import cv2
@@ -22,6 +23,7 @@ from app.services.new_database_service import DatabaseService
 from app.websocket.push_service import push_yolo_detection
 from app.core.logger import detection_logger
 from app.core.config import settings
+from app.core.paths import get_base_dir
 
 
 @dataclass
@@ -56,6 +58,7 @@ class RealtimeDetectionService:
         self.preview_interval = 1.0 / 10.0
         self.preview_clients_lock: Optional[asyncio.Lock] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.detections_root = Path(get_base_dir()) / "uploads" / "detections"
         
     def set_queue_manager(self, queue_manager):
         """設置隊列管理器"""
@@ -412,20 +415,31 @@ class RealtimeDetectionService:
                         # 準備檢測結果數據
                         detection_results = []
                         for detection in predictions:
-                            detection_data = {
+                            bbox = detection.get('bbox', [0, 0, 0, 0])
+                            tracker_id = detection.get('tracker_id')
+                            thumbnail_path = self._save_detection_thumbnail(
+                                session.task_id,
+                                frame,
+                                bbox,
+                                tracker_id,
+                                session.frame_count
+                            )
+                            detection_payload = {
                                 'task_id': session.task_id,
                                 'frame_number': session.frame_count,
-                                'timestamp': timestamp,
+                                'frame_timestamp': timestamp,
                                 'object_type': detection.get('class', 'unknown'),
                                 'confidence': detection.get('confidence', 0.0),
-                                'bbox_x1': detection.get('bbox', [0, 0, 0, 0])[0],
-                                'bbox_y1': detection.get('bbox', [0, 0, 0, 0])[1],
-                                'bbox_x2': detection.get('bbox', [0, 0, 0, 0])[2],
-                                'bbox_y2': detection.get('bbox', [0, 0, 0, 0])[3],
-                                'center_x': (detection.get('bbox', [0, 0, 0, 0])[0] + detection.get('bbox', [0, 0, 0, 0])[2]) / 2,
-                                'center_y': (detection.get('bbox', [0, 0, 0, 0])[1] + detection.get('bbox', [0, 0, 0, 0])[3]) / 2
+                                'bbox_x1': bbox[0],
+                                'bbox_y1': bbox[1],
+                                'bbox_x2': bbox[2],
+                                'bbox_y2': bbox[3],
+                                'center_x': (bbox[0] + bbox[2]) / 2,
+                                'center_y': (bbox[1] + bbox[3]) / 2,
+                                'tracker_id': tracker_id,
+                                'thumbnail_path': thumbnail_path
                             }
-                            detection_results.append(detection_data)
+                            detection_results.append(detection_payload)
                         
                         # 儲存檢測結果到資料庫
                         detection_logger.debug(f"準備儲存 {len(detection_results)} 個檢測結果到任務 {session.task_id}")
@@ -619,6 +633,48 @@ class RealtimeDetectionService:
     def get_all_sessions(self) -> List[Dict[str, Any]]:
         """獲取所有會話（與 list_active_sessions 相同）"""
         return self.list_active_sessions()
+
+    def _save_detection_thumbnail(
+        self,
+        task_id: str,
+        frame: Optional[np.ndarray],
+        bbox: Optional[List[float]],
+        tracker_id: Optional[int],
+        frame_number: int,
+    ) -> Optional[str]:
+        """裁切偵測區塊並儲存縮圖，回傳相對於 /uploads 的路徑"""
+        if frame is None or bbox is None or len(bbox) != 4:
+            return None
+        if not hasattr(frame, "shape"):
+            return None
+        try:
+            height, width = frame.shape[:2]
+            x1 = int(max(0, min(width, bbox[0])))
+            y1 = int(max(0, min(height, bbox[1])))
+            x2 = int(max(0, min(width, bbox[2])))
+            y2 = int(max(0, min(height, bbox[3])))
+            if x2 <= x1 or y2 <= y1:
+                return None
+
+            task_dir = self.detections_root / str(task_id)
+            task_dir.mkdir(parents=True, exist_ok=True)
+            tracker_part = f"{tracker_id}" if tracker_id is not None else "det"
+            timestamp_part = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+            filename = f"{tracker_part}_f{frame_number}_{timestamp_part}.jpg"
+
+            crop = frame[y1:y2, x1:x2].copy()
+            if crop.size == 0:
+                return None
+
+            saved = cv2.imwrite(str(task_dir / filename), crop)
+            if not saved:
+                return None
+
+            relative_path = f"detections/{task_id}/{filename}"
+            return relative_path.replace("\\", "/")
+        except Exception as e:
+            detection_logger.error(f"儲存縮圖失敗: {e}")
+            return None
     
     def cleanup(self):
         """清理資源"""

@@ -144,14 +144,14 @@ async def get_detection_results(
         if start_date:
             try:
                 start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-                filters.append(DetectionResult.timestamp >= start_dt)
+                filters.append(DetectionResult.frame_timestamp >= start_dt)
             except ValueError:
                 raise HTTPException(status_code=400, detail="開始日期格式錯誤，請使用 YYYY-MM-DD")
                 
         if end_date:
             try:
                 end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-                filters.append(DetectionResult.timestamp < end_dt)
+                filters.append(DetectionResult.frame_timestamp < end_dt)
             except ValueError:
                 raise HTTPException(status_code=400, detail="結束日期格式錯誤，請使用 YYYY-MM-DD")
         
@@ -165,7 +165,7 @@ async def get_detection_results(
         total_count = total_result.scalar()
         
         # 執行主查詢
-        query = query.order_by(desc(DetectionResult.timestamp)).limit(limit).offset(offset)
+        query = query.order_by(desc(DetectionResult.frame_timestamp)).limit(limit).offset(offset)
         result = await db.execute(query)
         detections = result.scalars().all()
         
@@ -223,7 +223,7 @@ async def get_analysis_task_detail(
         if include_detections:
             detection_query = select(DetectionResult).where(
                 DetectionResult.task_id == task_id
-            ).order_by(desc(DetectionResult.timestamp)).limit(detection_limit)
+            ).order_by(desc(DetectionResult.frame_timestamp)).limit(detection_limit)
             
             detection_result = await db.execute(detection_query)
             detections = detection_result.scalars().all()
@@ -302,7 +302,7 @@ async def get_database_stats(db: AsyncSession = Depends(get_async_db)):
         latest_task_result = await db.execute(latest_task_query)
         latest_task_time = latest_task_result.scalar_one_or_none()
         
-        latest_detection_query = select(DetectionResult.timestamp).order_by(desc(DetectionResult.timestamp)).limit(1)
+        latest_detection_query = select(DetectionResult.frame_timestamp).order_by(desc(DetectionResult.frame_timestamp)).limit(1)
         latest_detection_result = await db.execute(latest_detection_query)
         latest_detection_time = latest_detection_result.scalar_one_or_none()
         

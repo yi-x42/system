@@ -116,8 +116,8 @@ class AnalyticsService:
             # 總檢測數
             total_query = select(func.count(DetectionResult.id)).where(
                 and_(
-                    DetectionResult.timestamp >= start_time,
-                    DetectionResult.timestamp <= end_time
+                    DetectionResult.frame_timestamp >= start_time,
+                    DetectionResult.frame_timestamp <= end_time
                 )
             )
             total_result = await db.execute(total_query)
@@ -127,8 +127,8 @@ class AnalyticsService:
             person_query = select(func.count(DetectionResult.id)).where(
                 and_(
                     DetectionResult.object_type == "person",
-                    DetectionResult.timestamp >= start_time,
-                    DetectionResult.timestamp <= end_time
+                    DetectionResult.frame_timestamp >= start_time,
+                    DetectionResult.frame_timestamp <= end_time
                 )
             )
             person_result = await db.execute(person_query)
@@ -138,8 +138,8 @@ class AnalyticsService:
             vehicle_query = select(func.count(DetectionResult.id)).where(
                 and_(
                     DetectionResult.object_type.in_(["car", "truck", "bus", "motorcycle"]),
-                    DetectionResult.timestamp >= start_time,
-                    DetectionResult.timestamp <= end_time
+                    DetectionResult.frame_timestamp >= start_time,
+                    DetectionResult.frame_timestamp <= end_time
                 )
             )
             vehicle_result = await db.execute(vehicle_query)
@@ -149,8 +149,8 @@ class AnalyticsService:
             alert_query = select(func.count(DetectionResult.id)).where(
                 and_(
                     DetectionResult.confidence > 0.9,
-                    DetectionResult.timestamp >= start_time,
-                    DetectionResult.timestamp <= end_time
+                    DetectionResult.frame_timestamp >= start_time,
+                    DetectionResult.frame_timestamp <= end_time
                 )
             )
             alert_result = await db.execute(alert_query)
@@ -240,8 +240,8 @@ class AnalyticsService:
                 func.count(DetectionResult.id).label('count')
             ).where(
                 and_(
-                    DetectionResult.timestamp >= start_time,
-                    DetectionResult.timestamp <= end_time
+                    DetectionResult.frame_timestamp >= start_time,
+                    DetectionResult.frame_timestamp <= end_time
                 )
             ).group_by(DetectionResult.object_type)
             
@@ -277,19 +277,19 @@ class AnalyticsService:
             for period_name, (start_hour, end_hour) in periods.items():
                 if start_hour < end_hour:
                     hour_condition = and_(
-                        func.extract('hour', DetectionResult.timestamp) >= start_hour,
-                        func.extract('hour', DetectionResult.timestamp) < end_hour
+                        func.extract('hour', DetectionResult.frame_timestamp) >= start_hour,
+                        func.extract('hour', DetectionResult.frame_timestamp) < end_hour
                     )
                 else:  # 跨日情況（night period）
                     hour_condition = or_(
-                        func.extract('hour', DetectionResult.timestamp) >= start_hour,
-                        func.extract('hour', DetectionResult.timestamp) < end_hour
+                        func.extract('hour', DetectionResult.frame_timestamp) >= start_hour,
+                        func.extract('hour', DetectionResult.frame_timestamp) < end_hour
                     )
                 
                 query = select(func.count(DetectionResult.id)).where(
                     and_(
-                        DetectionResult.timestamp >= start_time,
-                        DetectionResult.timestamp <= end_time,
+                        DetectionResult.frame_timestamp >= start_time,
+                        DetectionResult.frame_timestamp <= end_time,
                         hour_condition
                     )
                 )

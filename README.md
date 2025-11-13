@@ -72,6 +72,7 @@ D:/project/system/uploads/
 - `PROJECT_ROOT`
 - `UPLOADS_DIR`
 - `VIDEOS_DIR`
+- `DETECTIONS_DIR`（GUI / 即時任務縮圖：`uploads/detections/<task_id>/*.jpg`）
 
 上傳 API：
 - `POST /api/v1/frontend/data-sources/upload/video`
@@ -317,3 +318,10 @@ init.sql：照你調整後的 schema 產生所有資料表（analysis_tasks、de
 執行 docker compose up -d 就會啟動新的 PostgreSQL。
 若要進入資料庫，可用 docker exec -it yolo_analysis_db psql -U yolo_user -d yolo_analysis。
 將應用程式的連線字串改成 postgresql://yolo_user:please_change_me@localhost:5432/yolo_analysis（或依你修改 .env.db 的設定）。
+
+
+
+
+docker compose down -v      # 會停止容器並刪除 volume
+docker volume ls | findstr yolo_pgdata  # 確認沒有殘留
+docker compose up -d --build

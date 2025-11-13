@@ -173,7 +173,7 @@ class DatabaseService:
             detection_obj = DetectionResult(
                 task_id=detection_data['task_id'],
                 frame_number=detection_data['frame_number'],
-                timestamp=detection_data.get('timestamp', datetime.utcnow()),
+                frame_timestamp=detection_data.get('frame_timestamp', datetime.utcnow()),
                 object_type=detection_data['object_type'],
                 confidence=detection_data['confidence'],
                 bbox_x1=detection_data['bbox_x1'],
@@ -181,7 +181,8 @@ class DatabaseService:
                 bbox_x2=detection_data['bbox_x2'],
                 bbox_y2=detection_data['bbox_y2'],
                 center_x=detection_data['center_x'],
-                center_y=detection_data['center_y']
+                center_y=detection_data['center_y'],
+                thumbnail_path=detection_data.get('thumbnail_path')
             )
             
             session.add(detection_obj)
@@ -204,7 +205,7 @@ class DatabaseService:
                 detection_obj = DetectionResult(
                     task_id=task_id,
                     frame_number=detection['frame_number'],
-                    timestamp=detection.get('timestamp', datetime.utcnow()),
+                    frame_timestamp=detection.get('frame_timestamp', datetime.utcnow()),
                     object_type=detection['object_type'],
                     confidence=detection['confidence'],
                     bbox_x1=detection['bbox_x1'],
@@ -212,7 +213,8 @@ class DatabaseService:
                     bbox_x2=detection['bbox_x2'],
                     bbox_y2=detection['bbox_y2'],
                     center_x=detection['center_x'],
-                    center_y=detection['center_y']
+                    center_y=detection['center_y'],
+                    thumbnail_path=detection.get('thumbnail_path')
                 )
                 detection_objects.append(detection_obj)
             
@@ -451,7 +453,7 @@ class DatabaseService:
         # 最近24小時檢測統計
         recent_detections = await session.execute(
             select(func.count(DetectionResult.id))
-            .where(DetectionResult.timestamp >= datetime.utcnow() - timedelta(days=1))
+            .where(DetectionResult.frame_timestamp >= datetime.utcnow() - timedelta(days=1))
         )
         
         return {
@@ -482,7 +484,7 @@ class DatabaseService:
         try:
             # 驗證必要的資料欄位
             required_fields = [
-                'task_id', 'frame_number', 'timestamp', 'object_type', 'confidence',
+                'task_id', 'frame_number', 'frame_timestamp', 'object_type', 'confidence',
                 'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'center_x', 'center_y'
             ]
             
@@ -518,17 +520,17 @@ class DatabaseService:
                     # 使用原始 SQL 插入，避免 ORM 的 async 問題
                     sql = text("""
                         INSERT INTO detection_results 
-                        (task_id, frame_number, timestamp, object_type, confidence, 
-                         bbox_x1, bbox_y1, bbox_x2, bbox_y2, center_x, center_y)
+                        (task_id, frame_number, frame_timestamp, object_type, confidence, 
+                         bbox_x1, bbox_y1, bbox_x2, bbox_y2, center_x, center_y, thumbnail_path)
                         VALUES 
-                        (:task_id, :frame_number, :timestamp, :object_type, :confidence, 
-                         :bbox_x1, :bbox_y1, :bbox_x2, :bbox_y2, :center_x, :center_y)
+                        (:task_id, :frame_number, :frame_timestamp, :object_type, :confidence, 
+                         :bbox_x1, :bbox_y1, :bbox_x2, :bbox_y2, :center_x, :center_y, :thumbnail_path)
                     """)
                     
                     params = {
                         'task_id': int(detection_data['task_id']),
                         'frame_number': int(detection_data['frame_number']),
-                        'timestamp': detection_data['timestamp'],
+                        'frame_timestamp': detection_data['frame_timestamp'],
                         'object_type': str(detection_data['object_type']),
                         'confidence': float(detection_data['confidence']),
                         'bbox_x1': float(detection_data['bbox_x1']),
@@ -536,7 +538,8 @@ class DatabaseService:
                         'bbox_x2': float(detection_data['bbox_x2']),
                         'bbox_y2': float(detection_data['bbox_y2']),
                         'center_x': float(detection_data['center_x']),
-                        'center_y': float(detection_data['center_y'])
+                        'center_y': float(detection_data['center_y']),
+                        'thumbnail_path': detection_data.get('thumbnail_path')
                     }
                     
                     session.execute(sql, params)

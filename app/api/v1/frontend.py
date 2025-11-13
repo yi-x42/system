@@ -21,6 +21,7 @@ from fastapi import (
     Query,
     WebSocket,
     WebSocketDisconnect,
+    Request,
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -48,6 +49,17 @@ _network_measurement_cache = {
     "last_time": 0,
     "ethernet_interface": "乙太網路"  # 預設乙太網路介面名稱
 }
+
+
+def _build_thumbnail_url(request: Optional[Request], thumbnail_path: Optional[str]) -> Optional[str]:
+    """將存放於 uploads 下的相對路徑轉成可供前端使用的 URL"""
+    if not thumbnail_path:
+        return None
+    normalized = str(thumbnail_path).lstrip("/\\")
+    if not normalized:
+        return None
+    base = str(request.base_url) if request else ""
+    return f"{base}uploads/{normalized}" if base else f"/uploads/{normalized}"
 
 # ===== 工具函數 =====
 
@@ -636,7 +648,7 @@ async def get_detection_summary(db: AsyncSession = Depends(get_db)):
         
         # 總檢測數
         total_query = select(func.count(DetectionResult.id)).where(
-            DetectionResult.created_at >= yesterday
+            DetectionResult.frame_timestamp >= yesterday
         )
         total_result = await db.execute(total_query)
         total_detections = total_result.scalar() or 0
@@ -646,7 +658,7 @@ async def get_detection_summary(db: AsyncSession = Depends(get_db)):
             DetectionResult.class_name,
             func.count(DetectionResult.id).label('count')
         ).where(
-            DetectionResult.created_at >= yesterday
+            DetectionResult.frame_timestamp >= yesterday
         ).group_by(DetectionResult.class_name)
         
         category_result = await db.execute(category_query)
@@ -654,8 +666,8 @@ async def get_detection_summary(db: AsyncSession = Depends(get_db)):
         
         # 最近檢測記錄
         recent_query = select(DetectionResult).where(
-            DetectionResult.created_at >= yesterday
-        ).order_by(desc(DetectionResult.created_at)).limit(10)
+            DetectionResult.frame_timestamp >= yesterday
+        ).order_by(desc(DetectionResult.frame_timestamp)).limit(10)
         
         recent_result = await db.execute(recent_query)
         recent_detections = recent_result.scalars().all()
@@ -668,7 +680,7 @@ async def get_detection_summary(db: AsyncSession = Depends(get_db)):
                     "id": detection.id,
                     "class_name": detection.class_name,
                     "confidence": detection.confidence,
-                    "timestamp": detection.created_at.isoformat(),
+                    "timestamp": detection.frame_timestamp.isoformat() if detection.frame_timestamp else None,
                     "bbox": [detection.x_min, detection.y_min, detection.x_max, detection.y_max]
                 }
                 for detection in recent_detections
@@ -1650,6 +1662,7 @@ async def get_heatmap_data(db: AsyncSession = Depends(get_db)):
 
 @router.get("/detection-results")
 async def get_detection_results(
+    request: Request,
     page: int = 1,
     limit: int = 100,
     db: AsyncSession = Depends(get_db)
@@ -1665,7 +1678,7 @@ async def get_detection_results(
         # 查詢檢測結果
         stmt = (
             select(DetectionResult)
-            .order_by(desc(DetectionResult.timestamp))
+            .order_by(desc(DetectionResult.frame_timestamp))
             .limit(limit)
             .offset(offset)
         )
@@ -1689,7 +1702,7 @@ async def get_detection_results(
             
             results.append({
                 "id": detection.id,
-                "timestamp": detection.timestamp.isoformat(),
+                "timestamp": detection.frame_timestamp.isoformat() if detection.frame_timestamp else None,
                 "task_id": detection.task_id,  # 使用 task_id 而不是 camera_id
                 "object_type": detection.object_type,
                 "object_chinese": detection.object_type,  # 暫時相同
@@ -1706,7 +1719,9 @@ async def get_detection_results(
                 "area": area,
                 "zone": f"zone_{detection.task_id}",
                 "zone_chinese": f"區域{detection.task_id}",
-                "status": "completed"
+                "status": "completed",
+                "thumbnail_path": detection.thumbnail_path,
+                "thumbnail_url": _build_thumbnail_url(request, detection.thumbnail_path),
             })
         
         return {
@@ -1724,6 +1739,7 @@ async def get_detection_results(
 @router.get("/detection-results/{detection_id}")
 async def get_detection_detail(
     detection_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """獲取特定檢測結果的詳細信息"""
@@ -1742,14 +1758,16 @@ async def get_detection_detail(
         
         return {
             "id": str(detection.id),
-            "timestamp": detection.timestamp.isoformat(),
+            "timestamp": detection.frame_timestamp.isoformat() if detection.frame_timestamp else None,
             "camera_id": detection.camera_id,
             "object_type": detection.object_type,
             "confidence": detection.confidence,
             "bbox": detection.bbox,
             "status": "completed",
             "processing_time": getattr(detection, 'processing_time', None),
-            "image_url": getattr(detection, 'image_url', None)
+            "image_url": getattr(detection, 'image_url', None),
+            "thumbnail_path": detection.thumbnail_path,
+            "thumbnail_url": _build_thumbnail_url(request, detection.thumbnail_path),
         }
         
     except ValueError:

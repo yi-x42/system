@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS detection_results (
     bbox_x2          FLOAT,
     bbox_y2          FLOAT,
     center_x         FLOAT,
-    center_y         FLOAT
+    center_y         FLOAT,
+    thumbnail_path   VARCHAR(255)
 );
 CREATE INDEX IF NOT EXISTS idx_detection_results_task ON detection_results(task_id);
 CREATE INDEX IF NOT EXISTS idx_detection_results_tracker ON detection_results(tracker_id);

@@ -297,6 +297,11 @@ frontend_static_path = Path("app/static")
 if frontend_static_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_static_path)), name="frontend_static")
 
+# 上傳資源（縮圖 / 影片等）
+uploads_path = Path("uploads")
+uploads_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
+
 # 根路由 - 重定向到您的現代化網站
 @app.get("/", include_in_schema=False)
 async def root():

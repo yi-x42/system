@@ -988,7 +988,7 @@ async def view_detection_results_table(
                 'id': detection.id,
                 'task_id': detection.task_id,
                 'frame_number': detection.frame_number,
-                'timestamp': detection.timestamp.isoformat() if detection.timestamp else None,
+                'timestamp': detection.frame_timestamp.isoformat() if detection.frame_timestamp else None,
                 'object_type': detection.object_type,
                 'confidence': detection.confidence,
                 'bbox_x1': detection.bbox_x1,

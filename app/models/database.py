@@ -194,6 +194,7 @@ class DetectionResult(Base):
     bbox_y2 = Column(Float)
     center_x = Column(Float)
     center_y = Column(Float)
+    thumbnail_path = Column(String(255))
 
     task = relationship("AnalysisTask", back_populates="detection_results")
 
@@ -214,6 +215,7 @@ class DetectionResult(Base):
             "bbox_y2": self.bbox_y2,
             "center_x": self.center_x,
             "center_y": self.center_y,
+            "thumbnail_path": self.thumbnail_path,
         }
 
 

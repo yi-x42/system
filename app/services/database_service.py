@@ -97,7 +97,7 @@ class DatabaseService:
             for detection in detections:
                 detection_data = {
                     "analysis_id": analysis_id,
-                    "timestamp": datetime.utcnow(),
+                    "frame_timestamp": datetime.utcnow(),
                     **detection
                 }
                 detection_records.append(DetectionResult(**detection_data))
