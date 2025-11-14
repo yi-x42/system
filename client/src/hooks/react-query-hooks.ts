@@ -681,6 +681,105 @@ export const useToggleAnalysisTaskStatus = () => {
   });
 };
 
+// ===== 偵測記錄 =====
+
+export interface DetectionRecord {
+  id: number;
+  tracker_id?: number | null;
+  timestamp: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  task_id: number;
+  task_name?: string | null;
+  task_type?: string | null;
+  camera_name?: string | null;
+  camera_id?: string | null;
+  object_type?: string | null;
+  object_chinese?: string | null;
+  object_id?: string;
+  confidence?: number | null;
+  bbox_x1?: number | null;
+  bbox_y1?: number | null;
+  bbox_x2?: number | null;
+  bbox_y2?: number | null;
+  center_x?: number | null;
+  center_y?: number | null;
+  width?: number | null;
+  height?: number | null;
+  area?: number | null;
+  zone?: string | null;
+  zone_chinese?: string | null;
+  status?: string | null;
+  thumbnail_path?: string | null;
+  thumbnail_url?: string | null;
+}
+
+export interface DetectionRecordsResponse {
+  results: DetectionRecord[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface DetectionRecordsQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  cameraName?: string;
+  cameraId?: string;
+  taskId?: number;
+  objectType?: string;
+  startTime?: string;
+  endTime?: string;
+  minConfidence?: number;
+  maxConfidence?: number;
+}
+
+const fetchDetectionResults = async (
+  params: DetectionRecordsQuery = {}
+): Promise<DetectionRecordsResponse> => {
+  const queryParams: Record<string, string | number> = {};
+
+  if (params.page !== undefined) queryParams.page = params.page;
+  if (params.limit !== undefined) queryParams.limit = params.limit;
+  if (params.search) queryParams.search = params.search;
+  if (params.cameraName) queryParams.camera_name = params.cameraName;
+  if (params.cameraId) queryParams.camera_id = params.cameraId;
+  if (params.taskId !== undefined) queryParams.task_id = params.taskId;
+  if (params.objectType) queryParams.object_type = params.objectType;
+  if (params.startTime) queryParams.start_time = params.startTime;
+  if (params.endTime) queryParams.end_time = params.endTime;
+  if (params.minConfidence !== undefined) queryParams.min_confidence = params.minConfidence;
+  if (params.maxConfidence !== undefined) queryParams.max_confidence = params.maxConfidence;
+
+  const { data } = await apiClient.get('/frontend/detection-results', {
+    params: queryParams,
+  });
+  return data;
+};
+
+export const useDetectionResults = (params: DetectionRecordsQuery = {}) => {
+  return useQuery<DetectionRecordsResponse, Error>({
+    queryKey: [
+      'detectionResults',
+      params.page,
+      params.limit,
+      params.search,
+      params.cameraName,
+      params.cameraId,
+      params.taskId,
+      params.objectType,
+      params.startTime,
+      params.endTime,
+      params.minConfidence,
+      params.maxConfidence,
+    ],
+    queryFn: () => fetchDetectionResults(params),
+    keepPreviousData: true,
+  });
+};
+
 // ===== 系統控制相關 =====
 interface ShutdownResponse {
   message: string;

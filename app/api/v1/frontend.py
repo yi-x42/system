@@ -26,7 +26,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, delete, select, text
+from sqlalchemy import update, delete, select, text, func, desc, or_
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db, AsyncSessionLocal, get_async_db
@@ -1663,75 +1663,186 @@ async def get_heatmap_data(db: AsyncSession = Depends(get_db)):
 @router.get("/detection-results")
 async def get_detection_results(
     request: Request,
-    page: int = 1,
-    limit: int = 100,
-    db: AsyncSession = Depends(get_db)
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    search: Optional[str] = Query(None, description="關鍵字，匹配任務名稱/攝影機/物件"),
+    camera_name: Optional[str] = Query(None, description="攝影機名稱"),
+    camera_id: Optional[str] = Query(None, description="攝影機 ID"),
+    task_id: Optional[int] = Query(None, description="任務 ID"),
+    object_type: Optional[str] = Query(None, description="物件種類"),
+    start_time: Optional[datetime] = Query(None, description="開始時間 (ISO 8601)"),
+    end_time: Optional[datetime] = Query(None, description="結束時間 (ISO 8601)"),
+    min_confidence: Optional[float] = Query(None, description="最低信心度"),
+    max_confidence: Optional[float] = Query(None, description="最高信心度"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """獲取檢測結果列表"""
+    """
+    取得偵測記錄列表：
+    - 同一個追蹤 ID (tracker_id) 只會顯示一次
+    - start_time / end_time 分別對應首次出現與最後一次出現的時間
+    """
     try:
-        from app.models.database import DetectionResult
-        from sqlalchemy import desc, select
-        
-        # 計算 offset
         offset = (page - 1) * limit
-        
-        # 查詢檢測結果
-        stmt = (
-            select(DetectionResult)
-            .order_by(desc(DetectionResult.frame_timestamp))
-            .limit(limit)
-            .offset(offset)
+
+        tracker_group = func.coalesce(DetectionResult.tracker_id, DetectionResult.id)
+        partition_key = (DetectionResult.task_id, tracker_group)
+
+        start_time_col = func.min(DetectionResult.frame_timestamp).over(
+            partition_by=partition_key
+        ).label("start_time")
+
+        end_time_col = func.max(DetectionResult.frame_timestamp).over(
+            partition_by=partition_key
+        ).label("end_time")
+
+        row_rank_col = func.row_number().over(
+            partition_by=partition_key,
+            order_by=DetectionResult.frame_timestamp.desc(),
+        ).label("row_rank")
+
+        base_stmt = (
+            select(
+                DetectionResult.id.label("id"),
+                DetectionResult.task_id.label("task_id"),
+                DetectionResult.tracker_id.label("tracker_id"),
+                DetectionResult.frame_timestamp.label("frame_timestamp"),
+                DetectionResult.object_type.label("object_type"),
+                DetectionResult.confidence.label("confidence"),
+                DetectionResult.bbox_x1.label("bbox_x1"),
+                DetectionResult.bbox_y1.label("bbox_y1"),
+                DetectionResult.bbox_x2.label("bbox_x2"),
+                DetectionResult.bbox_y2.label("bbox_y2"),
+                DetectionResult.center_x.label("center_x"),
+                DetectionResult.center_y.label("center_y"),
+                DetectionResult.thumbnail_path.label("thumbnail_path"),
+                AnalysisTask.task_name.label("task_name"),
+                AnalysisTask.task_type.label("task_type"),
+                AnalysisTask.camera_name.label("camera_name"),
+                AnalysisTask.camera_id.label("camera_id"),
+                AnalysisTask.id.label("analysis_task_id"),
+                start_time_col,
+                end_time_col,
+                row_rank_col,
+            )
+            .outerjoin(AnalysisTask, DetectionResult.task_id == AnalysisTask.id)
         )
-        
-        result = await db.execute(stmt)
-        detection_results = result.scalars().all()
-        
-        # 查詢總數
-        from sqlalchemy import func
-        count_stmt = select(func.count(DetectionResult.id))
+
+        filters = []
+
+        if task_id is not None:
+            filters.append(DetectionResult.task_id == task_id)
+
+        if object_type:
+            filters.append(DetectionResult.object_type.ilike(f"%{object_type}%"))
+
+        if camera_name:
+            filters.append(AnalysisTask.camera_name.ilike(f"%{camera_name}%"))
+
+        if camera_id:
+            filters.append(AnalysisTask.camera_id == camera_id)
+
+        if start_time:
+            filters.append(DetectionResult.frame_timestamp >= start_time)
+
+        if end_time:
+            filters.append(DetectionResult.frame_timestamp <= end_time)
+
+        if min_confidence is not None:
+            filters.append(DetectionResult.confidence >= min_confidence)
+
+        if max_confidence is not None:
+            filters.append(DetectionResult.confidence <= max_confidence)
+
+        if search:
+            keyword = f"%{search}%"
+            filters.append(
+                or_(
+                    DetectionResult.object_type.ilike(keyword),
+                    AnalysisTask.task_name.ilike(keyword),
+                    AnalysisTask.camera_name.ilike(keyword),
+                )
+            )
+
+        if filters:
+            base_stmt = base_stmt.where(*filters)
+
+        ranked_cte = base_stmt.cte("ranked_detections")
+
+        deduplicated_stmt = (
+            select(ranked_cte)
+            .where(ranked_cte.c.row_rank == 1)
+            .order_by(desc(ranked_cte.c.end_time))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        count_stmt = (
+            select(func.count())
+            .select_from(ranked_cte)
+            .where(ranked_cte.c.row_rank == 1)
+        )
+
+        result = await db.execute(deduplicated_stmt)
+        detection_rows = result.fetchall()
+
         count_result = await db.execute(count_stmt)
-        total = count_result.scalar()
-        
-        # 轉換為響應格式
+        total = count_result.scalar_one_or_none() or 0
+
         results = []
-        for detection in detection_results:
-            # 計算邊界框的寬度和高度
-            width = detection.bbox_x2 - detection.bbox_x1
-            height = detection.bbox_y2 - detection.bbox_y1
+        for row in detection_rows:
+            bbox_x1 = row.bbox_x1 or 0
+            bbox_y1 = row.bbox_y1 or 0
+            bbox_x2 = row.bbox_x2 or 0
+            bbox_y2 = row.bbox_y2 or 0
+            width = bbox_x2 - bbox_x1
+            height = bbox_y2 - bbox_y1
             area = width * height
-            
-            results.append({
-                "id": detection.id,
-                "timestamp": detection.frame_timestamp.isoformat() if detection.frame_timestamp else None,
-                "task_id": detection.task_id,  # 使用 task_id 而不是 camera_id
-                "object_type": detection.object_type,
-                "object_chinese": detection.object_type,  # 暫時相同
-                "object_id": f"obj_{detection.id}",
-                "confidence": detection.confidence,
-                "bbox_x1": detection.bbox_x1,
-                "bbox_y1": detection.bbox_y1,
-                "bbox_x2": detection.bbox_x2,
-                "bbox_y2": detection.bbox_y2,
-                "center_x": detection.center_x,
-                "center_y": detection.center_y,
-                "width": width,
-                "height": height,
-                "area": area,
-                "zone": f"zone_{detection.task_id}",
-                "zone_chinese": f"區域{detection.task_id}",
-                "status": "completed",
-                "thumbnail_path": detection.thumbnail_path,
-                "thumbnail_url": _build_thumbnail_url(request, detection.thumbnail_path),
-            })
-        
+
+            results.append(
+                {
+                    "id": row.id,
+                    "tracker_id": row.tracker_id,
+                    "timestamp": row.frame_timestamp.isoformat()
+                    if row.frame_timestamp
+                    else None,
+                    "start_time": row.start_time.isoformat()
+                    if row.start_time
+                    else None,
+                    "end_time": row.end_time.isoformat() if row.end_time else None,
+                    "task_id": row.task_id,
+                    "task_name": row.task_name,
+                    "task_type": row.task_type,
+                    "camera_name": row.camera_name,
+                    "camera_id": row.camera_id,
+                    "object_type": row.object_type,
+                    "object_chinese": row.object_type,
+                    "object_id": f"obj_{row.id}",
+                    "confidence": row.confidence,
+                    "bbox_x1": row.bbox_x1,
+                    "bbox_y1": row.bbox_y1,
+                    "bbox_x2": row.bbox_x2,
+                    "bbox_y2": row.bbox_y2,
+                    "center_x": row.center_x,
+                    "center_y": row.center_y,
+                    "width": width,
+                    "height": height,
+                    "area": area,
+                    "zone": f"zone_{row.task_id}",
+                    "zone_chinese": f"區域{row.task_id}",
+                    "status": "completed",
+                    "thumbnail_path": row.thumbnail_path,
+                    "thumbnail_url": _build_thumbnail_url(request, row.thumbnail_path),
+                }
+            )
+
         return {
             "results": results,
             "total": total,
             "page": page,
             "limit": limit,
-            "total_pages": (total + limit - 1) // limit
+            "total_pages": (total + limit - 1) // limit,
         }
-        
+
     except Exception as e:
         api_logger.error(f"獲取檢測結果失敗: {e}")
         raise HTTPException(status_code=500, detail=f"檢測結果獲取失敗: {str(e)}")

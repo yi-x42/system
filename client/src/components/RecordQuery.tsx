@@ -1,86 +1,317 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "./ui/pagination";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "./ui/pagination";
+import { Skeleton } from "./ui/skeleton";
 import {
   Search,
   Filter,
   Download,
   Eye,
-  Calendar,
   Clock,
-  Camera,
   AlertTriangle,
-  Play,
   FileText,
   Database,
 } from "lucide-react";
+import {
+  useCameras,
+  useDetectionResults,
+  type DetectionRecordsQuery,
+} from "../hooks/react-query-hooks";
+
+type FilterState = {
+  searchQuery: string;
+  startTime: string;
+  endTime: string;
+  cameraKey: string;
+  cameraId?: string;
+  cameraName?: string;
+};
+
+type PaginationIndicator = number | "ellipsis-left" | "ellipsis-right";
+
+const DEFAULT_PAGE_SIZE = 5;
+
+const createDefaultFilters = (): FilterState => ({
+  searchQuery: "",
+  startTime: "",
+  endTime: "",
+  cameraKey: "all",
+  cameraId: undefined,
+  cameraName: "",
+});
+
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-TW", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) {
+    return "--";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return dateTimeFormatter.format(date);
+};
+
+const formatConfidence = (value?: number | null) => {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+const toIsoString = (value: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return date.toISOString();
+};
+
+const buildPaginationRange = (
+  current: number,
+  total: number,
+): PaginationIndicator[] => {
+  const safeTotal = Math.max(total, 1);
+  const pages: PaginationIndicator[] = [];
+  const clampedCurrent = Math.min(Math.max(current, 1), safeTotal);
+
+  if (safeTotal <= 5) {
+    for (let i = 1; i <= safeTotal; i += 1) {
+      pages.push(i);
+    }
+    return pages;
+  }
+
+  pages.push(1);
+
+  if (clampedCurrent > 3) {
+    pages.push("ellipsis-left");
+  }
+
+  const start = Math.max(2, clampedCurrent - 1);
+  const end = Math.min(safeTotal - 1, clampedCurrent + 1);
+
+  for (let i = start; i <= end; i += 1) {
+    pages.push(i);
+  }
+
+  if (clampedCurrent < safeTotal - 2) {
+    pages.push("ellipsis-right");
+  }
+
+  pages.push(safeTotal);
+
+  return pages;
+};
 
 export function RecordQuery() {
+  const pageSize = DEFAULT_PAGE_SIZE;
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [formFilters, setFormFilters] = useState<FilterState>(() =>
+    createDefaultFilters(),
+  );
+  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() =>
+    createDefaultFilters(),
+  );
+  const { data: cameraData } = useCameras();
+  const cameraOptions = cameraData ?? [];
 
-  // 模擬偵測記錄數據
-  const detectionRecords = [
-    {
-      id: "DET_001",
-      timestamp: "2024-01-15 14:30:25",
-      camera: "大門入口",
-      type: "人員偵測",
-      object: "person",
-      confidence: 0.95,
-      thumbnail: "/api/placeholder/80/60",
-      status: "confirmed",
-    },
-    {
-      id: "DET_002",
-      timestamp: "2024-01-15 14:28:12",
-      camera: "停車場",
-      type: "車輛偵測",
-      object: "car",
-      confidence: 0.88,
-      thumbnail: "/api/placeholder/80/60",
-      status: "pending",
-    },
-    {
-      id: "DET_003",
-      timestamp: "2024-01-15 14:25:45",
-      camera: "後門出口",
-      type: "異常行為",
-      object: "person",
-      confidence: 0.92,
-      thumbnail: "/api/placeholder/80/60",
-      status: "false_positive",
-    },
-    {
-      id: "DET_004",
-      timestamp: "2024-01-15 14:20:33",
-      camera: "走廊A",
-      type: "移動偵測",
-      object: "person",
-      confidence: 0.87,
-      thumbnail: "/api/placeholder/80/60",
-      status: "confirmed",
-    },
-    {
-      id: "DET_005",
-      timestamp: "2024-01-15 14:15:18",
-      camera: "停車場",
-      type: "車輛偵測",
-      object: "motorcycle",
-      confidence: 0.91,
-      thumbnail: "/api/placeholder/80/60",
-      status: "confirmed",
-    },
-  ];
+  const handleCameraChange = (value: string) => {
+    if (value === "all") {
+      setFormFilters((prev) => ({
+        ...prev,
+        cameraKey: value,
+        cameraId: undefined,
+        cameraName: "",
+      }));
+      return;
+    }
 
-  // 模擬警報記錄數據
+    const selectedCamera = cameraOptions.find(
+      (camera) => camera.id === value || camera.name === value,
+    );
+
+    setFormFilters((prev) => ({
+      ...prev,
+      cameraKey: value,
+      cameraId: selectedCamera?.id,
+      cameraName: selectedCamera?.name ?? value,
+    }));
+  };
+
+  const detectionQueryParams = useMemo<DetectionRecordsQuery>(() => {
+    const payload: DetectionRecordsQuery = {
+      page: currentPage,
+      limit: pageSize,
+    };
+
+    const trimmedSearch = appliedFilters.searchQuery.trim();
+    if (trimmedSearch) {
+      payload.search = trimmedSearch;
+    }
+
+    const startIso = toIsoString(appliedFilters.startTime);
+    const endIso = toIsoString(appliedFilters.endTime);
+    if (startIso) {
+      payload.startTime = startIso;
+    }
+    if (endIso) {
+      payload.endTime = endIso;
+    }
+
+    if (appliedFilters.cameraId) {
+      payload.cameraId = appliedFilters.cameraId;
+    } else if (appliedFilters.cameraName) {
+      payload.cameraName = appliedFilters.cameraName;
+    }
+
+    return payload;
+  }, [appliedFilters, currentPage, pageSize]);
+
+  const {
+    data: detectionData,
+    isLoading: isDetectionLoading,
+    isError: isDetectionError,
+    error: detectionError,
+    refetch: refetchDetection,
+  } = useDetectionResults(detectionQueryParams);
+
+  const detectionRecords = detectionData?.results ?? [];
+  const totalRecords = detectionData?.total ?? 0;
+  const rawTotalPages = detectionData?.total_pages ?? 0;
+  const effectiveTotalPages = Math.max(rawTotalPages, 1);
+  const paginationIndicators = useMemo(
+    () => buildPaginationRange(currentPage, effectiveTotalPages),
+    [currentPage, effectiveTotalPages],
+  );
+  const limitFromResponse = detectionData?.limit ?? pageSize;
+  const currentPageFromResponse = detectionData?.page ?? currentPage;
+  const pageStart =
+    totalRecords === 0 ? 0 : (currentPageFromResponse - 1) * limitFromResponse + 1;
+  const pageEnd =
+    totalRecords === 0
+      ? 0
+      : Math.min(pageStart + limitFromResponse - 1, totalRecords);
+
+  useEffect(() => {
+    if (!rawTotalPages) {
+      return;
+    }
+    if (currentPage > effectiveTotalPages) {
+      setCurrentPage(effectiveTotalPages);
+    }
+  }, [currentPage, effectiveTotalPages, rawTotalPages]);
+
+  const summaryText = isDetectionLoading
+    ? "資料載入中..."
+    : totalRecords > 0
+      ? `顯示第 ${pageStart}-${pageEnd} 筆，共 ${totalRecords} 筆記錄`
+      : "目前沒有符合條件的偵測結果";
+
+  const handleSearch = () => {
+    setAppliedFilters({ ...formFilters });
+    setCurrentPage(1);
+  };
+
+  const handleReset = () => {
+    const defaults = createDefaultFilters();
+    setFormFilters(defaults);
+    setAppliedFilters(defaults);
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (page: number) => {
+    if (page < 1 || page === currentPage || page > effectiveTotalPages) {
+      return;
+    }
+    setCurrentPage(page);
+  };
+
+  const canGoPrev = currentPage > 1;
+  const canGoNext = currentPage < effectiveTotalPages && totalRecords > 0;
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "confirmed":
+      case "已處理":
+        return "default";
+      case "pending":
+      case "處理中":
+        return "secondary";
+      case "false_positive":
+      case "未處理":
+        return "outline";
+      default:
+        return "outline";
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case "高":
+        return "destructive";
+      case "中":
+        return "secondary";
+      case "低":
+        return "outline";
+      default:
+        return "outline";
+    }
+  };
+
+  const getLogLevelColor = (level: string) => {
+    switch (level) {
+      case "ERROR":
+        return "destructive";
+      case "WARNING":
+        return "secondary";
+      case "INFO":
+        return "default";
+      default:
+        return "outline";
+    }
+  };
+
   const alertRecords = [
     {
       id: "ALERT_001",
@@ -114,7 +345,6 @@ export function RecordQuery() {
     },
   ];
 
-  // 模擬系統日誌數據
   const systemLogs = [
     {
       id: "LOG_001",
@@ -150,61 +380,6 @@ export function RecordQuery() {
     },
   ];
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "confirmed":
-      case "已處理":
-        return "default";
-      case "pending":
-      case "處理中":
-        return "secondary";
-      case "false_positive":
-      case "未處理":
-        return "outline";
-      default:
-        return "outline";
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case "confirmed":
-        return "已確認";
-      case "pending":
-        return "待確認";
-      case "false_positive":
-        return "誤報";
-      default:
-        return status;
-    }
-  };
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "高":
-        return "destructive";
-      case "中":
-        return "secondary";
-      case "低":
-        return "outline";
-      default:
-        return "outline";
-    }
-  };
-
-  const getLogLevelColor = (level: string) => {
-    switch (level) {
-      case "ERROR":
-        return "destructive";
-      case "WARNING":
-        return "secondary";
-      case "INFO":
-        return "default";
-      default:
-        return "outline";
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -221,7 +396,6 @@ export function RecordQuery() {
         </div>
       </div>
 
-      {/* 搜尋和篩選區域 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -236,37 +410,81 @@ export function RecordQuery() {
               <Input
                 id="search-query"
                 placeholder="輸入搜尋關鍵字..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={formFilters.searchQuery}
+                onChange={(event) =>
+                  setFormFilters((prev) => ({
+                    ...prev,
+                    searchQuery: event.target.value,
+                  }))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleSearch();
+                  }
+                }}
               />
             </div>
             <div>
               <Label htmlFor="date-from">開始日期時間</Label>
-              <Input id="date-from" type="datetime-local" />
+              <Input
+                id="date-from"
+                type="datetime-local"
+                value={formFilters.startTime}
+                onChange={(event) =>
+                  setFormFilters((prev) => ({
+                    ...prev,
+                    startTime: event.target.value,
+                  }))
+                }
+              />
             </div>
             <div>
               <Label htmlFor="date-to">結束日期時間</Label>
-              <Input id="date-to" type="datetime-local" />
+              <Input
+                id="date-to"
+                type="datetime-local"
+                value={formFilters.endTime}
+                onChange={(event) =>
+                  setFormFilters((prev) => ({
+                    ...prev,
+                    endTime: event.target.value,
+                  }))
+                }
+              />
             </div>
             <div>
               <Label htmlFor="camera-filter">攝影機</Label>
-              <Select>
-                <SelectTrigger>
+              <Select
+                value={formFilters.cameraKey}
+                onValueChange={handleCameraChange}
+              >
+                <SelectTrigger id="camera-filter">
                   <SelectValue placeholder="選擇攝影機" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部攝影機</SelectItem>
-                  <SelectItem value="cam_001">大門入口</SelectItem>
-                  <SelectItem value="cam_002">停車場</SelectItem>
-                  <SelectItem value="cam_003">後門出口</SelectItem>
-                  <SelectItem value="cam_004">走廊A</SelectItem>
+                  {cameraOptions.map((camera) => {
+                    const optionValue = camera.id || camera.name;
+                    if (!optionValue) {
+                      return null;
+                    }
+                    const valueString = String(optionValue);
+                    return (
+                      <SelectItem key={valueString} value={valueString}>
+                        {camera.name || camera.id}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline">重置</Button>
-            <Button>
+            <Button variant="outline" type="button" onClick={handleReset}>
+              重置
+            </Button>
+            <Button type="button" onClick={handleSearch}>
               <Search className="h-4 w-4 mr-2" />
               搜尋
             </Button>
@@ -294,83 +512,196 @@ export function RecordQuery() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>縮圖</TableHead>
-                    <TableHead>時間</TableHead>
+                    <TableHead>時間區間</TableHead>
                     <TableHead>偵測來源</TableHead>
-                    <TableHead>偵測類型</TableHead>
                     <TableHead>信心度</TableHead>
-                    <TableHead>狀態</TableHead>
                     <TableHead>操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detectionRecords.map((record) => (
-                    <TableRow key={record.id}>
-                      <TableCell>
-                        <img
-                          src={record.thumbnail}
-                          alt="偵測縮圖"
-                          className="w-20 h-15 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => handleViewImage(record)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm">{record.timestamp}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{record.camera}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{record.type}</Badge>
-                      </TableCell>
-                      <TableCell>{(record.confidence * 100).toFixed(1)}%</TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusColor(record.status)}>
-                          {getStatusText(record.status)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
+                  {isDetectionLoading &&
+                    Array.from({ length: pageSize }).map((_, index) => (
+                      <TableRow key={`loading-${index}`}>
+                        <TableCell>
+                          <Skeleton className="h-16 w-20 rounded" />
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <Skeleton className="h-4 w-40" />
+                            <Skeleton className="h-3 w-28" />
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-3 w-24 mt-1" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-4 w-16" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-8 w-16 rounded" />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+
+                  {!isDetectionLoading && isDetectionError && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="py-10 text-center text-sm text-destructive"
+                      >
+                        <div className="space-y-3">
+                          <p>
+                            載入偵測記錄時發生錯誤：
+                            {detectionError?.message ?? "未知錯誤"}
+                          </p>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleViewImage(record)}
+                            onClick={() => refetchDetection()}
                           >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4" />
+                            重新整理
                           </Button>
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )}
+
+                  {!isDetectionLoading &&
+                    !isDetectionError &&
+                    detectionRecords.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className="py-10 text-center text-sm text-muted-foreground"
+                        >
+                          找不到符合條件的偵測記錄
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                  {!isDetectionLoading &&
+                    !isDetectionError &&
+                    detectionRecords.map((record) => {
+                      const thumbnailSrc = record.thumbnail_url;
+                      const sourceLabel =
+                        record.camera_name ||
+                        record.task_name ||
+                        `任務 #${record.task_id}`;
+                      const startText = formatDateTime(
+                        record.start_time ?? record.timestamp,
+                      );
+                      const endText = formatDateTime(
+                        record.end_time ?? record.timestamp,
+                      );
+
+                      return (
+                        <TableRow key={record.id}>
+                          <TableCell>
+                            {thumbnailSrc ? (
+                              <img
+                                src={thumbnailSrc}
+                                alt="偵測縮圖"
+                                className="w-20 h-16 object-cover rounded border"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="w-20 h-16 rounded border bg-muted text-xs text-muted-foreground flex items-center justify-center">
+                                無縮圖
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-sm">{startText}</span>
+                              </div>
+                              <div className="pl-4 text-xs text-muted-foreground">
+                                ~ {endText}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-1">
+                              <span>{sourceLabel}</span>
+                              <span className="text-xs text-muted-foreground">
+                                物件：{record.object_type ?? "未知"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{formatConfidence(record.confidence)}</TableCell>
+                          <TableCell>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled
+                              title="影像預覽功能即將推出"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                 </TableBody>
               </Table>
 
-              <div className="flex justify-between items-center mt-4">
-                <p className="text-sm text-muted-foreground">
-                  顯示第 1-5 筆，共 156 筆記錄
-                </p>
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious href="#" />
-                    </PaginationItem>
-                    <PaginationItem>
-                      <PaginationLink href="#" isActive>1</PaginationLink>
-                    </PaginationItem>
-                    <PaginationItem>
-                      <PaginationLink href="#">2</PaginationLink>
-                    </PaginationItem>
-                    <PaginationItem>
-                      <PaginationLink href="#">3</PaginationLink>
-                    </PaginationItem>
-                    <PaginationItem>
-                      <PaginationNext href="#" />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mt-4">
+                <p className="text-sm text-muted-foreground">{summaryText}</p>
+                {totalRecords > 0 && (
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          aria-disabled={!canGoPrev}
+                          className={!canGoPrev ? "pointer-events-none opacity-50" : undefined}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            if (canGoPrev) {
+                              handlePageChange(currentPage - 1);
+                            }
+                          }}
+                        />
+                      </PaginationItem>
+                      {paginationIndicators.map((indicator, index) =>
+                        indicator === "ellipsis-left" ||
+                        indicator === "ellipsis-right" ? (
+                          <PaginationItem key={`${indicator}-${index}`}>
+                            <PaginationEllipsis />
+                          </PaginationItem>
+                        ) : (
+                          <PaginationItem key={indicator}>
+                            <PaginationLink
+                              href="#"
+                              isActive={indicator === currentPage}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                handlePageChange(indicator);
+                              }}
+                            >
+                              {indicator}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      )}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          aria-disabled={!canGoNext}
+                          className={!canGoNext ? "pointer-events-none opacity-50" : undefined}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            if (canGoNext) {
+                              handlePageChange(currentPage + 1);
+                            }
+                          }}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -416,7 +747,9 @@ export function RecordQuery() {
                           {record.severity}
                         </Badge>
                       </TableCell>
-                      <TableCell className="max-w-xs truncate">{record.description}</TableCell>
+                      <TableCell className="max-w-xs truncate">
+                        {record.description}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={getStatusColor(record.status)}>
                           {record.status}
@@ -448,7 +781,9 @@ export function RecordQuery() {
                       <PaginationPrevious href="#" />
                     </PaginationItem>
                     <PaginationItem>
-                      <PaginationLink href="#" isActive>1</PaginationLink>
+                      <PaginationLink href="#" isActive>
+                        1
+                      </PaginationLink>
                     </PaginationItem>
                     <PaginationItem>
                       <PaginationLink href="#">2</PaginationLink>
@@ -511,7 +846,9 @@ export function RecordQuery() {
                         </Badge>
                       </TableCell>
                       <TableCell>{log.module}</TableCell>
-                      <TableCell className="max-w-md truncate">{log.message}</TableCell>
+                      <TableCell className="max-w-md truncate">
+                        {log.message}
+                      </TableCell>
                       <TableCell>{log.user}</TableCell>
                     </TableRow>
                   ))}
@@ -528,7 +865,9 @@ export function RecordQuery() {
                       <PaginationPrevious href="#" />
                     </PaginationItem>
                     <PaginationItem>
-                      <PaginationLink href="#" isActive>1</PaginationLink>
+                      <PaginationLink href="#" isActive>
+                        1
+                      </PaginationLink>
                     </PaginationItem>
                     <PaginationItem>
                       <PaginationLink href="#">2</PaginationLink>
