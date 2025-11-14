@@ -105,6 +105,34 @@ D:/project/system/uploads/
 
 React 前端使用 React Query 定時輪詢顯示。
 
+## 🗄️ 資料庫查詢 API（Unity / 協作者專用）
+
+所有「讀資料」的 REST API 已統一掛在 `GET /api/v1/database/*`，每張表各對應一支端點，回傳格式固定為：
+
+```jsonc
+{
+  "success": true,
+  "data": [...],        // 查到的資料列
+  "pagination": {...},  // limit / offset / total / has_next / has_prev
+  "filters": {...},     // 實際生效的查詢條件
+  "timestamp": "ISO8601"
+}
+```
+
+| 資料表 | 端點 | 常用查詢參數 | 說明 |
+|--------|------|--------------|------|
+| `data_sources` | `GET /api/v1/database/data-sources` | `source_type`, `status`, `keyword`, `limit`, `offset` | 來源清單，提供名稱模糊搜尋 |
+| `analysis_tasks` | `GET /api/v1/database/tasks` | `task_type`, `status`, `start_date`, `end_date`, `limit`, `offset` | 任務主檔（既有端點，保留） |
+| `detection_results` | `GET /api/v1/database/detection-results` | `task_id`, `object_type`, `min_confidence`, `start_date`, `end_date`, `limit`, `offset` | 任務逐幀結果（既有端點，保留） |
+| `line_crossing_events` | `GET /api/v1/database/line-events` | `task_id`, `line_id`, `start_time`, `end_time`, `limit`, `offset` | 穿越線事件 |
+| `zone_dwell_events` | `GET /api/v1/database/zone-events` | `task_id`, `zone_id`, `start_time`, `end_time`, `limit`, `offset` | 區域停留事件 |
+| `speed_events` | `GET /api/v1/database/speed-events` | `task_id`, `min_speed`, `start_time`, `end_time`, `limit`, `offset` | 速度異常事件 |
+| `task_statistics` | `GET /api/v1/database/task-statistics` | `task_id`, `limit`, `offset` | 最新任務統計（fps、人數、分區統計等） |
+| `system_config` | `GET /api/v1/database/system-config` | `key`, `limit`, `offset` | 全域設定值 |
+| `users` | `GET /api/v1/database/users` | `role`, `is_active`, `limit`, `offset` | 只回傳公開欄位（不包含 `password_hash`） |
+
+> 時間參數同時支援 `YYYY-MM-DD` 與完整 ISO 8601，適合 Unity 端直接帶 `DateTime.ToString("o")`。
+
 ## 🔐 系統控制
 
 - `POST /api/v1/frontend/system/shutdown`

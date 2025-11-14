@@ -10,10 +10,36 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from app.core.database import get_async_db
-from app.models.database import AnalysisTask, DetectionResult
+from app.models.database import (
+    AnalysisTask,
+    DetectionResult,
+    DataSource,
+    SystemConfig,
+    LineCrossingEvent,
+    ZoneDwellEvent,
+    SpeedEvent,
+    TaskStatistics,
+    User,
+)
 
 # 創建資料庫查詢路由器
 db_query_router = APIRouter(prefix="/api/v1/database", tags=["資料庫查詢"])
+
+
+def _parse_datetime(value: Optional[str], field_name: str) -> Optional[datetime]:
+    """將字串解析為 datetime，支援 YYYY-MM-DD 或 ISO 8601。"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_name} 格式錯誤，請使用 ISO8601 或 YYYY-MM-DD",
+            ) from exc
 
 @db_query_router.get("/tasks", summary="查看分析任務表")
 async def get_analysis_tasks(
@@ -324,3 +350,375 @@ async def get_database_stats(db: AsyncSession = Depends(get_async_db)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查詢統計資訊失敗: {str(e)}")
+
+
+@db_query_router.get("/data-sources", summary="查看資料來源表")
+async def get_data_sources(
+    limit: int = Query(50, ge=1, le=1000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    source_type: Optional[str] = Query(None, description="來源類型 (camera/video_file)"),
+    status: Optional[str] = Query(None, description="狀態 (active/inactive/error)"),
+    keyword: Optional[str] = Query(None, description="依名稱模糊搜尋"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 data_sources 內容。"""
+    try:
+        query = select(DataSource)
+        count_query = select(func.count(DataSource.id))
+        filters = []
+
+        if source_type:
+            filters.append(DataSource.source_type == source_type)
+        if status:
+            filters.append(DataSource.status == status)
+        if keyword:
+            like_pattern = f"%{keyword}%"
+            filters.append(DataSource.name.ilike(like_pattern))
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(DataSource.created_at)).limit(limit).offset(offset)
+        )
+
+        sources = [source.to_dict() for source in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": sources,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {
+                "source_type": source_type,
+                "status": status,
+                "keyword": keyword,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢資料來源失敗: {str(e)}")
+
+
+@db_query_router.get("/line-events", summary="查看穿越線事件表")
+async def get_line_events(
+    limit: int = Query(100, ge=1, le=5000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    task_id: Optional[int] = Query(None, description="任務 ID"),
+    line_id: Optional[str] = Query(None, description="線段識別碼"),
+    start_time: Optional[str] = Query(None, description="起始時間 (ISO8601/日期)"),
+    end_time: Optional[str] = Query(None, description="結束時間 (ISO8601/日期)"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 line_crossing_events 內容。"""
+    try:
+        query = select(LineCrossingEvent)
+        count_query = select(func.count(LineCrossingEvent.id))
+        filters = []
+
+        if task_id is not None:
+            filters.append(LineCrossingEvent.task_id == task_id)
+        if line_id:
+            filters.append(LineCrossingEvent.line_id == line_id)
+
+        start_dt = _parse_datetime(start_time, "start_time")
+        end_dt = _parse_datetime(end_time, "end_time")
+        if start_dt:
+            filters.append(LineCrossingEvent.frame_timestamp >= start_dt)
+        if end_dt:
+            filters.append(LineCrossingEvent.frame_timestamp <= end_dt)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(LineCrossingEvent.frame_timestamp))
+            .limit(limit)
+            .offset(offset)
+        )
+        events = [event.to_dict() for event in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": events,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {
+                "task_id": task_id,
+                "line_id": line_id,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢穿越線事件失敗: {str(e)}")
+
+
+@db_query_router.get("/zone-events", summary="查看區域停留事件表")
+async def get_zone_events(
+    limit: int = Query(100, ge=1, le=5000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    task_id: Optional[int] = Query(None, description="任務 ID"),
+    zone_id: Optional[str] = Query(None, description="區域識別碼"),
+    start_time: Optional[str] = Query(None, description="起始時間 (ISO8601/日期)"),
+    end_time: Optional[str] = Query(None, description="結束時間 (ISO8601/日期)"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 zone_dwell_events 內容。"""
+    try:
+        query = select(ZoneDwellEvent)
+        count_query = select(func.count(ZoneDwellEvent.id))
+        filters = []
+
+        if task_id is not None:
+            filters.append(ZoneDwellEvent.task_id == task_id)
+        if zone_id:
+            filters.append(ZoneDwellEvent.zone_id == zone_id)
+
+        start_dt = _parse_datetime(start_time, "start_time")
+        end_dt = _parse_datetime(end_time, "end_time")
+        if start_dt:
+            filters.append(ZoneDwellEvent.event_timestamp >= start_dt)
+        if end_dt:
+            filters.append(ZoneDwellEvent.event_timestamp <= end_dt)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(ZoneDwellEvent.event_timestamp))
+            .limit(limit)
+            .offset(offset)
+        )
+        events = [event.to_dict() for event in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": events,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {
+                "task_id": task_id,
+                "zone_id": zone_id,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢區域停留事件失敗: {str(e)}")
+
+
+@db_query_router.get("/speed-events", summary="查看速度事件表")
+async def get_speed_events(
+    limit: int = Query(100, ge=1, le=5000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    task_id: Optional[int] = Query(None, description="任務 ID"),
+    min_speed: Optional[float] = Query(None, ge=0, description="最低 speed_max 過濾"),
+    start_time: Optional[str] = Query(None, description="起始時間 (ISO8601/日期)"),
+    end_time: Optional[str] = Query(None, description="結束時間 (ISO8601/日期)"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 speed_events 內容。"""
+    try:
+        query = select(SpeedEvent)
+        count_query = select(func.count(SpeedEvent.id))
+        filters = []
+
+        if task_id is not None:
+            filters.append(SpeedEvent.task_id == task_id)
+
+        if min_speed is not None:
+            filters.append(SpeedEvent.speed_max >= min_speed)
+
+        start_dt = _parse_datetime(start_time, "start_time")
+        end_dt = _parse_datetime(end_time, "end_time")
+        if start_dt:
+            filters.append(SpeedEvent.event_timestamp >= start_dt)
+        if end_dt:
+            filters.append(SpeedEvent.event_timestamp <= end_dt)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(SpeedEvent.event_timestamp)).limit(limit).offset(offset)
+        )
+        events = [event.to_dict() for event in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": events,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {
+                "task_id": task_id,
+                "min_speed": min_speed,
+                "start_time": start_time,
+                "end_time": end_time,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢速度事件失敗: {str(e)}")
+
+
+@db_query_router.get("/system-config", summary="查看系統設定")
+async def get_system_config(
+    limit: int = Query(100, ge=1, le=1000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    key: Optional[str] = Query(None, description="依 config_key 過濾"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 system_config 內容。"""
+    try:
+        query = select(SystemConfig)
+        count_query = select(func.count(SystemConfig.id))
+        if key:
+            query = query.where(SystemConfig.config_key == key)
+            count_query = count_query.where(SystemConfig.config_key == key)
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(SystemConfig.updated_at)).limit(limit).offset(offset)
+        )
+
+        configs = [config.to_dict() for config in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": configs,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {"key": key},
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢系統設定失敗: {str(e)}")
+
+
+@db_query_router.get("/task-statistics", summary="查看任務統計")
+async def get_task_statistics(
+    limit: int = Query(100, ge=1, le=2000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    task_id: Optional[int] = Query(None, description="特定任務 ID"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 task_statistics 內容。"""
+    try:
+        query = select(TaskStatistics)
+        count_query = select(func.count(TaskStatistics.task_id))
+
+        if task_id is not None:
+            query = query.where(TaskStatistics.task_id == task_id)
+            count_query = count_query.where(TaskStatistics.task_id == task_id)
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(TaskStatistics.updated_at)).limit(limit).offset(offset)
+        )
+
+        stats = [stat.to_dict() for stat in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": stats,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {"task_id": task_id},
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢任務統計失敗: {str(e)}")
+
+
+@db_query_router.get("/users", summary="查看使用者表")
+async def get_users(
+    limit: int = Query(100, ge=1, le=1000, description="限制筆數"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    role: Optional[str] = Query(None, description="依角色過濾"),
+    is_active: Optional[bool] = Query(None, description="是否啟用"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """列出 users 內容（不包含密碼雜湊）。"""
+    try:
+        query = select(User)
+        count_query = select(func.count(User.id))
+        filters = []
+
+        if role:
+            filters.append(User.role == role)
+        if is_active is not None:
+            filters.append(User.is_active == is_active)
+
+        if filters:
+            query = query.where(and_(*filters))
+            count_query = count_query.where(and_(*filters))
+
+        total = (await db.execute(count_query)).scalar()
+        result = await db.execute(
+            query.order_by(desc(User.created_at)).limit(limit).offset(offset)
+        )
+
+        users = [user.to_dict() for user in result.scalars().all()]
+
+        return {
+            "success": True,
+            "data": users,
+            "pagination": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total,
+                "has_prev": offset > 0,
+            },
+            "filters": {"role": role, "is_active": is_active},
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查詢使用者失敗: {str(e)}")

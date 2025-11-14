@@ -236,6 +236,19 @@ class LineCrossingEvent(Base):
 
     task = relationship("AnalysisTask", back_populates="line_events")
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "is_enabled": self.is_enabled,
+            "task_id": self.task_id,
+            "tracker_id": self.tracker_id,
+            "line_id": self.line_id,
+            "direction": self.direction,
+            "frame_number": self.frame_number,
+            "frame_timestamp": _safe_iso(self.frame_timestamp),
+            "extra": self.extra,
+        }
+
 
 class ZoneDwellEvent(Base):
     __tablename__ = "zone_dwell_events"
@@ -256,6 +269,21 @@ class ZoneDwellEvent(Base):
 
     task = relationship("AnalysisTask", back_populates="zone_events")
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "is_enabled": self.is_enabled,
+            "task_id": self.task_id,
+            "tracker_id": self.tracker_id,
+            "zone_id": self.zone_id,
+            "entered_at": _safe_iso(self.entered_at),
+            "exited_at": _safe_iso(self.exited_at),
+            "dwell_seconds": self.dwell_seconds,
+            "frame_number": self.frame_number,
+            "event_timestamp": _safe_iso(self.event_timestamp),
+            "extra": self.extra,
+        }
+
 
 class SpeedEvent(Base):
     __tablename__ = "speed_events"
@@ -274,6 +302,20 @@ class SpeedEvent(Base):
     extra = Column(JSON)
 
     task = relationship("AnalysisTask", back_populates="speed_events")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "is_enabled": self.is_enabled,
+            "task_id": self.task_id,
+            "tracker_id": self.tracker_id,
+            "speed_avg": self.speed_avg,
+            "speed_max": self.speed_max,
+            "threshold": self.threshold,
+            "frame_number": self.frame_number,
+            "event_timestamp": _safe_iso(self.event_timestamp),
+            "extra": self.extra,
+        }
 
 
 class DataSource(Base):
@@ -312,6 +354,16 @@ class User(Base):
     last_login = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "is_active": self.is_active,
+            "last_login": _safe_iso(self.last_login),
+            "created_at": _safe_iso(self.created_at),
+        }
+
 
 class SystemConfig(Base):
     __tablename__ = "system_config"
@@ -321,6 +373,15 @@ class SystemConfig(Base):
     config_value = Column(Text)
     description = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "config_key": self.config_key,
+            "config_value": self.config_value,
+            "description": self.description,
+            "updated_at": _safe_iso(self.updated_at),
+        }
 
 
 class TaskStatistics(Base):
@@ -339,6 +400,19 @@ class TaskStatistics(Base):
     extra = Column(JSON)
 
     task = relationship("AnalysisTask", back_populates="statistics")
+
+    def to_dict(self):
+        return {
+            "task_id": self.task_id,
+            "updated_at": _safe_iso(self.updated_at),
+            "fps": self.fps,
+            "person_count": self.person_count,
+            "avg_confidence": self.avg_confidence,
+            "line_stats": self.line_stats,
+            "zone_stats": self.zone_stats,
+            "speed_stats": self.speed_stats,
+            "extra": self.extra,
+        }
 
 
 # 索引
