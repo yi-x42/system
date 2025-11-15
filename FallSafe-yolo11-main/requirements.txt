@@ -1,0 +1,14 @@
+icecream
+opencv-python
+opencv-contrib-python
+ultralytics
+moviepy2
+python-dotenv
+torch
+torchvision
+torchaudio
+flask
+flask-cors
+twilio
+email-validator
+Pillow>=10.3

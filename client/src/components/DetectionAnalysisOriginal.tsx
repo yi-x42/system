@@ -696,7 +696,13 @@ export function DetectionAnalysisOriginal() {
 
   const handleOpenPreviewWindow = async (taskId: number) => {
     try {
-      const response = await launchLivePersonPreviewMutation.mutateAsync(String(taskId));
+      const selectedRules = (taskAlertBindings[String(taskId)] ?? []).map((ruleId) => ({
+        type: ruleId,
+      }));
+      const response = await launchLivePersonPreviewMutation.mutateAsync({
+        taskId: String(taskId),
+        alertRules: selectedRules,
+      });
       const message =
         response?.message ||
         (response?.already_running
@@ -1186,8 +1192,9 @@ export function DetectionAnalysisOriginal() {
                                       variant="outline"
                                       size="sm"
                                       disabled={
-                                        launchLivePersonPreviewMutation.isPending &&
-                                        launchLivePersonPreviewMutation.variables === String(task.id)
+                                      launchLivePersonPreviewMutation.isPending &&
+                                      launchLivePersonPreviewMutation.variables?.taskId ===
+                                        String(task.id)
                                       }
                                       onClick={() => {
                                         void handleOpenPreviewWindow(task.id);

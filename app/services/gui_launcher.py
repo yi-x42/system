@@ -90,6 +90,7 @@ class RealtimeDetectionProcessManager:
         start_hidden: bool,
         control_port: Optional[int],
         control_token: Optional[str],
+        fall_alert_enabled: bool,
     ) -> list[str]:
         command: list[str] = [
             sys.executable,
@@ -121,6 +122,8 @@ class RealtimeDetectionProcessManager:
             ]
         if control_token:
             command += ["--control-token", control_token]
+        if fall_alert_enabled:
+            command.append("--enable-fall-alert")
         if parent_pid:
             command += ["--parent-pid", str(parent_pid)]
         return command
@@ -186,6 +189,7 @@ class RealtimeDetectionProcessManager:
         imgsz: Optional[int] = None,
         device: Optional[str] = None,
         start_hidden: bool = True,
+        fall_alert_enabled: bool = False,
     ) -> Dict[str, object]:
         """啟動（或返回已存在的）偵測子行程。"""
         with self._lock:
@@ -212,6 +216,7 @@ class RealtimeDetectionProcessManager:
                 start_hidden=start_hidden,
                 control_port=control_port,
                 control_token=control_token,
+                fall_alert_enabled=fall_alert_enabled,
             )
             record = self._spawn_process(task_id, command)
             record.control_port = control_port

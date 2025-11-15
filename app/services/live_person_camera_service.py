@@ -56,7 +56,7 @@ class ManualLineCounter:
 class LivePersonCameraConfig:
     """服務配置"""
     source: str | int = 0
-    model_path: str = "yolov8n.pt"
+    model_path: str = "yolo11n.pt"
     imgsz: int = 640
     conf_threshold: float = 0.35
     device: str | None = settings.device

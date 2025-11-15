@@ -559,6 +559,11 @@ export interface LaunchPreviewResponse {
   message: string;
 }
 
+export interface LaunchPreviewRequestPayload {
+  taskId: string;
+  alertRules?: { type: string; [key: string]: any }[];
+}
+
 // 開始 Live Person Camera 分析的非同步函式
 const startLivePersonCamera = async (requestData: LivePersonCameraRequest): Promise<LivePersonCameraResponse> => {
   const { data } = await apiClient.post('/frontend/analysis/start-realtime', requestData);
@@ -585,13 +590,20 @@ export const useStopLivePersonCamera = () => {
   });
 };
 
-const launchLivePersonPreview = async (taskId: string): Promise<LaunchPreviewResponse> => {
-  const { data } = await apiClient.post(`/frontend/analysis/live-person-camera/${taskId}/preview`);
+const launchLivePersonPreview = async ({
+  taskId,
+  alertRules,
+}: LaunchPreviewRequestPayload): Promise<LaunchPreviewResponse> => {
+  const payload = alertRules && alertRules.length > 0 ? { alert_rules: alertRules } : undefined;
+  const { data } = await apiClient.post(
+    `/frontend/analysis/live-person-camera/${taskId}/preview`,
+    payload
+  );
   return data;
 };
 
 export const useLaunchLivePersonPreview = () => {
-  return useMutation<LaunchPreviewResponse, Error, string>({
+  return useMutation<LaunchPreviewResponse, Error, LaunchPreviewRequestPayload>({
     mutationFn: launchLivePersonPreview,
   });
 };

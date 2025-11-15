@@ -33,7 +33,7 @@ def test_live_person_camera_api():
     request_data = {
         "task_name": "測試即時人體檢測",
         "camera_id": camera_id,
-        "model_path": "yolov8n.pt",
+        "model_path": "yolo11n.pt",
         "confidence_threshold": 0.35,
         "imgsz": 640,
         "trace_length": 30,

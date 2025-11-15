@@ -278,6 +278,7 @@ class PreviewLaunchRequest(BaseModel):
     imgsz: Optional[int] = Field(None, description="推論影像尺寸")
     confidence: Optional[float] = Field(None, description="信心閾值")
     device: Optional[str] = Field(None, description="推論裝置，例如 cpu 或 cuda:0")
+    alert_rules: Optional[List[Dict[str, Any]]] = Field(None, description="啟用的警報規則列表")
 
 
 class PreviewLaunchResponse(BaseModel):
@@ -1033,6 +1034,7 @@ async def start_realtime_analysis(
                 imgsz=camera_width,
                 device=None,
                 start_hidden=True,
+                fall_alert_enabled=False,
             )
         except Exception as exc:
             api_logger.error(f"啟動 PySide6 偵測程式失敗: {exc}")
@@ -3440,6 +3442,17 @@ async def launch_live_person_preview_gui(
             or f"Live Task {task_id}"
         )
 
+        alert_rules = payload.alert_rules or []
+        fall_alert_enabled = False
+        for rule in alert_rules:
+            if not isinstance(rule, dict):
+                continue
+            rule_type = str(rule.get("type", "")).lower()
+            normalized_type = rule_type.replace("-", "_")
+            if normalized_type in {"fall_detection", "falldetection"}:
+                fall_alert_enabled = True
+                break
+
         try:
             detection_status = realtime_gui_manager.start_detection(
                 task_id=str(task.id),
@@ -3450,6 +3463,7 @@ async def launch_live_person_preview_gui(
                 imgsz=imgsz_value,
                 device=payload.device or source_info.get("device"),
                 start_hidden=False,
+                fall_alert_enabled=fall_alert_enabled,
             )
         except Exception as exc:
             api_logger.error(f"啟動/確認偵測子行程失敗: {exc}")

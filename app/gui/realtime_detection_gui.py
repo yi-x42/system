@@ -846,6 +846,10 @@ class DetectionWorker(QtCore.QThread):
         self._scale_reference_distance: float | None = None
         self._speed_unit = "m/s"
         self._speed_states: dict[int, SpeedState] = {}
+        self._fall_alert_enabled = bool(getattr(args, "enable_fall_alert", False))
+        self._fall_event_log: dict[int, float] = {}
+        self._fall_aspect_ratio_threshold = 1.25
+        self._fall_log_cooldown = 5.0
         self._next_line_id = 1
         self._next_zone_id = 1
         self._frame_index = 0
@@ -916,6 +920,46 @@ class DetectionWorker(QtCore.QThread):
         except Exception as exc:  # noqa: BLE001
             detection_logger.error(f"儲存縮圖失敗: {exc}")
             return None
+
+    def _detect_fall_candidates(
+        self, detections: sv.Detections
+    ) -> list[tuple[int | None, float]]:
+        events: list[tuple[int | None, float]] = []
+        if detections.xyxy is None or len(detections.xyxy) == 0:
+            return events
+        for idx, bbox in enumerate(detections.xyxy):
+            width = float(bbox[2] - bbox[0])
+            height = float(bbox[3] - bbox[1])
+            if height <= 1e-3 or width <= 1e-3:
+                continue
+            aspect_ratio = width / height
+            if aspect_ratio < self._fall_aspect_ratio_threshold:
+                continue
+            tracker_id = None
+            if detections.tracker_id is not None and idx < len(detections.tracker_id):
+                tracker_value = detections.tracker_id[idx]
+                tracker_id = int(tracker_value) if tracker_value is not None else None
+            events.append((tracker_id, aspect_ratio))
+        return events
+
+    def _log_fall_events(
+        self, events: list[tuple[int | None, float]], frame_timestamp: datetime
+    ) -> None:
+        if not events:
+            return
+        now = time.perf_counter()
+        for tracker_id, ratio in events:
+            key = tracker_id if tracker_id is not None else -1
+            last_logged = self._fall_event_log.get(key, 0.0)
+            if now - last_logged < self._fall_log_cooldown:
+                continue
+            self._fall_event_log[key] = now
+            tracker_part = (
+                f"追蹤 ID {tracker_id}" if tracker_id is not None else "未知目標"
+            )
+            detection_logger.warning(
+                f"[FallAlert][Task {self._task_id}] {tracker_part} 疑似跌倒 (寬高比 {ratio:.2f})"
+            )
 
     @QtCore.Slot(str, bool)
     def set_toggle(self, name: str, value: bool) -> None:
@@ -1201,9 +1245,15 @@ class DetectionWorker(QtCore.QThread):
                 line_event_records: list[dict[str, object]] = []
                 zone_event_records: list[dict[str, object]] = []
                 speed_event_records: list[dict[str, object]] = []
+                fall_events: list[tuple[int | None, float]] = []
 
                 with self._toggle_lock:
                     toggles_snapshot = dict(self._toggles)
+
+                if self._fall_alert_enabled and len(detections):
+                    fall_events = self._detect_fall_candidates(detections)
+                    if fall_events:
+                        self._log_fall_events(fall_events, frame_timestamp)
 
                 annotated = frame.copy()
 
@@ -2083,8 +2133,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="yolov8n.pt",
-        help="Ultralytics 模型權重檔（預設：yolov8n.pt）。",
+        default="yolo11n.pt",
+        help="Ultralytics 模型權重檔（預設：yolo11n.pt）。",
     )
     parser.add_argument(
         "--imgsz",
@@ -2173,6 +2223,11 @@ def parse_args() -> argparse.Namespace:
         "--allow-window-close",
         action="store_true",
         help="允許使用者關閉視窗並終止偵測（預設會改為隱藏）。",
+    )
+    parser.add_argument(
+        "--enable-fall-alert",
+        action="store_true",
+        help="啟用跌倒警報邏輯，偵測到可疑姿態時輸出日誌。",
     )
     return parser.parse_args()
 
