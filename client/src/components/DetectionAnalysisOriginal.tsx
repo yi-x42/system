@@ -57,6 +57,7 @@ import {
   ArrowLeftRight,
   Timer,
   Monitor,
+  BellRing,
 } from "lucide-react";
 
 type CameraWithMeta = CameraInfo & {
@@ -104,6 +105,20 @@ export function DetectionAnalysisOriginal() {
   // 模型上傳進度 / 錯誤狀態
   const [modelUploadPending, setModelUploadPending] = useState<boolean>(false);
   const [modelUploadError, setModelUploadError] = useState<string | null>(null);
+  const [isAlertConfigOpen, setIsAlertConfigOpen] = useState(false);
+  const [alertConfigTask, setAlertConfigTask] = useState<{ id: string; name: string } | null>(null);
+  const [taskAlertBindings, setTaskAlertBindings] = useState<Record<string, string[]>>({});
+
+  const availableAlertRules = useMemo(
+    () => [
+      { id: "line_crossing", name: "越線警報", description: "監控指定線段的進出數量" },
+      { id: "zone_dwell", name: "區域滯留警報", description: "偵測停留時間過長的目標" },
+      { id: "speed_anomaly", name: "速度異常警報", description: "平均或最大速度超過門檻" },
+      { id: "crowd_count", name: "人數警報", description: "現場人數超過設定上限" },
+      { id: "fall_detection", name: "跌倒警報", description: "啟用跌倒動作模型並偵測異常" },
+    ],
+    []
+  );
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -191,6 +206,25 @@ export function DetectionAnalysisOriginal() {
         };
       });
   }, [runningTasks]);
+
+  const handleOpenAlertConfig = (taskId: string, name: string) => {
+    setAlertConfigTask({ id: taskId, name });
+    setIsAlertConfigOpen(true);
+  };
+
+  const handleToggleAlertRule = (taskId: string, ruleId: string, enabled: boolean) => {
+    setTaskAlertBindings((previous) => {
+      const currentRules = previous[taskId] ?? [];
+      const nextRules = enabled
+        ? [...new Set([...currentRules, ruleId])]
+        : currentRules.filter((item) => item !== ruleId);
+      return { ...previous, [taskId]: nextRules };
+    });
+  };
+
+  const handleSaveAlertConfig = () => {
+    setIsAlertConfigOpen(false);
+  };
 
 
   // 真實數據獲取
@@ -1127,34 +1161,44 @@ export function DetectionAnalysisOriginal() {
                       <div className="space-y-3">
                         {realtimeAnalysisTasks.map((task) => (
                           <div key={task.id} className="border rounded-lg p-4 space-y-4">
-                            <div className="flex justify-between items-start">
-                              <div className="flex items-center gap-2">
-                                <Camera className="h-5 w-5 text-primary" />
-                                <div>
-                                  <p className="font-medium">{task.camera}</p>
-                                  <Badge variant={getTaskStatusColor(task.status)} className="mt-1">
-                                    <Activity className="h-3 w-3 mr-1" />
-                                    {getTaskStatusText(task.status)}
-                                  </Badge>
+                              <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-2">
+                                  <Camera className="h-5 w-5 text-primary" />
+                                  <div>
+                                    <p className="font-medium">{task.camera}</p>
+                                    <Badge variant={getTaskStatusColor(task.status)} className="mt-1">
+                                      <Activity className="h-3 w-3 mr-1" />
+                                      {getTaskStatusText(task.status)}
+                                    </Badge>
+                                  </div>
                                 </div>
+                                {task.status === "running" && (
+                                  <div className="flex gap-2">
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => handleOpenAlertConfig(String(task.id), task.camera)}
+                                    >
+                                      <BellRing className="h-4 w-4 mr-1" />
+                                      配置警報
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={
+                                        launchLivePersonPreviewMutation.isPending &&
+                                        launchLivePersonPreviewMutation.variables === String(task.id)
+                                      }
+                                      onClick={() => {
+                                        void handleOpenPreviewWindow(task.id);
+                                      }}
+                                    >
+                                      <Monitor className="h-4 w-4 mr-2" />
+                                      打開預覽
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
-                              {task.status === 'running' && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={
-                                    launchLivePersonPreviewMutation.isPending &&
-                                    launchLivePersonPreviewMutation.variables === String(task.id)
-                                  }
-                                  onClick={() => {
-                                    void handleOpenPreviewWindow(task.id);
-                                  }}
-                                >
-                                  <Monitor className="h-4 w-4 mr-2" />
-                                  打開預覽
-                                </Button>
-                              )}
-                            </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                               <div className="space-y-1">
@@ -1204,6 +1248,47 @@ export function DetectionAnalysisOriginal() {
                       </div>
                     )}
                   </section>
+
+                  <Dialog open={isAlertConfigOpen} onOpenChange={setIsAlertConfigOpen}>
+                    <DialogContent className="max-w-2xl">
+                      <DialogHeader>
+                        <DialogTitle>配置警報</DialogTitle>
+                        {alertConfigTask && (
+                          <p className="text-sm text-muted-foreground">套用對象：{alertConfigTask.name}</p>
+                        )}
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        {availableAlertRules.map((rule) => {
+                          const taskId = alertConfigTask?.id ?? "";
+                          const enabledRules = taskAlertBindings[taskId] ?? [];
+                          const isChecked = enabledRules.includes(rule.id);
+                          return (
+                            <div key={rule.id} className="flex items-start justify-between rounded-lg border p-4">
+                              <div>
+                                <p className="font-medium">{rule.name}</p>
+                                <p className="text-sm text-muted-foreground">{rule.description}</p>
+                              </div>
+                              <Switch
+                                checked={isChecked}
+                                onCheckedChange={(checked) => {
+                                  if (!alertConfigTask) {
+                                    return;
+                                  }
+                                  handleToggleAlertRule(alertConfigTask.id, rule.id, checked);
+                                }}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex justify-end gap-2 pt-4">
+                        <Button variant="outline" onClick={() => setIsAlertConfigOpen(false)}>
+                          取消
+                        </Button>
+                        <Button onClick={handleSaveAlertConfig}>儲存設定</Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
 
                 </div>
               </div>
