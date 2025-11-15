@@ -26,9 +26,117 @@ import {
   User,
 } from "lucide-react";
 
+type AlertTypeKey =
+  | "lineCrossing"
+  | "zoneDwell"
+  | "speedAnomaly"
+  | "crowdCount"
+  | "fallDetection";
+
+type TriggerField = {
+  key: string;
+  label: string;
+  type: "number" | "text" | "select";
+  placeholder?: string;
+  helpText?: string;
+  defaultValue?: string;
+  options?: { label: string; value: string }[];
+};
+
+const alertTypeConfig: Record<
+  AlertTypeKey,
+  {
+    label: string;
+    fields: TriggerField[];
+  }
+> = {
+  lineCrossing: {
+    label: "越線警報",
+    fields: [
+      {
+        key: "crossingCount",
+        label: "越線人數",
+        type: "number",
+        placeholder: "輸入觸發人數",
+        helpText: "在指定時間窗內越線人數超過此值即觸發",
+      },
+    ],
+  },
+  zoneDwell: {
+    label: "區域滯留警報",
+    fields: [
+      {
+        key: "dwellSeconds",
+        label: "滯留秒數",
+        type: "number",
+        placeholder: "輸入秒數",
+        helpText: "物件在區域內停留超過此秒數觸發",
+      },
+      {
+        key: "simultaneousCount",
+        label: "同時人數",
+        type: "number",
+        placeholder: "輸入人數",
+        helpText: "區域內同時人數達到此值觸發，可搭配滯留秒數",
+      },
+    ],
+  },
+  speedAnomaly: {
+    label: "速度異常警報",
+    fields: [
+      {
+        key: "avgSpeedThreshold",
+        label: "平均速度門檻 (m/s)",
+        type: "number",
+        placeholder: "例如 1.5",
+      },
+      {
+        key: "maxSpeedThreshold",
+        label: "最大速度門檻 (m/s)",
+        type: "number",
+        placeholder: "例如 2.2",
+      },
+    ],
+  },
+  crowdCount: {
+    label: "人數警報",
+    fields: [
+      {
+        key: "peopleCount",
+        label: "人數門檻",
+        type: "number",
+        placeholder: "輸入人數",
+        helpText: "偵測到的人數大於等於此值時觸發",
+      },
+    ],
+  },
+  fallDetection: {
+    label: "跌倒警報",
+    fields: [
+      {
+        key: "detectionWindow",
+        label: "觀察時間 (秒)",
+        type: "number",
+        placeholder: "例如 3",
+        helpText: "在此時間窗內偵測到跌倒姿態即觸發",
+      },
+      {
+        key: "fallConfidence",
+        label: "跌倒信心門檻 (0-1)",
+        type: "number",
+        placeholder: "例如 0.7",
+        helpText: "動作識別模型輸出的最低信心值",
+      },
+    ],
+  },
+};
+
 export function AlertManagement() {
   const [selectedAlert, setSelectedAlert] = useState<string | null>(null);
   const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
+  const [selectedAlertType, setSelectedAlertType] = useState<AlertTypeKey | "">("");
+  const [triggerValues, setTriggerValues] = useState<Record<string, string>>({});
+  const alertTypeKeys = Object.keys(alertTypeConfig) as AlertTypeKey[];
 
   // 模擬活躍警報數據
   const activeAlerts = [
@@ -122,6 +230,75 @@ export function AlertManagement() {
     },
   };
 
+  const getDefaultTriggerValues = (type: AlertTypeKey) => {
+    const defaults: Record<string, string> = {};
+    alertTypeConfig[type].fields.forEach((field) => {
+      defaults[field.key] = field.defaultValue ?? "";
+    });
+    return defaults;
+  };
+
+  const handleAlertTypeChange = (value: AlertTypeKey) => {
+    setSelectedAlertType(value);
+    setTriggerValues(getDefaultTriggerValues(value));
+  };
+
+  const updateTriggerValue = (key: string, value: string) => {
+    setTriggerValues((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const renderTriggerFields = () => {
+    if (!selectedAlertType) {
+      return <p className="text-sm text-muted-foreground">請先選擇警報類型以設定條件。</p>;
+    }
+
+    return alertTypeConfig[selectedAlertType].fields.map((field) => {
+      if (field.type === "number" || field.type === "text") {
+        return (
+          <div key={field.key} className="space-y-1">
+            <Label>{field.label}</Label>
+            <Input
+              type={field.type}
+              placeholder={field.placeholder}
+              value={triggerValues[field.key] ?? ""}
+              onChange={(event) => updateTriggerValue(field.key, event.target.value)}
+            />
+            {field.helpText && <p className="text-xs text-muted-foreground">{field.helpText}</p>}
+          </div>
+        );
+      }
+
+      if (field.type === "select") {
+        return (
+          <div key={field.key} className="space-y-1">
+            <Label>{field.label}</Label>
+            <Select
+              value={triggerValues[field.key] ?? ""}
+              onValueChange={(value) => updateTriggerValue(field.key, value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={field.placeholder} />
+              </SelectTrigger>
+              <SelectContent>
+                {field.options?.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {field.helpText && <p className="text-xs text-muted-foreground">{field.helpText}</p>}
+          </div>
+        );
+      }
+
+      return null;
+    });
+  };
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "高":
@@ -175,15 +352,19 @@ export function AlertManagement() {
                   </div>
                   <div>
                     <Label htmlFor="rule-type">警報類型</Label>
-                    <Select>
+                    <Select
+                      value={selectedAlertType || undefined}
+                      onValueChange={(value) => handleAlertTypeChange(value as AlertTypeKey)}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="選擇警報類型" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="intrusion">入侵偵測</SelectItem>
-                        <SelectItem value="behavior">異常行為</SelectItem>
-                        <SelectItem value="vehicle">車輛偵測</SelectItem>
-                        <SelectItem value="device">設備異常</SelectItem>
+                        {alertTypeKeys.map((key) => (
+                          <SelectItem key={key} value={key}>
+                            {alertTypeConfig[key].label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -205,15 +386,10 @@ export function AlertManagement() {
                 </div>
 
                 <div>
-                  <Label htmlFor="rule-conditions">觸發條件</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="選擇觸發條件" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unknown">未知</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label>觸發條件</Label>
+                  <div className="mt-2 space-y-3 rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 p-4">
+                    {renderTriggerFields()}
+                  </div>
                 </div>
 
                 <div>

@@ -51,7 +51,7 @@ def resolve_labels(
     object_types: Iterable[str] | None = None,
     dwell_lookup: dict[int, float] | None = None,
     speed_lookup: dict[int, float] | None = None,
-    speed_unit: str = "km/h",
+    speed_unit: str = "m/s",
 ) -> list[str]:
     if len(detections) == 0:
         return []
@@ -844,7 +844,7 @@ class DetectionWorker(QtCore.QThread):
         self._meters_per_pixel: float | None = None
         self._scale_reference_pixels: float | None = None
         self._scale_reference_distance: float | None = None
-        self._speed_unit = "km/h"
+        self._speed_unit = "m/s"
         self._speed_states: dict[int, SpeedState] = {}
         self._next_line_id = 1
         self._next_zone_id = 1
@@ -1957,7 +1957,7 @@ class MainWindow(QtWidgets.QMainWindow):
         zone_summaries = stats.get("zone_summaries", [])
 
         speed_configured = bool(stats.get("speed_configured", False))
-        speed_unit = stats.get("speed_unit", "km/h") or "km/h"
+        speed_unit = stats.get("speed_unit", "m/s") or "m/s"
         avg_speed_value = float(stats.get("avg_speed", 0.0) or 0.0)
         max_speed_value = float(stats.get("max_speed", 0.0) or 0.0)
 
