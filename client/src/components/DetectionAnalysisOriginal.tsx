@@ -34,6 +34,8 @@ import {
   LivePersonCameraRequest,
   useVideoAnalysis,
   CameraInfo,
+  useAlertRules,
+  AlertRule,
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -106,19 +108,44 @@ export function DetectionAnalysisOriginal() {
   const [modelUploadPending, setModelUploadPending] = useState<boolean>(false);
   const [modelUploadError, setModelUploadError] = useState<string | null>(null);
   const [isAlertConfigOpen, setIsAlertConfigOpen] = useState(false);
-  const [alertConfigTask, setAlertConfigTask] = useState<{ id: string; name: string } | null>(null);
+  const [alertConfigTask, setAlertConfigTask] = useState<{ id: string; name: string; cameraId?: string | null } | null>(null);
   const [taskAlertBindings, setTaskAlertBindings] = useState<Record<string, string[]>>({});
 
-  const availableAlertRules = useMemo(
-    () => [
-      { id: "line_crossing", name: "越線警報", description: "監控指定線段的進出數量" },
-      { id: "zone_dwell", name: "區域滯留警報", description: "偵測停留時間過長的目標" },
-      { id: "speed_anomaly", name: "速度異常警報", description: "平均或最大速度超過門檻" },
-      { id: "crowd_count", name: "人數警報", description: "現場人數超過設定上限" },
-      { id: "fall_detection", name: "跌倒警報", description: "啟用跌倒動作模型並偵測異常" },
-    ],
+  const alertRuleTypeMeta = useMemo(
+    () => ({
+      lineCrossing: { label: "越線警報", description: "監控指定線段的進出數量" },
+      zoneDwell: { label: "區域滯留警報", description: "偵測停留時間過長的目標" },
+      speedAnomaly: { label: "速度異常警報", description: "平均或最大速度超過門檻" },
+      crowdCount: { label: "人數警報", description: "現場人數超過設定上限" },
+      fallDetection: { label: "跌倒警報", description: "啟用跌倒動作模型並偵測異常" },
+    }),
     []
   );
+  const { data: alertRulesData } = useAlertRules();
+  const alertRules = (alertRulesData ?? []) as AlertRule[];
+
+  const alertRulesForDialog = useMemo(() => {
+    if (!alertConfigTask) {
+      return [];
+    }
+    const cameraId = alertConfigTask.cameraId;
+    return alertRules
+      .filter((rule) => {
+        const cameras = rule.cameras || [];
+        if (!cameraId) {
+          return true;
+        }
+        return cameras.length === 0 || cameras.includes(cameraId);
+      })
+      .map((rule) => {
+        const meta = alertRuleTypeMeta[rule.rule_type as AlertTypeKey];
+        return {
+          id: rule.id,
+          name: rule.name || meta?.label || rule.rule_type,
+          description: meta?.description || "",
+        };
+      });
+  }, [alertConfigTask, alertRules, alertRuleTypeMeta]);
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -182,6 +209,10 @@ export function DetectionAnalysisOriginal() {
         const stats = sourceInfo.statistics || {};
         const lineStats = stats.line || stats.crossing || {};
         const dwellStats = stats.zone || stats.dwell || {};
+        const cameraIdValue =
+          sourceInfo.camera_id !== undefined && sourceInfo.camera_id !== null
+            ? String(sourceInfo.camera_id)
+            : undefined;
         return {
           id: task.id,
           status: task.status ?? task.task_status ?? "unknown",
@@ -190,6 +221,7 @@ export function DetectionAnalysisOriginal() {
             sourceInfo.camera_id ||
             task.task_name ||
             `任務 ${task.id}`,
+          cameraId: cameraIdValue,
           detectedPeople:
             stats.detected_people ??
             stats.people_count ??
@@ -207,8 +239,8 @@ export function DetectionAnalysisOriginal() {
       });
   }, [runningTasks]);
 
-  const handleOpenAlertConfig = (taskId: string, name: string) => {
-    setAlertConfigTask({ id: taskId, name });
+  const handleOpenAlertConfig = (taskId: string, name: string, cameraId?: string | null) => {
+    setAlertConfigTask({ id: taskId, name, cameraId });
     setIsAlertConfigOpen(true);
   };
 
@@ -1183,7 +1215,7 @@ export function DetectionAnalysisOriginal() {
                                     <Button
                                       variant="secondary"
                                       size="sm"
-                                      onClick={() => handleOpenAlertConfig(String(task.id), task.camera)}
+                                      onClick={() => handleOpenAlertConfig(String(task.id), task.camera, task.cameraId)}
                                     >
                                       <BellRing className="h-4 w-4 mr-1" />
                                       配置警報
@@ -1265,28 +1297,36 @@ export function DetectionAnalysisOriginal() {
                         )}
                       </DialogHeader>
                       <div className="space-y-4">
-                        {availableAlertRules.map((rule) => {
-                          const taskId = alertConfigTask?.id ?? "";
-                          const enabledRules = taskAlertBindings[taskId] ?? [];
-                          const isChecked = enabledRules.includes(rule.id);
-                          return (
-                            <div key={rule.id} className="flex items-start justify-between rounded-lg border p-4">
-                              <div>
-                                <p className="font-medium">{rule.name}</p>
-                                <p className="text-sm text-muted-foreground">{rule.description}</p>
+                        {alertRulesForDialog.length === 0 ? (
+                          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                            尚未建立符合此攝影機的警報規則，請先到「警報管理」新增規則。
+                          </div>
+                        ) : (
+                          alertRulesForDialog.map((rule) => {
+                            const taskId = alertConfigTask?.id ?? "";
+                            const enabledRules = taskAlertBindings[taskId] ?? [];
+                            const isChecked = enabledRules.includes(rule.id);
+                            return (
+                              <div key={rule.id} className="flex items-start justify-between rounded-lg border p-4">
+                                <div>
+                                  <p className="font-medium">{rule.name}</p>
+                                  {rule.description && (
+                                    <p className="text-sm text-muted-foreground">{rule.description}</p>
+                                  )}
+                                </div>
+                                <Switch
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    if (!alertConfigTask) {
+                                      return;
+                                    }
+                                    handleToggleAlertRule(alertConfigTask.id, rule.id, checked);
+                                  }}
+                                />
                               </div>
-                              <Switch
-                                checked={isChecked}
-                                onCheckedChange={(checked) => {
-                                  if (!alertConfigTask) {
-                                    return;
-                                  }
-                                  handleToggleAlertRule(alertConfigTask.id, rule.id, checked);
-                                }}
-                              />
-                            </div>
-                          );
-                        })}
+                            );
+                          })
+                        )}
                       </div>
                       <div className="flex justify-end gap-2 pt-4">
                         <Button variant="outline" onClick={() => setIsAlertConfigOpen(false)}>
