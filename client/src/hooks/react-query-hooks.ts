@@ -75,6 +75,17 @@ export const useUpdateEmailNotificationSettings = () => {
   });
 };
 
+const testEmailNotification = async (payload: { address: string }): Promise<{ success: boolean; message: string }> => {
+  const { data } = await apiClient.post('/frontend/alerts/notification-settings/email/test', payload);
+  return data;
+};
+
+export const useTestEmailNotification = () => {
+  return useMutation<{ success: boolean; message: string }, Error, { address: string }>({
+    mutationFn: testEmailNotification,
+  });
+};
+
 // 警報規則設定
 export interface AlertRuleActionSettings {
   email: boolean;

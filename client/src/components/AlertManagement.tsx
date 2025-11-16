@@ -32,6 +32,7 @@ import {
   useToggleAlertRule,
   useDeleteAlertRule,
   useCameras,
+  useTestEmailNotification,
 } from "../hooks/react-query-hooks";
 
 type AlertTypeKey =
@@ -159,6 +160,7 @@ export function AlertManagement() {
   const createAlertRuleMutation = useCreateAlertRule();
   const toggleAlertRuleMutation = useToggleAlertRule();
   const deleteAlertRuleMutation = useDeleteAlertRule();
+  const testEmailNotificationMutation = useTestEmailNotification();
   const alertRules = alertRulesData ?? [];
   const { data: camerasData } = useCameras();
   const cameraOptions = camerasData ?? [];
@@ -421,6 +423,28 @@ export function AlertManagement() {
     );
   };
 
+  const handleSendTestEmail = () => {
+    if (!emailEnabled) {
+      alert("請先啟用郵件通知再發送測試郵件。");
+      return;
+    }
+    if (!emailAddress.trim()) {
+      alert("請先輸入收件者郵件地址。");
+      return;
+    }
+    testEmailNotificationMutation.mutate(
+      { address: emailAddress.trim() },
+      {
+        onSuccess: (response) => {
+          alert(response.message || "測試郵件已寄出");
+        },
+        onError: (error) => {
+          alert(`測試郵件寄送失敗：${error.message}`);
+        },
+      }
+    );
+  };
+
   const handleConfirmRule = async () => {
     if (!ruleName.trim()) {
       alert("請輸入規則名稱");
@@ -656,7 +680,9 @@ export function AlertManagement() {
                   <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
                     取消
                   </Button>
-                  <Button onClick={handleConfirmRule}>確認新增</Button>
+                  <Button onClick={handleConfirmRule} disabled={createAlertRuleMutation.isPending}>
+                    {createAlertRuleMutation.isPending ? "處理中..." : "確認新增"}
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -878,7 +904,14 @@ export function AlertManagement() {
                   </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleSendTestEmail}
+                    disabled={!emailEnabled || testEmailNotificationMutation.isPending}
+                  >
+                    {testEmailNotificationMutation.isPending ? "寄送中..." : "發送測試郵件"}
+                  </Button>
                   <Button onClick={handleSaveEmailSettings} disabled={updateEmailSettingsMutation.isPending}>
                     {updateEmailSettingsMutation.isPending ? "儲存中..." : "儲存郵件設定"}
                   </Button>

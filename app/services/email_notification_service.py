@@ -71,8 +71,41 @@ def send_fall_email_alert(
             with smtplib.SMTP_SSL(settings.smtp_server, settings.smtp_port) as server:
                 server.login(settings.smtp_username, settings.smtp_password)
                 server.sendmail(settings.smtp_username, receiver_email, message.as_string())
-        detection_logger.info("跌倒通知郵件已寄送至 %s", receiver_email)
+        detection_logger.info(f"跌倒通知郵件已寄送至 {receiver_email}")
         return True
     except Exception as exc:  # noqa: BLE001
         detection_logger.error(f"寄送跌倒通知失敗: {exc}")
+        return False
+
+
+def send_test_email(receiver_email: str) -> bool:
+    """寄送測試郵件，確認 SMTP 設定是否正確。"""
+    if not settings.smtp_username or not settings.smtp_password:
+        detection_logger.error("郵件帳號或密碼未設定，無法寄送測試郵件")
+        return False
+    if not receiver_email:
+        detection_logger.warning("未提供收件者，跳過寄送測試郵件")
+        return False
+
+    subject = "警報通知測試郵件"
+    body = (
+        "這是一封測試郵件，用來確認郵件通知設定是否可以正常運作。\n"
+        "如需停用測試信件，請返回系統的「通知設定」頁調整。"
+    )
+    message = _build_message(subject, body, receiver_email)
+
+    try:
+        if settings.smtp_port == 587:
+            with smtplib.SMTP(settings.smtp_server, settings.smtp_port) as server:
+                server.starttls()
+                server.login(settings.smtp_username, settings.smtp_password)
+                server.sendmail(settings.smtp_username, receiver_email, message.as_string())
+        else:
+            with smtplib.SMTP_SSL(settings.smtp_server, settings.smtp_port) as server:
+                server.login(settings.smtp_username, settings.smtp_password)
+                server.sendmail(settings.smtp_username, receiver_email, message.as_string())
+        detection_logger.info(f"測試郵件已寄送至 {receiver_email}")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        detection_logger.error(f"寄送測試郵件失敗: {exc}")
         return False

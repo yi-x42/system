@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from app.core.database import get_db, AsyncSessionLocal, get_async_db
 from app.core.logger import api_logger
+from app.core.config import settings
 # from app.services.yolo_service import get_yolo_service  # 暫時註解
 from app.services.camera_service import CameraService
 from app.services.task_service import TaskService, get_task_service
@@ -50,6 +51,7 @@ from app.services.alert_rule_service import (
     delete_rule as delete_alert_rule_service,
 )
 from app.services.fall_detection_service import fall_detection_service
+from app.services.email_notification_service import send_fall_email_alert, send_test_email
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
@@ -342,6 +344,10 @@ class AlertRuleResponse(AlertRuleBase):
 
 class AlertRuleToggleRequest(BaseModel):
     enabled: bool
+
+
+class EmailNotificationTestRequest(BaseModel):
+    address: Optional[str] = Field(None, description="若提供則使用此收件者；否則使用配置檔")
 
 class TaskInfo(BaseModel):
     """任務資訊模型"""
@@ -743,6 +749,24 @@ async def delete_alert_rule_api(rule_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="找不到警報規則")
     return {"success": True}
+
+
+@router.post("/alerts/notification-settings/email/test")
+async def send_email_notification_test(
+    payload: EmailNotificationTestRequest,
+):
+    """手動發送一封測試郵件給目前設定的收件者。"""
+    settings_data = get_email_settings()
+    receiver = (payload.address or "").strip() or settings_data.get("address")
+    if not receiver:
+        raise HTTPException(status_code=400, detail="請先設定郵件地址再測試")
+    if not settings.smtp_username or not settings.smtp_password:
+        raise HTTPException(status_code=400, detail="SMTP 帳號或密碼未設定")
+
+    success = send_test_email(receiver)
+    if not success:
+        raise HTTPException(status_code=500, detail="測試郵件寄送失敗，請檢查 SMTP 設定")
+    return {"success": True, "message": f"測試郵件已寄出至 {receiver}"}
 
 @router.get("/detection-summary")
 async def get_detection_summary(db: AsyncSession = Depends(get_db)):
