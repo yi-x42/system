@@ -135,7 +135,6 @@ const alertTypeConfig: Record<
 
 export function AlertManagement() {
   type TriggerValuesState = Record<string, unknown>;
-  type NamedItem = { id: string; label: string };
 
   const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
   const [selectedAlertType, setSelectedAlertType] = useState<AlertTypeKey | "">("");
@@ -149,8 +148,6 @@ export function AlertManagement() {
     push: false,
     sms: false,
   });
-  const [lineItems, setLineItems] = useState<NamedItem[]>([{ id: "line-1", label: "Line 1" }]);
-  const [zoneItems, setZoneItems] = useState<NamedItem[]>([{ id: "zone-1", label: "Zone 1" }]);
   const alertTypeKeys = Object.keys(alertTypeConfig) as AlertTypeKey[];
   const {
     data: emailSettings,
@@ -264,16 +261,6 @@ export function AlertManagement() {
       defaults["fallConfidence"] = fallRuleConfidence;
     }
     setTriggerValues(defaults);
-    if (value === "lineCrossing") {
-      setLineItems((prev) => (prev.length ? prev : [{ id: "line-1", label: "Line 1" }]));
-    } else {
-      setLineItems([{ id: "line-1", label: "Line 1" }]);
-    }
-    if (value === "zoneDwell") {
-      setZoneItems((prev) => (prev.length ? prev : [{ id: "zone-1", label: "Zone 1" }]));
-    } else {
-      setZoneItems([{ id: "zone-1", label: "Zone 1" }]);
-    }
   };
 
   const updateTriggerValue = (key: string, value: string) => {
@@ -355,8 +342,6 @@ export function AlertManagement() {
     setSelectedAlertType("");
     setTriggerValues({});
     setNotificationSelections({ email: true, push: false, sms: false });
-    setLineItems([{ id: "line-1", label: "Line 1" }]);
-    setZoneItems([{ id: "zone-1", label: "Zone 1" }]);
   };
 
   const handleToggleRuleStatus = (ruleId: string, enabled: boolean) => {
@@ -479,12 +464,6 @@ export function AlertManagement() {
     );
   };
 
-  const normalizeNamedItems = (items: NamedItem[], prefix: "Line" | "Zone") =>
-    items.map((item, index) => ({
-      id: item.id || `${prefix.toLowerCase()}-${index + 1}`,
-      label: item.label || `${prefix} ${index + 1}`,
-    }));
-
   const handleConfirmRule = async () => {
     if (!ruleName.trim()) {
       alert("請輸入規則名稱");
@@ -505,11 +484,6 @@ export function AlertManagement() {
       cleanedTriggers[key] = value;
     });
 
-    if (selectedAlertType === "lineCrossing") {
-      cleanedTriggers["lines"] = normalizeNamedItems(lineItems, "Line");
-    } else if (selectedAlertType === "zoneDwell") {
-      cleanedTriggers["zones"] = normalizeNamedItems(zoneItems, "Zone");
-    }
     try {
       await createAlertRuleMutation.mutateAsync({
         name: ruleName.trim(),
@@ -664,98 +638,6 @@ export function AlertManagement() {
                     {renderTriggerFields()}
                   </div>
                 </div>
-
-                {selectedAlertType === "lineCrossing" && (
-                  <div>
-                    <Label>線段列表</Label>
-                    <div className="mt-2 space-y-2">
-                      {lineItems.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-2">
-                          <Input
-                            value={item.label}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setLineItems((prev) => {
-                                const next = [...prev];
-                                next[index] = { ...next[index], label: value };
-                                return next;
-                              });
-                            }}
-                          />
-                          {lineItems.length > 1 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                setLineItems((prev) => prev.filter((_, i) => i !== index))
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setLineItems((prev) => [
-                            ...prev,
-                            { id: `line-${prev.length + 1}-${Date.now()}`, label: `Line ${prev.length + 1}` },
-                          ])
-                        }
-                      >
-                        新增線段
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {selectedAlertType === "zoneDwell" && (
-                  <div>
-                    <Label>區域列表</Label>
-                    <div className="mt-2 space-y-2">
-                      {zoneItems.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-2">
-                          <Input
-                            value={item.label}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setZoneItems((prev) => {
-                                const next = [...prev];
-                                next[index] = { ...next[index], label: value };
-                                return next;
-                              });
-                            }}
-                          />
-                          {zoneItems.length > 1 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                setZoneItems((prev) => prev.filter((_, i) => i !== index))
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setZoneItems((prev) => [
-                            ...prev,
-                            { id: `zone-${prev.length + 1}-${Date.now()}`, label: `Zone ${prev.length + 1}` },
-                          ])
-                        }
-                      >
-                        新增區域
-                      </Button>
-                    </div>
-                  </div>
-                )}
 
                 <div>
                   <Label htmlFor="rule-severity">嚴重程度</Label>

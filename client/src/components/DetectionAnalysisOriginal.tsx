@@ -37,6 +37,7 @@ import {
   CameraInfo,
   useAlertRules,
   AlertRule,
+  useTaskRegions,
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -130,6 +131,10 @@ export function DetectionAnalysisOriginal() {
   );
   const { data: alertRulesData } = useAlertRules();
   const alertRules = (alertRulesData ?? []) as AlertRule[];
+  const {
+    data: taskRegionData,
+    isLoading: isTaskRegionsLoading,
+  } = useTaskRegions(alertConfigTask?.id);
 
   const alertRulesForDialog = useMemo(() => {
     if (!alertConfigTask) {
@@ -251,24 +256,23 @@ export function DetectionAnalysisOriginal() {
     setIsAlertConfigOpen(true);
   };
 
-  const handleToggleAlertRule = (taskId: string, rule: AlertRule, enabled: boolean) => {
+  const handleToggleAlertRule = (
+    taskId: string,
+    rule: AlertRule,
+    enabled: boolean,
+    availableItems: Array<{ id?: string; label?: string }> = []
+  ) => {
     setTaskAlertBindings((previous) => {
       const taskBindings = { ...(previous[taskId] ?? {}) };
       if (!enabled) {
         taskBindings[rule.id] = { enabled: false, selections: [] };
       } else {
-        const lines = Array.isArray(rule.trigger_values?.lines)
-          ? (rule.trigger_values?.lines as Array<{ id?: string; label?: string }>)
+        const prefix = rule.rule_type === "zoneDwell" ? "zone" : "line";
+        const selections = availableItems.length
+          ? availableItems.map(
+              (item, index) => item.id || `${rule.id}-${prefix}-${index + 1}`
+            )
           : [];
-        const zones = Array.isArray(rule.trigger_values?.zones)
-          ? (rule.trigger_values?.zones as Array<{ id?: string; label?: string }>)
-          : [];
-        const selections =
-          lines.length > 0
-            ? lines.map((item, index) => item.id || `${rule.id}-line-${index + 1}`)
-            : zones.length > 0
-            ? zones.map((item, index) => item.id || `${rule.id}-zone-${index + 1}`)
-            : [];
         taskBindings[rule.id] = {
           enabled: true,
           selections,
@@ -1356,15 +1360,20 @@ export function DetectionAnalysisOriginal() {
                             const taskId = alertConfigTask?.id ?? "";
                             const taskBindings = taskAlertBindings[taskId] ?? {};
                             const ruleState = taskBindings[rule.id];
-                            const lines = Array.isArray(rule.trigger_values?.lines)
-                              ? (rule.trigger_values?.lines as Array<{ id?: string; label?: string }>)
-                              : [];
-                            const zones = Array.isArray(rule.trigger_values?.zones)
-                              ? (rule.trigger_values?.zones as Array<{ id?: string; label?: string }>)
-                              : [];
-                            const selectionItems = lines.length
-                              ? lines
-                              : zones;
+                            const selectionItems =
+                              rule.rule_type === "lineCrossing"
+                                ? taskRegionData?.lines ?? []
+                                : rule.rule_type === "zoneDwell"
+                                ? taskRegionData?.zones ?? []
+                                : [];
+                            const requiresGeometry =
+                              rule.rule_type === "lineCrossing" || rule.rule_type === "zoneDwell";
+                            const selectionLabel =
+                              rule.rule_type === "lineCrossing" ? "選擇線段" : "選擇區域";
+                            const geometryLoading = requiresGeometry && isTaskRegionsLoading;
+                            const selectionUnavailable =
+                              requiresGeometry && !geometryLoading && selectionItems.length === 0;
+                            const disableSwitch = requiresGeometry && (geometryLoading || selectionUnavailable);
                             return (
                               <div key={rule.id} className="rounded-lg border p-4 space-y-3">
                                 <div className="flex items-start justify-between">
@@ -1376,25 +1385,33 @@ export function DetectionAnalysisOriginal() {
                                   </div>
                                   <Switch
                                     checked={ruleState?.enabled ?? false}
+                                    disabled={disableSwitch}
                                     onCheckedChange={(checked) => {
                                       if (!alertConfigTask) {
                                         return;
                                       }
-                                      handleToggleAlertRule(alertConfigTask.id, rule, checked);
+                                      handleToggleAlertRule(alertConfigTask.id, rule, checked, selectionItems);
                                     }}
                                   />
                                 </div>
+                                {geometryLoading && (
+                                  <p className="text-xs text-muted-foreground">載入線段/區域資訊中...</p>
+                                )}
+                                {selectionUnavailable && (
+                                  <p className="text-xs text-yellow-600">此任務尚未設定對應的線段或區域，請先於即時分析介面繪製。</p>
+                                )}
                                 {ruleState?.enabled && selectionItems.length > 0 && (
                                   <div className="rounded-md border bg-muted/30 p-3 space-y-2">
-                                    <p className="text-xs text-muted-foreground">
-                                      {lines.length ? "選擇線段" : "選擇區域"}
-                                    </p>
+                                    <p className="text-xs text-muted-foreground">{selectionLabel}</p>
                                     {selectionItems.map((item, index) => {
                                       const itemId =
-                                        item.id || `${rule.id}-${lines.length ? "line" : "zone"}-${index + 1}`;
+                                        item.id ||
+                                        `${rule.id}-${rule.rule_type === "lineCrossing" ? "line" : "zone"}-${
+                                          index + 1
+                                        }`;
                                       const label =
                                         item.label ||
-                                        (lines.length ? `Line ${index + 1}` : `Zone ${index + 1}`);
+                                        (rule.rule_type === "lineCrossing" ? `Line ${index + 1}` : `Zone ${index + 1}`);
                                       const checked = ruleState.selections?.includes(itemId) ?? true;
                                       return (
                                         <label key={itemId} className="flex items-center gap-2 text-sm">

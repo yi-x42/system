@@ -775,6 +775,33 @@ export const useAnalysisTasks = (taskType?: string, status?: string, limit: numb
   });
 };
 
+// 任務線段 / 區域資訊
+export interface TaskRegionItem {
+  id?: string;
+  label?: string;
+  metrics?: Record<string, unknown> | null;
+}
+
+export interface TaskRegionResponse {
+  task_id: number;
+  updated_at: string | null;
+  lines: TaskRegionItem[];
+  zones: TaskRegionItem[];
+}
+
+const fetchTaskRegions = async (taskId: string | number): Promise<TaskRegionResponse> => {
+  const { data } = await apiClient.get(`/frontend/analysis/tasks/${taskId}/regions`);
+  return data;
+};
+
+export const useTaskRegions = (taskId?: string | number) => {
+  return useQuery<TaskRegionResponse, Error>({
+    queryKey: ['taskRegions', taskId],
+    queryFn: () => fetchTaskRegions(taskId!),
+    enabled: Boolean(taskId),
+  });
+};
+
 // 停止任務的非同步函式
 const stopAnalysisTask = async (taskId: string): Promise<{ message: string; task_id: string }> => {
   const { data } = await apiClient.put(`/frontend/tasks/${taskId}/stop`);

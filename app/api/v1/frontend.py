@@ -52,7 +52,7 @@ from app.services.alert_rule_service import (
 )
 from app.services.fall_detection_service import fall_detection_service
 from app.services.email_notification_service import send_fall_email_alert, send_test_email
-from app.models.database import AnalysisTask, DetectionResult, DataSource
+from app.models.database import AnalysisTask, DetectionResult, DataSource, TaskStatistics
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
 
@@ -1208,6 +1208,62 @@ async def start_realtime_analysis(
     except Exception as e:
         api_logger.error(f"啟動即時分析失敗: {e}")
         raise HTTPException(status_code=500, detail=f"啟動即時分析失敗: {str(e)}")
+
+
+@router.get(
+    "/analysis/tasks/{task_id}/regions",
+    summary="取得分析任務的線段與區域配置",
+)
+async def get_analysis_task_regions(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    提供前端查詢某個任務目前已配置的線段與區域標籤，
+    來源為 task_statistics 表的 line_stats / zone_stats 欄位。
+    """
+    try:
+        stats = await db.get(TaskStatistics, task_id)
+        if not stats:
+            task = await db.get(AnalysisTask, task_id)
+            if not task:
+                raise HTTPException(status_code=404, detail="分析任務不存在")
+            return {
+                "task_id": task_id,
+                "lines": [],
+                "zones": [],
+                "updated_at": None,
+            }
+
+        def _convert_items(payload):
+            items = []
+            if isinstance(payload, dict):
+                for label, metrics in payload.items():
+                    if label is None:
+                        continue
+                    items.append(
+                        {
+                            "id": str(label),
+                            "label": str(label),
+                            "metrics": metrics or {},
+                        }
+                    )
+            return items
+
+        return {
+            "task_id": task_id,
+            "lines": _convert_items(stats.line_stats),
+            "zones": _convert_items(stats.zone_stats),
+            "updated_at": stats.updated_at.isoformat() if stats.updated_at else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        api_logger.error(f"取得任務線段/區域配置失敗: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"查詢任務線段/區域配置失敗: {exc}",
+        )
 
 # ===== 攝影機管理 API =====
 @router.websocket("/analysis/live-person-camera/{task_id}/ws")
