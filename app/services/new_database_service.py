@@ -368,23 +368,39 @@ class DatabaseService:
     # 系統配置相關操作
     # ============================================================================
     
-    async def get_config(self, session: AsyncSession, key: str, default_value: Optional[str] = None) -> Optional[str]:
+    async def get_config(
+        self,
+        session: AsyncSession,
+        key: str,
+        default_value: Optional[str] = None,
+        config_type: str = "kv",
+    ) -> Optional[str]:
         """取得系統配置值"""
         result = await session.execute(
-            select(SystemConfig.config_value).where(SystemConfig.config_key == key)
+            select(SystemConfig.config_value).where(
+                SystemConfig.config_type == config_type,
+                SystemConfig.config_key == key,
+            )
         )
         value = result.scalar_one_or_none()
         return value if value is not None else default_value
     
-    async def set_config(self, session: AsyncSession, 
-                        key: str, 
-                        value: str, 
-                        description: Optional[str] = None) -> bool:
+    async def set_config(
+        self,
+        session: AsyncSession,
+        key: str,
+        value: str,
+        description: Optional[str] = None,
+        config_type: str = "kv",
+    ) -> bool:
         """設定系統配置值"""
         try:
             # 檢查是否已存在
             existing = await session.execute(
-                select(SystemConfig).where(SystemConfig.config_key == key)
+                select(SystemConfig).where(
+                    SystemConfig.config_type == config_type,
+                    SystemConfig.config_key == key,
+                )
             )
             config = existing.scalar_one_or_none()
             
@@ -392,18 +408,24 @@ class DatabaseService:
                 # 更新現有配置
                 await session.execute(
                     update(SystemConfig)
-                    .where(SystemConfig.config_key == key)
+                    .where(
+                        SystemConfig.config_type == config_type,
+                        SystemConfig.config_key == key,
+                    )
                     .values(
                         config_value=value,
                         description=description or config.description,
+                        name=description or config.name,
                         updated_at=datetime.utcnow()
                     )
                 )
             else:
                 # 建立新配置
                 new_config = SystemConfig(
+                    config_type=config_type,
                     config_key=key,
                     config_value=value,
+                    name=description,
                     description=description,
                     updated_at=datetime.utcnow()
                 )
@@ -420,7 +442,9 @@ class DatabaseService:
     async def get_all_configs(self, session: AsyncSession) -> List[SystemConfig]:
         """取得所有系統配置"""
         result = await session.execute(
-            select(SystemConfig).order_by(SystemConfig.config_key)
+            select(SystemConfig)
+            .where(SystemConfig.config_type == "kv")
+            .order_by(SystemConfig.config_key)
         )
         return result.scalars().all()
     

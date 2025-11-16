@@ -141,12 +141,22 @@ CREATE TABLE IF NOT EXISTS users (
 -- 8. system_config (系統配置表)
 ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS system_config (
-    id           BIGSERIAL PRIMARY KEY,
-    config_key   VARCHAR(100) UNIQUE NOT NULL,
-    config_value TEXT,
-    description  TEXT,
-    updated_at   TIMESTAMPTZ DEFAULT NOW()
+    id            BIGSERIAL PRIMARY KEY,
+    config_key    VARCHAR(100) NOT NULL,
+    config_type   VARCHAR(50) NOT NULL DEFAULT ''kv'',
+    name          VARCHAR(200),
+    camera_id     VARCHAR(100),
+    config_value  TEXT,
+    payload       JSONB,
+    description   TEXT,
+    enabled       BOOLEAN DEFAULT TRUE,
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (config_type, config_key)
 );
+CREATE INDEX IF NOT EXISTS idx_system_config_type ON system_config(config_type);
+CREATE INDEX IF NOT EXISTS idx_system_config_camera ON system_config(camera_id);
+CREATE INDEX IF NOT EXISTS idx_system_config_key ON system_config(config_key);
 
 ------------------------------------------------------------------------------
 -- 9. task_statistics (任務統計表)
@@ -163,3 +173,4 @@ CREATE TABLE IF NOT EXISTS task_statistics (
     extra          JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_task_statistics_updated_at ON task_statistics(updated_at);
+

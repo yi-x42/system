@@ -51,7 +51,7 @@
 | `data_sources` | 資料來源 | 攝影機或影片 (`source_type = camera | video_file`) |
 | `analysis_tasks` | 分析任務 | 與來源關聯，追蹤解析度/FPS/時長 |
 | `detection_results` | 檢測結果 | 逐幀物件辨識輸出 |
-| `system_config` | 系統設定 | 全域參數（保留擴充） |
+| `system_config` | 系統設定/警報規則 | 同時儲存傳統 KV 配置與警報/線段/區域等 JSON 設定 |
 
 任務狀態流：`pending → running ↔ paused → completed / failed`
 
@@ -128,7 +128,7 @@ React 前端使用 React Query 定時輪詢顯示。
 | `zone_dwell_events` | `GET /api/v1/database/zone-events` | `task_id`, `zone_id`, `start_time`, `end_time`, `limit`, `offset` | 區域停留事件 |
 | `speed_events` | `GET /api/v1/database/speed-events` | `task_id`, `min_speed`, `start_time`, `end_time`, `limit`, `offset` | 速度異常事件 |
 | `task_statistics` | `GET /api/v1/database/task-statistics` | `task_id`, `limit`, `offset` | 最新任務統計（fps、人數、分區統計等） |
-| `system_config` | `GET /api/v1/database/system-config` | `key`, `limit`, `offset` | 全域設定值 |
+| `system_config` | `GET /api/v1/database/system-config` | `key`, `config_type`, `limit`, `offset` | 取得指定類型 (如 `kv`, `alert_rule`) 的配置 |
 | `users` | `GET /api/v1/database/users` | `role`, `is_active`, `limit`, `offset` | 只回傳公開欄位（不包含 `password_hash`） |
 
 > 時間參數同時支援 `YYYY-MM-DD` 與完整 ISO 8601，適合 Unity 端直接帶 `DateTime.ToString("o")`。

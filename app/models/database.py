@@ -369,17 +369,29 @@ class SystemConfig(Base):
     __tablename__ = "system_config"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    config_key = Column(String(100), unique=True, nullable=False)
+    config_key = Column(String(100), nullable=False)
+    config_type = Column(String(50), nullable=False, default="kv")
+    name = Column(String(200))
+    camera_id = Column(String(100))
     config_value = Column(Text)
+    payload = Column(JSON)
     description = Column(Text)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     def to_dict(self):
         return {
             "id": self.id,
             "config_key": self.config_key,
+            "config_type": self.config_type,
+            "name": self.name,
+            "camera_id": self.camera_id,
             "config_value": self.config_value,
+            "payload": self.payload,
             "description": self.description,
+            "enabled": bool(self.enabled),
+            "created_at": _safe_iso(self.created_at),
             "updated_at": _safe_iso(self.updated_at),
         }
 

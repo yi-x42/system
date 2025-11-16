@@ -720,32 +720,34 @@ async def update_email_notification_settings_api(
 
 
 @router.get("/alerts/rules", response_model=List[AlertRuleResponse])
-async def list_alert_rules_api():
+async def list_alert_rules_api(db: AsyncSession = Depends(get_db)):
     """取得所有警報規則。"""
-    rules = list_alert_rule_service()
+    rules = await list_alert_rule_service(db)
     return [AlertRuleResponse(**rule) for rule in rules]
 
 
 @router.post("/alerts/rules", response_model=AlertRuleResponse)
-async def create_alert_rule_api(payload: AlertRuleBase):
+async def create_alert_rule_api(payload: AlertRuleBase, db: AsyncSession = Depends(get_db)):
     """新增警報規則。"""
-    rule = create_alert_rule_service(payload.dict())
+    rule = await create_alert_rule_service(db, payload.dict())
     return AlertRuleResponse(**rule)
 
 
 @router.patch("/alerts/rules/{rule_id}/toggle", response_model=AlertRuleResponse)
-async def toggle_alert_rule_api(rule_id: str, payload: AlertRuleToggleRequest):
+async def toggle_alert_rule_api(
+    rule_id: str, payload: AlertRuleToggleRequest, db: AsyncSession = Depends(get_db)
+):
     """切換警報規則啟用狀態。"""
-    rule = toggle_alert_rule_service(rule_id, payload.enabled)
+    rule = await toggle_alert_rule_service(db, rule_id, payload.enabled)
     if not rule:
         raise HTTPException(status_code=404, detail="找不到警報規則")
     return AlertRuleResponse(**rule)
 
 
 @router.delete("/alerts/rules/{rule_id}")
-async def delete_alert_rule_api(rule_id: str):
+async def delete_alert_rule_api(rule_id: str, db: AsyncSession = Depends(get_db)):
     """刪除警報規則。"""
-    success = delete_alert_rule_service(rule_id)
+    success = await delete_alert_rule_service(db, rule_id)
     if not success:
         raise HTTPException(status_code=404, detail="找不到警報規則")
     return {"success": True}

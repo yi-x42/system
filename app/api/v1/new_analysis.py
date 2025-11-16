@@ -724,16 +724,19 @@ async def get_data_source(
 
 @router.get("/config", summary="取得系統配置")
 async def get_system_configs(
+    config_type: str = Query("kv"),
     db: AsyncSession = Depends(get_db)
 ):
     """取得所有系統配置"""
     try:
-        configs = await db_service.get_all_configs(db)
+        configs = await db.execute(
+            select(SystemConfig).where(SystemConfig.config_type == config_type)
+        )
         
         return {
             'success': True,
-            'configs': [config.to_dict() for config in configs],
-            'count': len(configs)
+            'configs': [config.to_dict() for config in configs.scalars().all()],
+            'count': configs.rowcount or 0
         }
         
     except Exception as e:
@@ -742,19 +745,25 @@ async def get_system_configs(
 @router.get("/config/{key}", summary="取得特定配置")
 async def get_config_value(
     key: str,
+    config_type: str = Query("kv"),
     db: AsyncSession = Depends(get_db)
 ):
     """取得特定配置值"""
     try:
-        value = await db_service.get_config(db, key)
+        result = await db.execute(
+            select(SystemConfig).where(
+                SystemConfig.config_type == config_type, SystemConfig.config_key == key
+            )
+        )
+        config = result.scalar_one_or_none()
         
-        if value is None:
+        if not config:
             raise HTTPException(status_code=404, detail="配置不存在")
         
         return {
             'success': True,
             'key': key,
-            'value': value
+            'value': config.to_dict()
         }
         
     except HTTPException:
@@ -766,6 +775,7 @@ async def get_config_value(
 async def set_config_value(
     key: str,
     config_data: Dict[str, str],
+    config_type: str = Query("kv"),
     db: AsyncSession = Depends(get_db)
 ):
     """設定系統配置值"""
@@ -776,7 +786,7 @@ async def set_config_value(
         if value is None:
             raise HTTPException(status_code=400, detail="配置值不能為空")
         
-        success = await db_service.set_config(db, key, value, description)
+        success = await db_service.set_config(db, key, value, description, config_type=config_type)
         
         if success:
             return {

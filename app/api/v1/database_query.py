@@ -603,12 +603,15 @@ async def get_system_config(
     limit: int = Query(100, ge=1, le=1000, description="限制筆數"),
     offset: int = Query(0, ge=0, description="偏移量"),
     key: Optional[str] = Query(None, description="依 config_key 過濾"),
+    config_type: str = Query("kv", description="配置類型"),
     db: AsyncSession = Depends(get_async_db),
 ):
     """列出 system_config 內容。"""
     try:
-        query = select(SystemConfig)
-        count_query = select(func.count(SystemConfig.id))
+        query = select(SystemConfig).where(SystemConfig.config_type == config_type)
+        count_query = select(func.count(SystemConfig.id)).where(
+            SystemConfig.config_type == config_type
+        )
         if key:
             query = query.where(SystemConfig.config_key == key)
             count_query = count_query.where(SystemConfig.config_key == key)
@@ -630,7 +633,7 @@ async def get_system_config(
                 "has_next": offset + limit < total,
                 "has_prev": offset > 0,
             },
-            "filters": {"key": key},
+            "filters": {"key": key, "config_type": config_type},
             "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:
