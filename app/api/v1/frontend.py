@@ -39,6 +39,17 @@ from app.services.new_database_service import DatabaseService
 from app.services.camera_status_monitor import get_camera_monitor
 from app.services.realtime_detection_service import realtime_detection_service
 from app.services.gui_launcher import realtime_gui_manager
+from app.services.notification_settings_service import (
+    get_email_settings,
+    update_email_settings,
+)
+from app.services.alert_rule_service import (
+    list_rules as list_alert_rule_service,
+    create_rule as create_alert_rule_service,
+    toggle_rule as toggle_alert_rule_service,
+    delete_rule as delete_alert_rule_service,
+)
+from app.services.fall_detection_service import fall_detection_service
 from app.models.database import AnalysisTask, DetectionResult, DataSource
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
@@ -288,6 +299,49 @@ class PreviewLaunchResponse(BaseModel):
     already_running: bool
     message: str
     log_path: Optional[str] = Field(None, description="GUI 子行程輸出日誌路徑")
+
+
+class EmailNotificationSettings(BaseModel):
+    """郵件通知設定"""
+    enabled: bool = Field(False, description="是否啟用郵件通知")
+    address: str = Field("", description="收件者電子郵件")
+    confidence: float = Field(0.5, ge=0.0, le=1.0, description="跌倒偵測信心門檻")
+    cooldown_seconds: int = Field(
+        30, ge=5, le=3600, description="兩次通知最小間隔秒數"
+    )
+
+
+class EmailNotificationUpdate(BaseModel):
+    enabled: Optional[bool] = Field(None)
+    address: Optional[str] = Field(None)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    cooldown_seconds: Optional[int] = Field(None, ge=5, le=3600)
+
+
+class AlertRuleAction(BaseModel):
+    email: bool = False
+    push: bool = False
+    sms: bool = False
+
+
+class AlertRuleBase(BaseModel):
+    name: str
+    rule_type: str
+    severity: str = Field("中", description="嚴重程度")
+    cameras: List[str] = Field(default_factory=list)
+    trigger_values: Dict[str, Any] = Field(default_factory=dict)
+    actions: AlertRuleAction = Field(default_factory=AlertRuleAction)
+
+
+class AlertRuleResponse(AlertRuleBase):
+    id: str
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class AlertRuleToggleRequest(BaseModel):
+    enabled: bool
 
 class TaskInfo(BaseModel):
     """任務資訊模型"""
@@ -635,6 +689,60 @@ async def get_system_stats(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         api_logger.error(f"獲取系統統計數據失敗: {e}")
         raise HTTPException(status_code=500, detail=f"系統統計數據獲取失敗: {str(e)}")
+
+
+@router.get(
+    "/alerts/notification-settings/email",
+    response_model=EmailNotificationSettings,
+)
+async def get_email_notification_settings_api():
+    """取得郵件通知設定。"""
+    settings_data = get_email_settings()
+    return EmailNotificationSettings(**settings_data)
+
+
+@router.put(
+    "/alerts/notification-settings/email",
+    response_model=EmailNotificationSettings,
+)
+async def update_email_notification_settings_api(
+    payload: EmailNotificationUpdate,
+):
+    """更新郵件通知設定。"""
+    updated = update_email_settings(payload.dict(exclude_none=True))
+    return EmailNotificationSettings(**updated)
+
+
+@router.get("/alerts/rules", response_model=List[AlertRuleResponse])
+async def list_alert_rules_api():
+    """取得所有警報規則。"""
+    rules = list_alert_rule_service()
+    return [AlertRuleResponse(**rule) for rule in rules]
+
+
+@router.post("/alerts/rules", response_model=AlertRuleResponse)
+async def create_alert_rule_api(payload: AlertRuleBase):
+    """新增警報規則。"""
+    rule = create_alert_rule_service(payload.dict())
+    return AlertRuleResponse(**rule)
+
+
+@router.patch("/alerts/rules/{rule_id}/toggle", response_model=AlertRuleResponse)
+async def toggle_alert_rule_api(rule_id: str, payload: AlertRuleToggleRequest):
+    """切換警報規則啟用狀態。"""
+    rule = toggle_alert_rule_service(rule_id, payload.enabled)
+    if not rule:
+        raise HTTPException(status_code=404, detail="找不到警報規則")
+    return AlertRuleResponse(**rule)
+
+
+@router.delete("/alerts/rules/{rule_id}")
+async def delete_alert_rule_api(rule_id: str):
+    """刪除警報規則。"""
+    success = delete_alert_rule_service(rule_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="找不到警報規則")
+    return {"success": True}
 
 @router.get("/detection-summary")
 async def get_detection_summary(db: AsyncSession = Depends(get_db)):
@@ -3481,6 +3589,22 @@ async def launch_live_person_preview_gui(
             else f"{window_name} 的 GUI 預覽已啟動 (PID {show_result['pid']})"
         )
 
+        if fall_alert_enabled:
+            try:
+                monitor_device_index = int(device_index)
+            except (TypeError, ValueError):
+                monitor_device_index = 0
+            started = fall_detection_service.start_monitoring(
+                task_id=str(task.id),
+                camera_id=camera_id,
+                device_index=monitor_device_index,
+                confidence=confidence_value,
+            )
+            if not started:
+                api_logger.warning("跌倒偵測服務啟動失敗，請檢查攝影機設定")
+        else:
+            fall_detection_service.stop_monitoring(str(task.id))
+
         return PreviewLaunchResponse(
             task_id=task.id,
             pid=int(show_result["pid"]),
@@ -3505,6 +3629,8 @@ async def stop_live_person_camera(task_id: int, db: AsyncSession = Depends(get_d
         stopped = realtime_gui_manager.stop_process(str(task_id))
         if not stopped:
             raise HTTPException(status_code=404, detail="找不到對應的偵測行程")
+
+        fall_detection_service.stop_monitoring(str(task_id))
 
         await db.execute(
             update(AnalysisTask)

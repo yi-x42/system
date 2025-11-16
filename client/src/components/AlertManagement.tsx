@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -6,7 +6,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Switch } from "./ui/switch";
-import { Textarea } from "./ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "./ui/dialog";
@@ -25,6 +24,15 @@ import {
   Clock,
   User,
 } from "lucide-react";
+import {
+  useEmailNotificationSettings,
+  useUpdateEmailNotificationSettings,
+  useAlertRules,
+  useCreateAlertRule,
+  useToggleAlertRule,
+  useDeleteAlertRule,
+  useCameras,
+} from "../hooks/react-query-hooks";
 
 type AlertTypeKey =
   | "lineCrossing"
@@ -114,13 +122,6 @@ const alertTypeConfig: Record<
     label: "跌倒警報",
     fields: [
       {
-        key: "detectionWindow",
-        label: "觀察時間 (秒)",
-        type: "number",
-        placeholder: "例如 3",
-        helpText: "在此時間窗內偵測到跌倒姿態即觸發",
-      },
-      {
         key: "fallConfidence",
         label: "跌倒信心門檻 (0-1)",
         type: "number",
@@ -132,11 +133,55 @@ const alertTypeConfig: Record<
 };
 
 export function AlertManagement() {
-  const [selectedAlert, setSelectedAlert] = useState<string | null>(null);
   const [isRuleDialogOpen, setIsRuleDialogOpen] = useState(false);
   const [selectedAlertType, setSelectedAlertType] = useState<AlertTypeKey | "">("");
   const [triggerValues, setTriggerValues] = useState<Record<string, string>>({});
+  const [ruleName, setRuleName] = useState("");
+  const ALL_CAMERAS_VALUE = "ALL_CAMERAS";
+  const [selectedCameraId, setSelectedCameraId] = useState(ALL_CAMERAS_VALUE);
+  const [ruleSeverity, setRuleSeverity] = useState("中");
+  const [notificationSelections, setNotificationSelections] = useState({
+    email: true,
+    push: false,
+    sms: false,
+  });
   const alertTypeKeys = Object.keys(alertTypeConfig) as AlertTypeKey[];
+  const {
+    data: emailSettings,
+    isLoading: isEmailSettingsLoading,
+  } = useEmailNotificationSettings();
+  const updateEmailSettingsMutation = useUpdateEmailNotificationSettings();
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [emailCooldown, setEmailCooldown] = useState("30");
+  const [fallRuleConfidence, setFallRuleConfidence] = useState("0.5");
+  const { data: alertRulesData, isLoading: isAlertRulesLoading } = useAlertRules();
+  const createAlertRuleMutation = useCreateAlertRule();
+  const toggleAlertRuleMutation = useToggleAlertRule();
+  const deleteAlertRuleMutation = useDeleteAlertRule();
+  const alertRules = alertRulesData ?? [];
+  const { data: camerasData } = useCameras();
+  const cameraOptions = camerasData ?? [];
+  const cameraNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    cameraOptions.forEach((camera) => {
+      const key = camera.id?.toString() ?? camera.name ?? "";
+      if (key) {
+        map[key] = camera.name || key;
+      }
+    });
+    return map;
+  }, [cameraOptions]);
+
+  useEffect(() => {
+    if (!emailSettings) {
+      return;
+    }
+    setEmailEnabled(emailSettings.enabled);
+    setEmailAddress(emailSettings.address || "");
+    setFallRuleConfidence(emailSettings.confidence?.toString() ?? "0.5");
+    setEmailCooldown(emailSettings.cooldown_seconds?.toString() ?? "30");
+  }, [emailSettings]);
 
   // 模擬活躍警報數據
   const activeAlerts = [
@@ -173,39 +218,6 @@ export function AlertManagement() {
   ];
 
   // 模擬警報規則數據
-  const alertRules = [
-    {
-      id: "RULE_001",
-      name: "高風險區域入侵",
-      type: "入侵偵測",
-      cameras: ["大門入口", "後門出口"],
-      conditions: "人員在23:00-06:00期間進入",
-      actions: ["發送郵件", "推送通知", "簡訊通知"],
-      enabled: true,
-      severity: "高",
-    },
-    {
-      id: "RULE_002",
-      name: "車輛違規停放",
-      type: "車輛偵測",
-      cameras: ["停車場"],
-      conditions: "車輛停放超過24小時",
-      actions: ["發送郵件"],
-      enabled: true,
-      severity: "中",
-    },
-    {
-      id: "RULE_003",
-      name: "設備離線監控",
-      type: "設備異常",
-      cameras: ["全部攝影機"],
-      conditions: "攝影機離線超過5分鐘",
-      actions: ["推送通知", "簡訊通知"],
-      enabled: false,
-      severity: "低",
-    },
-  ];
-
   // 模擬通知設定
   const notificationSettings = {
     email: {
@@ -240,10 +252,17 @@ export function AlertManagement() {
 
   const handleAlertTypeChange = (value: AlertTypeKey) => {
     setSelectedAlertType(value);
-    setTriggerValues(getDefaultTriggerValues(value));
+    const defaults = getDefaultTriggerValues(value);
+    if (value === "fallDetection") {
+      defaults["fallConfidence"] = fallRuleConfidence;
+    }
+    setTriggerValues(defaults);
   };
 
   const updateTriggerValue = (key: string, value: string) => {
+    if (key === "fallConfidence") {
+      setFallRuleConfidence(value);
+    }
     setTriggerValues((prev) => ({
       ...prev,
       [key]: value,
@@ -267,6 +286,11 @@ export function AlertManagement() {
               onChange={(event) => updateTriggerValue(field.key, event.target.value)}
             />
             {field.helpText && <p className="text-xs text-muted-foreground">{field.helpText}</p>}
+            {selectedAlertType === "fallDetection" && field.key === "fallConfidence" && (
+              <p className="text-xs text-muted-foreground">
+                這個值會作為全域跌倒偵測門檻套用至所有任務。
+              </p>
+            )}
           </div>
         );
       }
@@ -297,6 +321,162 @@ export function AlertManagement() {
 
       return null;
     });
+  };
+
+  const resetRuleForm = () => {
+    setRuleName("");
+    setSelectedCameraId(ALL_CAMERAS_VALUE);
+    setRuleSeverity("中");
+    setSelectedAlertType("");
+    setTriggerValues({});
+    setNotificationSelections({ email: true, push: false, sms: false });
+  };
+
+  const handleToggleRuleStatus = (ruleId: string, enabled: boolean) => {
+    toggleAlertRuleMutation.mutate(
+      { ruleId, enabled },
+      {
+        onError: (error) => {
+          alert(`切換規則狀態失敗：${error.message}`);
+        },
+      }
+    );
+  };
+
+  const handleDeleteRule = (ruleId: string) => {
+    if (!window.confirm("確定要刪除此警報規則嗎？")) {
+      return;
+    }
+    deleteAlertRuleMutation.mutate(ruleId, {
+      onError: (error) => {
+        alert(`刪除規則失敗：${error.message}`);
+      },
+    });
+  };
+
+  const getRuleTypeLabel = (ruleType: string) =>
+    alertTypeConfig[ruleType as AlertTypeKey]?.label ?? ruleType;
+
+  const renderTriggerSummary = (rule: (typeof alertRules)[number]) => {
+    const config = alertTypeConfig[rule.rule_type as AlertTypeKey];
+    if (!config) {
+      return "未設定觸發條件";
+    }
+    const entries = config.fields
+      .map((field) => {
+        const value = rule.trigger_values?.[field.key];
+        if (!value) {
+          return null;
+        }
+        return `${field.label}: ${value}`;
+      })
+      .filter(Boolean);
+    return entries.length ? entries.join("；") : "未設定觸發條件";
+  };
+
+  const actionLabelMap: Record<string, string> = {
+    email: "郵件通知",
+    push: "推送通知",
+    sms: "簡訊通知",
+  };
+
+  const renderActionBadges = (rule: (typeof alertRules)[number]) => {
+    const actions = rule.actions || {};
+    const entries = Object.entries(actions).filter(([, value]) => value);
+    if (!entries.length) {
+      return <span className="text-sm text-muted-foreground">未設定</span>;
+    }
+    return (
+      <div className="flex flex-wrap gap-1 mt-1">
+        {entries.map(([key]) => (
+          <Badge key={key} variant="secondary">
+            {actionLabelMap[key] ?? key}
+          </Badge>
+        ))}
+      </div>
+    );
+  };
+
+  const handleSaveEmailSettings = () => {
+    const parsedConfidence = Math.min(
+      1,
+      Math.max(0, Number(fallRuleConfidence) || 0.5)
+    );
+    const parsedCooldown = Math.max(5, Number(emailCooldown) || 30);
+    updateEmailSettingsMutation.mutate(
+      {
+        enabled: emailEnabled,
+        address: emailAddress,
+        confidence: parsedConfidence,
+        cooldown_seconds: parsedCooldown,
+      },
+      {
+        onSuccess: () => {
+          alert("郵件通知設定已儲存。");
+        },
+        onError: (error) => {
+          alert(`儲存郵件設定失敗：${error.message}`);
+        },
+      }
+    );
+  };
+
+  const handleConfirmRule = async () => {
+    if (!ruleName.trim()) {
+      alert("請輸入規則名稱");
+      return;
+    }
+    if (!selectedAlertType) {
+      alert("請選擇警報類型");
+      return;
+    }
+    const cleanedTriggers = Object.fromEntries(
+      Object.entries(triggerValues).filter(
+        ([, value]) => value !== undefined && value !== null && value !== ""
+      )
+    );
+    try {
+      await createAlertRuleMutation.mutateAsync({
+        name: ruleName.trim(),
+        rule_type: selectedAlertType,
+        severity: ruleSeverity || "中",
+        cameras:
+          selectedCameraId && selectedCameraId !== ALL_CAMERAS_VALUE
+            ? [selectedCameraId]
+            : [],
+        trigger_values: cleanedTriggers,
+        actions: notificationSelections,
+      });
+
+      if (selectedAlertType === "fallDetection") {
+        const parsedConfidence = Math.min(
+          1,
+          Math.max(
+            0,
+            Number(cleanedTriggers["fallConfidence"] ?? fallRuleConfidence ?? "0.5")
+          )
+        );
+        setFallRuleConfidence(parsedConfidence.toString());
+        updateEmailSettingsMutation.mutate(
+          {
+            enabled: emailEnabled,
+            address: emailAddress,
+            confidence: parsedConfidence,
+            cooldown_seconds: Math.max(5, Number(emailCooldown) || 30),
+          },
+          {
+            onError: (error) => {
+              console.error("更新跌倒門檻失敗", error);
+            },
+          }
+        );
+      }
+
+      resetRuleForm();
+      setIsRuleDialogOpen(false);
+    } catch (error) {
+      alert("新增警報規則失敗，請稍後再試。");
+    }
   };
 
   const getSeverityColor = (severity: string) => {
@@ -330,7 +510,15 @@ export function AlertManagement() {
       <div className="flex items-center justify-between">
         <h1>警報管理</h1>
         <div className="flex gap-2">
-          <Dialog open={isRuleDialogOpen} onOpenChange={setIsRuleDialogOpen}>
+          <Dialog
+            open={isRuleDialogOpen}
+            onOpenChange={(open) => {
+              setIsRuleDialogOpen(open);
+              if (!open) {
+                resetRuleForm();
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -348,7 +536,12 @@ export function AlertManagement() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
                     <Label htmlFor="rule-name">規則名稱</Label>
-                    <Input id="rule-name" placeholder="輸入規則名稱" />
+                    <Input
+                      id="rule-name"
+                      placeholder="輸入規則名稱"
+                      value={ruleName}
+                      onChange={(event) => setRuleName(event.target.value)}
+                    />
                   </div>
                   <div>
                     <Label htmlFor="rule-type">警報類型</Label>
@@ -371,16 +564,21 @@ export function AlertManagement() {
                 </div>
 
                 <div>
-                  <Label htmlFor="rule-cameras">適用攝影機</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="選擇攝影機" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部攝影機</SelectItem>
-                      <SelectItem value="cam_001">大門入口</SelectItem>
-                      <SelectItem value="cam_002">停車場</SelectItem>
-                      <SelectItem value="cam_003">後門出口</SelectItem>
+                <Label htmlFor="rule-cameras">適用攝影機</Label>
+                <Select
+                    value={selectedCameraId}
+                    onValueChange={(value) => setSelectedCameraId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="選擇攝影機" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value={ALL_CAMERAS_VALUE}>全部攝影機</SelectItem>
+                      {cameraOptions.map((camera) => (
+                        <SelectItem key={camera.id} value={camera.id?.toString() ?? camera.name ?? ""}>
+                          {camera.name || camera.id || "未知攝影機"}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -394,14 +592,14 @@ export function AlertManagement() {
 
                 <div>
                   <Label htmlFor="rule-severity">嚴重程度</Label>
-                  <Select>
+                  <Select value={ruleSeverity} onValueChange={(value) => setRuleSeverity(value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="選擇嚴重程度" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="high">高</SelectItem>
-                      <SelectItem value="medium">中</SelectItem>
-                      <SelectItem value="low">低</SelectItem>
+                      <SelectItem value="高">高</SelectItem>
+                      <SelectItem value="中">中</SelectItem>
+                      <SelectItem value="低">低</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -410,15 +608,45 @@ export function AlertManagement() {
                   <Label>通知方式</Label>
                   <div className="flex flex-wrap gap-4 mt-2">
                     <div className="flex items-center space-x-2">
-                      <input type="checkbox" id="email-action" />
+                      <input
+                        type="checkbox"
+                        id="email-action"
+                        checked={notificationSelections.email}
+                        onChange={(event) =>
+                          setNotificationSelections((prev) => ({
+                            ...prev,
+                            email: event.target.checked,
+                          }))
+                        }
+                      />
                       <Label htmlFor="email-action">郵件通知</Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <input type="checkbox" id="push-action" />
+                      <input
+                        type="checkbox"
+                        id="push-action"
+                        checked={notificationSelections.push}
+                        onChange={(event) =>
+                          setNotificationSelections((prev) => ({
+                            ...prev,
+                            push: event.target.checked,
+                          }))
+                        }
+                      />
                       <Label htmlFor="push-action">推送通知</Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <input type="checkbox" id="sms-action" />
+                      <input
+                        type="checkbox"
+                        id="sms-action"
+                        checked={notificationSelections.sms}
+                        onChange={(event) =>
+                          setNotificationSelections((prev) => ({
+                            ...prev,
+                            sms: event.target.checked,
+                          }))
+                        }
+                      />
                       <Label htmlFor="sms-action">簡訊通知</Label>
                     </div>
                   </div>
@@ -428,7 +656,7 @@ export function AlertManagement() {
                   <Button variant="outline" onClick={() => setIsRuleDialogOpen(false)}>
                     取消
                   </Button>
-                  <Button onClick={() => setIsRuleDialogOpen(false)}>確認新增</Button>
+                  <Button onClick={handleConfirmRule}>確認新增</Button>
                 </div>
               </div>
             </DialogContent>
@@ -500,66 +728,87 @@ export function AlertManagement() {
 
         <TabsContent value="alert-rules">
           <div className="space-y-4">
-            {alertRules.map((rule) => (
-              <Card key={rule.id}>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <CardTitle className="flex items-center gap-2">
-                          {rule.name}
-                          {rule.enabled ? (
-                            <Badge variant="default">啟用</Badge>
-                          ) : (
-                            <Badge variant="outline">停用</Badge>
-                          )}
-                        </CardTitle>
-                        <p className="text-sm text-muted-foreground">
-                          類型: {rule.type} • 嚴重程度: {rule.severity}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch checked={rule.enabled} />
-                      <Button variant="outline" size="sm">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-sm text-muted-foreground">適用攝影機</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {rule.cameras.map((camera) => (
-                          <Badge key={camera} variant="outline">
-                            {camera}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">觸發條件</p>
-                      <p className="text-sm">{rule.conditions}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">通知方式</p>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {rule.actions.map((action) => (
-                          <Badge key={action} variant="secondary">
-                            {action}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+            {isAlertRulesLoading ? (
+              <Card>
+                <CardContent className="text-center py-6 text-muted-foreground">
+                  載入警報規則中...
                 </CardContent>
               </Card>
-            ))}
+            ) : alertRules.length === 0 ? (
+              <Card>
+                <CardContent className="text-center py-6 text-muted-foreground">
+                  尚未建立任何警報規則，請使用「新增規則」開始配置。
+                </CardContent>
+              </Card>
+            ) : (
+              alertRules.map((rule) => {
+                const typeLabel = getRuleTypeLabel(rule.rule_type);
+                const cameraLabels =
+                  rule.cameras && rule.cameras.length
+                    ? rule.cameras.map((cameraId) => cameraNameMap[cameraId] ?? cameraId)
+                    : ["全部攝影機"];
+                return (
+                  <Card key={rule.id}>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            {rule.name}
+                            <Badge variant={rule.enabled ? "default" : "outline"}>
+                              {rule.enabled ? "啟用" : "停用"}
+                            </Badge>
+                            <Badge variant="secondary">{typeLabel}</Badge>
+                          </CardTitle>
+                          <p className="text-sm text-muted-foreground">
+                            嚴重程度：{rule.severity || "未設定"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={rule.enabled}
+                            onCheckedChange={(checked) => handleToggleRuleStatus(rule.id, checked)}
+                            disabled={toggleAlertRuleMutation.isPending}
+                          />
+                          <Button variant="outline" size="sm" disabled title="暫未提供編輯功能">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            disabled={deleteAlertRuleMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm text-muted-foreground">適用攝影機</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {cameraLabels.map((label) => (
+                              <Badge key={label} variant="outline">
+                                {label}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">觸發條件</p>
+                          <p className="text-sm">{renderTriggerSummary(rule)}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">通知方式</p>
+                          {renderActionBadges(rule)}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
           </div>
         </TabsContent>
 
@@ -576,16 +825,38 @@ export function AlertManagement() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="email-enabled">啟用郵件通知</Label>
-                  <Switch id="email-enabled" checked={notificationSettings.email.enabled} />
+                  <Switch
+                    id="email-enabled"
+                    checked={emailEnabled}
+                    onCheckedChange={setEmailEnabled}
+                    disabled={isEmailSettingsLoading}
+                  />
                 </div>
 
                 <div>
                   <Label htmlFor="email-address">郵件地址</Label>
-                  <Input 
-                    id="email-address" 
-                    type="email" 
-                    defaultValue={notificationSettings.email.address}
-                    placeholder="輸入郵件地址" 
+                  <Input
+                    id="email-address"
+                    type="email"
+                    value={emailAddress}
+                    onChange={(event) => setEmailAddress(event.target.value)}
+                    placeholder="輸入郵件地址"
+                    disabled={!emailEnabled}
+                  />
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    跌倒偵測的信心門檻請於「新增警報規則」中的跌倒警報設定，這裡僅配置通知的冷卻秒數。
+                  </p>
+                  <Label htmlFor="fall-cooldown">通知冷卻秒數</Label>
+                  <Input
+                    id="fall-cooldown"
+                    type="number"
+                    min="5"
+                    value={emailCooldown}
+                    onChange={(event) => setEmailCooldown(event.target.value)}
+                    disabled={!emailEnabled}
                   />
                 </div>
 
@@ -594,17 +865,23 @@ export function AlertManagement() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm">高級別警報</span>
-                      <Switch checked={notificationSettings.email.highSeverity} />
+                      <Switch checked={notificationSettings.email.highSeverity} disabled />
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">中級別警報</span>
-                      <Switch checked={notificationSettings.email.mediumSeverity} />
+                      <Switch checked={notificationSettings.email.mediumSeverity} disabled />
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm">低級別警報</span>
-                      <Switch checked={notificationSettings.email.lowSeverity} />
+                      <Switch checked={notificationSettings.email.lowSeverity} disabled />
                     </div>
                   </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button onClick={handleSaveEmailSettings} disabled={updateEmailSettingsMutation.isPending}>
+                    {updateEmailSettingsMutation.isPending ? "儲存中..." : "儲存郵件設定"}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

@@ -38,6 +38,134 @@ export const useSystemStats = () => {
   });
 };
 
+// 郵件通知設定
+export interface EmailNotificationSettings {
+  enabled: boolean;
+  address: string;
+  confidence: number;
+  cooldown_seconds: number;
+}
+
+const fetchEmailNotificationSettings = async (): Promise<EmailNotificationSettings> => {
+  const { data } = await apiClient.get('/frontend/alerts/notification-settings/email');
+  return data;
+};
+
+export const useEmailNotificationSettings = () => {
+  return useQuery<EmailNotificationSettings, Error>({
+    queryKey: ['emailNotificationSettings'],
+    queryFn: fetchEmailNotificationSettings,
+  });
+};
+
+const updateEmailNotificationSettings = async (
+  payload: EmailNotificationSettings
+): Promise<EmailNotificationSettings> => {
+  const { data } = await apiClient.put('/frontend/alerts/notification-settings/email', payload);
+  return data;
+};
+
+export const useUpdateEmailNotificationSettings = () => {
+  const queryClient = useQueryClient();
+  return useMutation<EmailNotificationSettings, Error, EmailNotificationSettings>({
+    mutationFn: updateEmailNotificationSettings,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emailNotificationSettings'] });
+    },
+  });
+};
+
+// 警報規則設定
+export interface AlertRuleActionSettings {
+  email: boolean;
+  push: boolean;
+  sms: boolean;
+}
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  rule_type: string;
+  severity: string;
+  enabled: boolean;
+  cameras: string[];
+  trigger_values: Record<string, string>;
+  actions: AlertRuleActionSettings;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAlertRuleRequest {
+  name: string;
+  rule_type: string;
+  severity: string;
+  cameras: string[];
+  trigger_values: Record<string, string>;
+  actions: AlertRuleActionSettings;
+}
+
+const fetchAlertRules = async (): Promise<AlertRule[]> => {
+  const { data } = await apiClient.get('/frontend/alerts/rules');
+  return data;
+};
+
+export const useAlertRules = () => {
+  return useQuery<AlertRule[], Error>({
+    queryKey: ['alertRules'],
+    queryFn: fetchAlertRules,
+  });
+};
+
+const createAlertRule = async (payload: CreateAlertRuleRequest): Promise<AlertRule> => {
+  const { data } = await apiClient.post('/frontend/alerts/rules', payload);
+  return data;
+};
+
+export const useCreateAlertRule = () => {
+  const queryClient = useQueryClient();
+  return useMutation<AlertRule, Error, CreateAlertRuleRequest>({
+    mutationFn: createAlertRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alertRules'] });
+    },
+  });
+};
+
+interface ToggleAlertRuleRequest {
+  ruleId: string;
+  enabled: boolean;
+}
+
+const toggleAlertRule = async ({ ruleId, enabled }: ToggleAlertRuleRequest): Promise<AlertRule> => {
+  const { data } = await apiClient.patch(`/frontend/alerts/rules/${ruleId}/toggle`, { enabled });
+  return data;
+};
+
+export const useToggleAlertRule = () => {
+  const queryClient = useQueryClient();
+  return useMutation<AlertRule, Error, ToggleAlertRuleRequest>({
+    mutationFn: toggleAlertRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alertRules'] });
+    },
+  });
+};
+
+const deleteAlertRule = async (ruleId: string): Promise<{ success: boolean }> => {
+  const { data } = await apiClient.delete(`/frontend/alerts/rules/${ruleId}`);
+  return data;
+};
+
+export const useDeleteAlertRule = () => {
+  const queryClient = useQueryClient();
+  return useMutation<{ success: boolean }, Error, string>({
+    mutationFn: deleteAlertRule,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alertRules'] });
+    },
+  });
+};
+
 // 攝影機資料介面
 export interface CameraInfo {
   id: string;

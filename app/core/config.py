@@ -40,6 +40,26 @@ class Settings:
         self.max_detections = int(os.getenv("MAX_DETECTIONS", "100"))
         self.MAX_DETECTIONS = self.max_detections
 
+        # 跌倒偵測 / 通知設定
+        default_fall_model = (
+            Path(__file__).resolve().parents[2]
+            / "FallSafe-yolo11-main"
+            / "model"
+            / "model.pt"
+        )
+        self.fall_detection_model = os.getenv(
+            "FALL_DETECTION_MODEL", str(default_fall_model)
+        )
+        self.FALL_DETECTION_MODEL = self.fall_detection_model
+        self.fall_confidence_default = float(
+            os.getenv("FALL_CONFIDENCE_THRESHOLD", "0.5")
+        )
+        self.FALL_CONFIDENCE_THRESHOLD = self.fall_confidence_default
+        self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "465"))
+        self.smtp_username = os.getenv("SENDER_EMAIL")
+        self.smtp_password = os.getenv("SENDER_PASSWORD")
+
         # 追蹤器設定
         self.tracker = os.getenv("TRACKER", "bytetrack.yaml")
         self.track_high_thresh = float(os.getenv("TRACK_HIGH_THRESH", "0.6"))
