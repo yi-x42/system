@@ -100,10 +100,10 @@ export interface AlertRule {
   severity: string;
   enabled: boolean;
   cameras: string[];
-  trigger_values: Record<string, string>;
+  trigger_values: Record<string, unknown>;
   actions: AlertRuleActionSettings;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface CreateAlertRuleRequest {
@@ -111,7 +111,7 @@ export interface CreateAlertRuleRequest {
   rule_type: string;
   severity: string;
   cameras: string[];
-  trigger_values: Record<string, string>;
+  trigger_values: Record<string, unknown>;
   actions: AlertRuleActionSettings;
 }
 

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
+import { Checkbox } from "./ui/checkbox";
 import {
   useYoloModelList,
   useToggleModelStatus,
@@ -109,7 +110,13 @@ export function DetectionAnalysisOriginal() {
   const [modelUploadError, setModelUploadError] = useState<string | null>(null);
   const [isAlertConfigOpen, setIsAlertConfigOpen] = useState(false);
   const [alertConfigTask, setAlertConfigTask] = useState<{ id: string; name: string; cameraId?: string | null } | null>(null);
-  const [taskAlertBindings, setTaskAlertBindings] = useState<Record<string, string[]>>({});
+  type TaskRuleSelection = {
+    enabled: boolean;
+    selections?: string[];
+  };
+  const [taskAlertBindings, setTaskAlertBindings] = useState<
+    Record<string, Record<string, TaskRuleSelection>>
+  >({});
 
   const alertRuleTypeMeta = useMemo(
     () => ({
@@ -140,8 +147,8 @@ export function DetectionAnalysisOriginal() {
       .map((rule) => {
         const meta = alertRuleTypeMeta[rule.rule_type as AlertTypeKey];
         return {
-          id: rule.id,
-          name: rule.name || meta?.label || rule.rule_type,
+          rule,
+          displayName: rule.name || meta?.label || rule.rule_type,
           description: meta?.description || "",
         };
       });
@@ -244,16 +251,55 @@ export function DetectionAnalysisOriginal() {
     setIsAlertConfigOpen(true);
   };
 
-  const handleToggleAlertRule = (taskId: string, ruleId: string, enabled: boolean) => {
+  const handleToggleAlertRule = (taskId: string, rule: AlertRule, enabled: boolean) => {
     setTaskAlertBindings((previous) => {
-      const currentRules = previous[taskId] ?? [];
-      const nextRules = enabled
-        ? [...new Set([...currentRules, ruleId])]
-        : currentRules.filter((item) => item !== ruleId);
-      return { ...previous, [taskId]: nextRules };
+      const taskBindings = { ...(previous[taskId] ?? {}) };
+      if (!enabled) {
+        taskBindings[rule.id] = { enabled: false, selections: [] };
+      } else {
+        const lines = Array.isArray(rule.trigger_values?.lines)
+          ? (rule.trigger_values?.lines as Array<{ id?: string; label?: string }>)
+          : [];
+        const zones = Array.isArray(rule.trigger_values?.zones)
+          ? (rule.trigger_values?.zones as Array<{ id?: string; label?: string }>)
+          : [];
+        const selections =
+          lines.length > 0
+            ? lines.map((item, index) => item.id || `${rule.id}-line-${index + 1}`)
+            : zones.length > 0
+            ? zones.map((item, index) => item.id || `${rule.id}-zone-${index + 1}`)
+            : [];
+        taskBindings[rule.id] = {
+          enabled: true,
+          selections,
+        };
+      }
+      return { ...previous, [taskId]: taskBindings };
     });
   };
 
+  const handleToggleAlertItem = (
+    taskId: string,
+    ruleId: string,
+    itemId: string,
+    checked: boolean
+  ) => {
+    setTaskAlertBindings((previous) => {
+      const taskBindings = { ...(previous[taskId] ?? {}) };
+      const ruleState = taskBindings[ruleId] ?? { enabled: true, selections: [] };
+      const currentSelections = new Set(ruleState.selections ?? []);
+      if (checked) {
+        currentSelections.add(itemId);
+      } else {
+        currentSelections.delete(itemId);
+      }
+      taskBindings[ruleId] = {
+        ...ruleState,
+        selections: Array.from(currentSelections),
+      };
+      return { ...previous, [taskId]: taskBindings };
+    });
+  };
   const handleSaveAlertConfig = () => {
     setIsAlertConfigOpen(false);
   };
@@ -728,9 +774,13 @@ export function DetectionAnalysisOriginal() {
 
   const handleOpenPreviewWindow = async (taskId: number) => {
     try {
-      const selectedRules = (taskAlertBindings[String(taskId)] ?? []).map((ruleId) => ({
-        type: ruleId,
-      }));
+      const bindings = taskAlertBindings[String(taskId)] ?? {};
+      const selectedRules = Object.entries(bindings)
+        .filter(([, state]) => state.enabled)
+        .map(([ruleId, state]) => ({
+          type: ruleId,
+          selections: state.selections,
+        }));
       const response = await launchLivePersonPreviewMutation.mutateAsync({
         taskId: String(taskId),
         alertRules: selectedRules,
@@ -1302,27 +1352,72 @@ export function DetectionAnalysisOriginal() {
                             尚未建立符合此攝影機的警報規則，請先到「警報管理」新增規則。
                           </div>
                         ) : (
-                          alertRulesForDialog.map((rule) => {
+                          alertRulesForDialog.map(({ rule, displayName, description }) => {
                             const taskId = alertConfigTask?.id ?? "";
-                            const enabledRules = taskAlertBindings[taskId] ?? [];
-                            const isChecked = enabledRules.includes(rule.id);
+                            const taskBindings = taskAlertBindings[taskId] ?? {};
+                            const ruleState = taskBindings[rule.id];
+                            const lines = Array.isArray(rule.trigger_values?.lines)
+                              ? (rule.trigger_values?.lines as Array<{ id?: string; label?: string }>)
+                              : [];
+                            const zones = Array.isArray(rule.trigger_values?.zones)
+                              ? (rule.trigger_values?.zones as Array<{ id?: string; label?: string }>)
+                              : [];
+                            const selectionItems = lines.length
+                              ? lines
+                              : zones;
                             return (
-                              <div key={rule.id} className="flex items-start justify-between rounded-lg border p-4">
-                                <div>
-                                  <p className="font-medium">{rule.name}</p>
-                                  {rule.description && (
-                                    <p className="text-sm text-muted-foreground">{rule.description}</p>
-                                  )}
+                              <div key={rule.id} className="rounded-lg border p-4 space-y-3">
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                    <p className="font-medium">{displayName}</p>
+                                    {description && (
+                                      <p className="text-sm text-muted-foreground">{description}</p>
+                                    )}
+                                  </div>
+                                  <Switch
+                                    checked={ruleState?.enabled ?? false}
+                                    onCheckedChange={(checked) => {
+                                      if (!alertConfigTask) {
+                                        return;
+                                      }
+                                      handleToggleAlertRule(alertConfigTask.id, rule, checked);
+                                    }}
+                                  />
                                 </div>
-                                <Switch
-                                  checked={isChecked}
-                                  onCheckedChange={(checked) => {
-                                    if (!alertConfigTask) {
-                                      return;
-                                    }
-                                    handleToggleAlertRule(alertConfigTask.id, rule.id, checked);
-                                  }}
-                                />
+                                {ruleState?.enabled && selectionItems.length > 0 && (
+                                  <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                      {lines.length ? "選擇線段" : "選擇區域"}
+                                    </p>
+                                    {selectionItems.map((item, index) => {
+                                      const itemId =
+                                        item.id || `${rule.id}-${lines.length ? "line" : "zone"}-${index + 1}`;
+                                      const label =
+                                        item.label ||
+                                        (lines.length ? `Line ${index + 1}` : `Zone ${index + 1}`);
+                                      const checked = ruleState.selections?.includes(itemId) ?? true;
+                                      return (
+                                        <label key={itemId} className="flex items-center gap-2 text-sm">
+                                          <Checkbox
+                                            checked={checked}
+                                            onCheckedChange={(checkedValue) => {
+                                              if (!alertConfigTask) {
+                                                return;
+                                              }
+                                              handleToggleAlertItem(
+                                                alertConfigTask.id,
+                                                rule.id,
+                                                itemId,
+                                                Boolean(checkedValue)
+                                              );
+                                            }}
+                                          />
+                                          <span>{label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             );
                           })
