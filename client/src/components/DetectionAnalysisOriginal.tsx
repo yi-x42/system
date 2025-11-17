@@ -38,6 +38,9 @@ import {
   useAlertRules,
   AlertRule,
   useTaskRegions,
+  TaskAlertRulePayload,
+  useSaveTaskAlerts,
+  useTaskAlerts,
 } from "../hooks/react-query-hooks";
 import {
   Brain,
@@ -135,7 +138,7 @@ export function DetectionAnalysisOriginal() {
     data: taskRegionData,
     isLoading: isTaskRegionsLoading,
   } = useTaskRegions(alertConfigTask?.id);
-
+  const { data: savedTaskAlerts } = useTaskAlerts(alertConfigTask?.id);
   const alertRulesForDialog = useMemo(() => {
     if (!alertConfigTask) {
       return [];
@@ -158,6 +161,27 @@ export function DetectionAnalysisOriginal() {
         };
       });
   }, [alertConfigTask, alertRules, alertRuleTypeMeta]);
+  useEffect(() => {
+    if (!alertConfigTask?.id || !savedTaskAlerts) {
+      return;
+    }
+    setTaskAlertBindings((previous) => {
+      const next = { ...previous };
+      const taskId = alertConfigTask.id;
+      const bindings: Record<string, TaskRuleSelection> = {};
+      (savedTaskAlerts.rules ?? []).forEach((rule) => {
+        if (!rule?.id) {
+          return;
+        }
+        const selections = Array.isArray(rule.selections)
+          ? rule.selections.filter((item): item is string => typeof item === "string")
+          : [];
+        bindings[rule.id] = { enabled: true, selections };
+      });
+      next[taskId] = bindings;
+      return next;
+    });
+  }, [alertConfigTask?.id, savedTaskAlerts]);
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -304,8 +328,22 @@ export function DetectionAnalysisOriginal() {
       return { ...previous, [taskId]: taskBindings };
     });
   };
-  const handleSaveAlertConfig = () => {
-    setIsAlertConfigOpen(false);
+  const handleSaveAlertConfig = async () => {
+    if (!alertConfigTask) {
+      return;
+    }
+    try {
+      const payload = buildTaskAlertPayload(alertConfigTask.id);
+      await saveTaskAlertsMutation.mutateAsync({
+        taskId: alertConfigTask.id,
+        rules: payload,
+      });
+      alert("警報設定已儲存並會立即生效。");
+      setIsAlertConfigOpen(false);
+    } catch (error) {
+      console.error("儲存警報設定失敗:", error);
+      alert("儲存警報設定失敗，請稍後再試。");
+    }
   };
 
 
@@ -322,6 +360,7 @@ export function DetectionAnalysisOriginal() {
   const startLivePersonCameraMutation = useStartLivePersonCamera();
   const stopLivePersonCameraMutation = useStopLivePersonCamera();
   const launchLivePersonPreviewMutation = useLaunchLivePersonPreview();
+  const saveTaskAlertsMutation = useSaveTaskAlerts();
   const videoAnalysisMutation = useVideoAnalysis();
   const stopTaskMutation = useStopAnalysisTask();
   const deleteTaskMutation = useDeleteAnalysisTask();
@@ -776,17 +815,38 @@ export function DetectionAnalysisOriginal() {
     }
   };
 
+  const buildTaskAlertPayload = useCallback(
+    (taskId: string): TaskAlertRulePayload[] => {
+      const bindings = taskAlertBindings[taskId] ?? {};
+      return Object.entries(bindings)
+        .filter(([, state]) => state.enabled)
+        .map(([ruleId, state]) => {
+          const matchedRule = alertRules.find((rule) => rule.id === ruleId);
+          if (!matchedRule) {
+            return null;
+          }
+          return {
+            id: matchedRule.id,
+            rule_type: matchedRule.rule_type,
+            name: matchedRule.name,
+            severity: matchedRule.severity,
+            actions: matchedRule.actions,
+            trigger_values: matchedRule.trigger_values,
+            selections: state.selections ?? [],
+          };
+        })
+        .filter((payload): payload is TaskAlertRulePayload => Boolean(payload));
+    },
+    [alertRules, taskAlertBindings]
+  );
+
   const handleOpenPreviewWindow = async (taskId: number) => {
     try {
-      const bindings = taskAlertBindings[String(taskId)] ?? {};
-      const selectedRules = Object.entries(bindings)
-        .filter(([, state]) => state.enabled)
-        .map(([ruleId, state]) => ({
-          type: ruleId,
-          selections: state.selections,
-        }));
+      const taskKey = String(taskId);
+      const selectedRules = buildTaskAlertPayload(taskKey);
+      await saveTaskAlertsMutation.mutateAsync({ taskId: taskKey, rules: selectedRules });
       const response = await launchLivePersonPreviewMutation.mutateAsync({
-        taskId: String(taskId),
+        taskId: taskKey,
         alertRules: selectedRules,
       });
       const message =

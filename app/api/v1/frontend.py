@@ -52,10 +52,86 @@ from app.services.alert_rule_service import (
 )
 from app.services.fall_detection_service import fall_detection_service
 from app.services.email_notification_service import send_fall_email_alert, send_test_email
+from app.services.alert_runtime_store import (
+    ensure_alert_runtime_file,
+    load_alert_runtime_rules,
+    save_alert_runtime_rules,
+)
 from app.models.database import AnalysisTask, DetectionResult, DataSource, TaskStatistics
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
 
+
+def _has_fall_detection_rule(rules: Optional[List[Dict[str, Any]]]) -> bool:
+    if not rules:
+        return False
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        rule_type = str(rule.get("rule_type") or rule.get("type") or "").lower()
+        normalized_type = rule_type.replace("-", "_")
+        if normalized_type in {"fall_detection", "falldetection"}:
+            return True
+    return False
+
+
+def _update_fall_detection_monitor(
+    task: AnalysisTask,
+    enable: bool,
+    *,
+    confidence: Optional[float] = None,
+) -> None:
+    task_id = str(task.id)
+    if not enable:
+        fall_detection_service.stop_monitoring(task_id)
+        return
+
+    source_info = task.source_info or {}
+    if source_info.get("client_stream"):
+        api_logger.info(
+            f"任務 {task_id} 使用客戶端影像上傳，暫不支援跌倒偵測服務。",
+        )
+        fall_detection_service.stop_monitoring(task_id)
+        return
+
+    device_index = source_info.get("device_index")
+    try:
+        device_index_int = int(device_index)
+    except (TypeError, ValueError):
+        device_index_int = None
+
+    if device_index_int is None:
+        api_logger.warning(f"任務 {task_id} 缺少 device_index，無法啟動跌倒偵測。")
+        fall_detection_service.stop_monitoring(task_id)
+        return
+
+    camera_identifier = (
+        source_info.get("camera_id")
+        or task.camera_id
+        or source_info.get("source_id")
+        or f"task_{task_id}"
+    )
+    if not camera_identifier:
+        api_logger.warning(f"任務 {task_id} 無法判斷 camera_id，無法啟動跌倒偵測。")
+        fall_detection_service.stop_monitoring(task_id)
+        return
+
+    confidence_value = (
+        confidence
+        if confidence is not None
+        else source_info.get("confidence")
+        or task.confidence_threshold
+        or settings.fall_confidence_default
+    )
+
+    started = fall_detection_service.start_monitoring(
+        task_id=task_id,
+        camera_id=str(camera_identifier),
+        device_index=device_index_int,
+        confidence=confidence_value,
+    )
+    if not started:
+        api_logger.warning(f"任務 {task_id} 的跌倒偵測服務啟動失敗，請檢查攝影機設定。")
 # 全域變數：用於儲存網路速度測量的歷史數據
 _network_measurement_cache = {
     "last_bytes": 0,
@@ -271,6 +347,9 @@ class RealtimeAnalysisRequest(BaseModel):
     iou_threshold: float = Field(0.45, description="IoU閾值", ge=0.0, le=1.0)
     description: str = Field("", description="任務描述")
     client_stream: bool = Field(False, description="是否由客戶端上傳影像進行分析")
+    alert_rules: Optional[List[Dict[str, Any]]] = Field(
+        None, description="啟動任務時要套用的警報規則"
+    )
 
 class RealtimeAnalysisResponse(BaseModel):
     """即時分析回應模型"""
@@ -300,6 +379,11 @@ class PreviewLaunchResponse(BaseModel):
     pid: int
     already_running: bool
     message: str
+
+
+class TaskAlertRuleUpdate(BaseModel):
+    """任務警報綁定更新請求"""
+    rules: List[Dict[str, Any]] = Field(default_factory=list, description="套用於任務的警報規則")
     log_path: Optional[str] = Field(None, description="GUI 子行程輸出日誌路徑")
 
 
@@ -1122,7 +1206,7 @@ async def start_realtime_analysis(
                 "iou_threshold": request.iou_threshold,
                 "client_stream": request.client_stream
             }
-            
+
             analysis_task = AnalysisTask(
                 task_type="realtime_camera",
                 status="pending",
@@ -1141,15 +1225,22 @@ async def start_realtime_analysis(
             await db.commit()
             await db.refresh(analysis_task)
             task_id = analysis_task.id
-            
+
             api_logger.info(f"創建分析任務記錄成功: {task_id}")
-            
+
         except Exception as e:
             await db.rollback()
             api_logger.error(f"創建任務記錄失敗: {e}")
             raise HTTPException(status_code=500, detail=f"創建任務記錄失敗: {str(e)}")
-        
-        # 5. 啟動 PySide6 偵測程式（預設隱藏）
+
+        # 5. 準備警報設定並啟動 PySide6 偵測程式（預設隱藏）
+        if request.alert_rules is not None:
+            alert_rules = request.alert_rules
+            alert_rules_path = save_alert_runtime_rules(task_id, alert_rules)
+        else:
+            alert_rules = load_alert_runtime_rules(task_id)
+            alert_rules_path = ensure_alert_runtime_file(task_id)
+        fall_alert_enabled = _has_fall_detection_rule(alert_rules)
         if camera_info.get("camera_type") == "USB":
             source_value = str(camera_info.get("device_index", 0))
         else:
@@ -1168,13 +1259,23 @@ async def start_realtime_analysis(
                 imgsz=camera_width,
                 device=None,
                 start_hidden=True,
-                fall_alert_enabled=False,
+                fall_alert_enabled=fall_alert_enabled,
+                alert_rules_path=str(alert_rules_path),
             )
         except Exception as exc:
             api_logger.error(f"啟動 PySide6 偵測程式失敗: {exc}")
             raise HTTPException(
                 status_code=500, detail=f"偵測程式啟動失敗：{exc}"
             ) from exc
+
+        if fall_alert_enabled:
+            _update_fall_detection_monitor(
+                analysis_task,
+                True,
+                confidence=request.confidence,
+            )
+        else:
+            fall_detection_service.stop_monitoring(str(task_id))
 
         analysis_task.status = "running"
         analysis_task.start_time = datetime.utcnow()
@@ -1264,6 +1365,42 @@ async def get_analysis_task_regions(
             status_code=500,
             detail=f"查詢任務線段/區域配置失敗: {exc}",
         )
+
+
+@router.get("/analysis/tasks/{task_id}/alerts", summary="取得任務警報設定")
+async def get_task_alert_config(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await db.get(AnalysisTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+    rules = load_alert_runtime_rules(task_id)
+    return {"task_id": task_id, "rules": rules}
+
+
+@router.put("/analysis/tasks/{task_id}/alerts", summary="更新任務警報設定")
+async def update_task_alert_config(
+    task_id: int,
+    payload: TaskAlertRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    task = await db.get(AnalysisTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+    rules = payload.rules or []
+    path = save_alert_runtime_rules(task_id, rules)
+    fall_enabled = _has_fall_detection_rule(rules)
+    if task.status == "running":
+        _update_fall_detection_monitor(task, fall_enabled)
+    else:
+        fall_detection_service.stop_monitoring(str(task.id))
+    return {
+        "task_id": task_id,
+        "rules": rules,
+        "config_path": str(path),
+        "fall_detection_enabled": fall_enabled,
+    }
 
 # ===== 攝影機管理 API =====
 @router.websocket("/analysis/live-person-camera/{task_id}/ws")
@@ -3544,7 +3681,7 @@ async def run_realtime_detection(
             model_path=model_info.get("path"),
             external_source=request.client_stream,
         )
-        
+
         if success:
             api_logger.info(f"即時檢測任務 {task_id} 啟動成功")
         else:
@@ -3632,17 +3769,13 @@ async def launch_live_person_preview_gui(
             or f"Live Task {task_id}"
         )
 
-        alert_rules = payload.alert_rules or []
-        fall_alert_enabled = False
-        for rule in alert_rules:
-            if not isinstance(rule, dict):
-                continue
-            rule_type = str(rule.get("type", "")).lower()
-            normalized_type = rule_type.replace("-", "_")
-            if normalized_type in {"fall_detection", "falldetection"}:
-                fall_alert_enabled = True
-                break
-
+        if payload.alert_rules is not None:
+            alert_rules = payload.alert_rules
+            alert_rules_path = save_alert_runtime_rules(task.id, alert_rules)
+        else:
+            alert_rules = load_alert_runtime_rules(task.id)
+            alert_rules_path = ensure_alert_runtime_file(task.id)
+        fall_alert_enabled = _has_fall_detection_rule(alert_rules)
         try:
             detection_status = realtime_gui_manager.start_detection(
                 task_id=str(task.id),
@@ -3654,6 +3787,7 @@ async def launch_live_person_preview_gui(
                 device=payload.device or source_info.get("device"),
                 start_hidden=False,
                 fall_alert_enabled=fall_alert_enabled,
+                alert_rules_path=str(alert_rules_path),
             )
         except Exception as exc:
             api_logger.error(f"啟動/確認偵測子行程失敗: {exc}")
@@ -3672,18 +3806,7 @@ async def launch_live_person_preview_gui(
         )
 
         if fall_alert_enabled:
-            try:
-                monitor_device_index = int(device_index)
-            except (TypeError, ValueError):
-                monitor_device_index = 0
-            started = fall_detection_service.start_monitoring(
-                task_id=str(task.id),
-                camera_id=camera_id,
-                device_index=monitor_device_index,
-                confidence=confidence_value,
-            )
-            if not started:
-                api_logger.warning("跌倒偵測服務啟動失敗，請檢查攝影機設定")
+            _update_fall_detection_monitor(task, True, confidence=confidence_value)
         else:
             fall_detection_service.stop_monitoring(str(task.id))
 

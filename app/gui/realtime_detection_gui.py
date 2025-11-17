@@ -14,11 +14,13 @@ import ctypes
 import json
 import math
 import os
+import queue
 import secrets
 import socket
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +46,13 @@ from app.models.database import (
     TaskStatistics,
     ZoneDwellEvent,
 )
+from app.services.camera_stream_manager import (
+    FrameData,
+    StreamConsumer,
+    camera_stream_manager,
+)
+from app.services.email_notification_service import send_alert_rule_email
+from app.services.notification_settings_service import get_email_settings
 
 
 def resolve_labels(
@@ -590,6 +599,317 @@ class SpeedState:
     speed_mps: float = 0.0
 
 
+class AlertRuleEvaluator:
+    """根據配置的警報規則檢查事件並寄送郵件通知。"""
+
+    RULE_LABELS = {
+        "lineCrossing": "越線警報",
+        "zoneDwell": "區域滯留警報",
+        "speedAnomaly": "速度異常警報",
+        "crowdCount": "人數警報",
+        "fallDetection": "跌倒警報",
+    }
+
+    def __init__(
+        self,
+        task_id: int,
+        camera_name: str | None,
+        alert_rules_path: str | None,
+    ) -> None:
+        self._task_id = str(task_id)
+        self._camera_name = camera_name or f"Task {task_id}"
+        self._config_path = Path(alert_rules_path) if alert_rules_path else None
+        self._last_mtime = 0.0
+        self._rules: list[dict] = []
+        self._line_counts: dict[str, dict[str, int]] = {}
+        self._last_trigger_time: dict[str, float] = {}
+        self._snapshot_dir = PROJECT_ROOT / "uploads" / "alerts" / "snapshots" / self._task_id
+        self._email_disabled_logged = False
+
+    def _reload_rules_if_needed(self) -> None:
+        if not self._config_path:
+            return
+        try:
+            mtime = self._config_path.stat().st_mtime
+        except FileNotFoundError:
+            if self._rules:
+                detection_logger.info("警報設定檔被移除，停止套用規則")
+            self._rules = []
+            self._line_counts.clear()
+            self._last_mtime = 0.0
+            return
+        if mtime == self._last_mtime:
+            return
+        try:
+            with self._config_path.open("r", encoding="utf-8") as fp:
+                payload = json.load(fp)
+        except Exception as exc:  # noqa: BLE001
+            detection_logger.error(f"讀取警報設定檔失敗: {exc}")
+            return
+        raw_rules = payload.get("rules") if isinstance(payload, dict) else payload
+        if not isinstance(raw_rules, list):
+            raw_rules = []
+        normalized: list[dict] = []
+        for item in raw_rules:
+            if not isinstance(item, dict):
+                continue
+            normalized.append(self._normalize_rule(item))
+        self._rules = normalized
+        self._line_counts.clear()
+        self._last_mtime = mtime
+        detection_logger.info(
+            "任務 %s 已載入 %d 筆警報規則", self._task_id, len(self._rules)
+        )
+
+    def _normalize_rule(self, payload: dict) -> dict:
+        selections_raw = payload.get("selections") or []
+        selections: set[str] = set()
+        for entry in selections_raw:
+            if isinstance(entry, str):
+                selections.add(entry)
+            elif isinstance(entry, dict):
+                label = entry.get("label") or entry.get("id")
+                if label is not None:
+                    selections.add(str(label))
+        actions = payload.get("actions") or {}
+        rule_id = (
+            payload.get("id")
+            or payload.get("rule_id")
+            or payload.get("type")
+            or payload.get("rule_type")
+            or uuid.uuid4().hex
+        )
+        return {
+            "id": str(rule_id),
+            "rule_type": str(payload.get("rule_type") or payload.get("type") or "custom"),
+            "name": payload.get("name") or payload.get("rule_type") or "未命名規則",
+            "severity": payload.get("severity") or "中",
+            "trigger": payload.get("trigger_values") or payload.get("trigger") or {},
+            "actions": actions,
+            "selections": selections,
+        }
+
+    def _can_trigger(self, rule_id: str, cooldown: float) -> bool:
+        now = time.time()
+        last = self._last_trigger_time.get(rule_id)
+        if last is None or now - last >= cooldown:
+            self._last_trigger_time[rule_id] = now
+            return True
+        return False
+
+    def _save_snapshot(self, frame: np.ndarray, frame_timestamp: datetime, rule_id: str) -> str | None:
+        try:
+            if frame is None:
+                return None
+            self._snapshot_dir.mkdir(parents=True, exist_ok=True)
+            timestamp_part = frame_timestamp.strftime("%Y%m%d%H%M%S%f")
+            filename = f"{rule_id}_{timestamp_part}.jpg"
+            save_path = self._snapshot_dir / filename
+            success = cv2.imwrite(str(save_path), frame)
+            if not success:
+                return None
+            return str(save_path)
+        except Exception as exc:  # noqa: BLE001
+            detection_logger.error(f"儲存警報快照失敗: {exc}")
+            return None
+
+    def _send_alert(
+        self,
+        rule: dict,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        description: str,
+        extra_lines: list[str] | None = None,
+    ) -> None:
+        if not rule.get("actions", {}).get("email", True):
+            return
+        email_settings = get_email_settings()
+        if not email_settings.get("enabled"):
+            if not self._email_disabled_logged:
+                detection_logger.info("郵件通知未啟用，警報僅記錄不寄送")
+                self._email_disabled_logged = True
+            return
+        receiver = email_settings.get("address")
+        if not receiver:
+            detection_logger.warning("郵件通知未設定收件者，無法寄送警報郵件")
+            return
+        cooldown = max(5.0, float(email_settings.get("cooldown_seconds", 30)))
+        if not self._can_trigger(rule["id"], cooldown):
+            return
+        snapshot_path = self._save_snapshot(frame, frame_timestamp, rule["id"])
+        label = self.RULE_LABELS.get(rule["rule_type"], rule["rule_type"])
+        body_lines = [
+            f"任務 ID：{self._task_id}",
+            f"攝影機：{self._camera_name}",
+            f"警報類型：{label}",
+            f"發生時間：{frame_timestamp.isoformat()}",
+        ]
+        if extra_lines:
+            body_lines.extend(extra_lines)
+        send_alert_rule_email(
+            rule_name=rule.get("name", label),
+            rule_type=label,
+            severity=rule.get("severity", "中"),
+            receiver_email=receiver,
+            description=description,
+            body_lines=body_lines,
+            frame_path=snapshot_path,
+        )
+
+    def evaluate(
+        self,
+        *,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        line_events: list[dict],
+        zone_events: list[dict],
+        speed_events: list[dict],
+        person_count: int,
+        line_summaries: list[dict],
+        zone_summaries: list[dict],
+    ) -> None:
+        if not self._config_path:
+            return
+        self._reload_rules_if_needed()
+        if not self._rules:
+            return
+        line_events = line_events or []
+        zone_events = zone_events or []
+        speed_events = speed_events or []
+        line_summaries = line_summaries or []
+        zone_summaries = zone_summaries or []
+        for rule in self._rules:
+            rule_type = rule["rule_type"]
+            if rule_type == "lineCrossing":
+                self._evaluate_line_crossing(rule, frame, frame_timestamp, line_events)
+            elif rule_type == "zoneDwell":
+                self._evaluate_zone(rule, frame, frame_timestamp, zone_events, zone_summaries)
+            elif rule_type == "speedAnomaly":
+                self._evaluate_speed(rule, frame, frame_timestamp, speed_events)
+            elif rule_type == "crowdCount":
+                self._evaluate_crowd(rule, frame, frame_timestamp, person_count)
+
+    def _evaluate_line_crossing(
+        self,
+        rule: dict,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        line_events: list[dict],
+    ) -> None:
+        selections = rule["selections"]
+        if not selections:
+            return
+        trigger = rule.get("trigger") or {}
+        threshold = int(trigger.get("crossingCount") or 1)
+        threshold = max(1, threshold)
+        counts = self._line_counts.setdefault(rule["id"], {})
+        for event in line_events:
+            label = str(event.get("line_id") or "")
+            if not label or label not in selections:
+                continue
+            counts[label] = counts.get(label, 0) + 1
+            if counts[label] >= threshold:
+                direction = event.get("direction") or "unknown"
+                description = f"線段 {label} 偵測 {direction} 越線 (累積 {counts[label]}/{threshold})"
+                extra = [f"越線方向：{direction}", f"穿越線：{label}", f"閾值：{threshold}"]
+                self._send_alert(rule, frame, frame_timestamp, description, extra)
+                counts[label] = 0
+
+    def _evaluate_zone(
+        self,
+        rule: dict,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        zone_events: list[dict],
+        zone_summaries: list[dict],
+    ) -> None:
+        selections = rule["selections"]
+        if not selections:
+            return
+        trigger = rule.get("trigger") or {}
+        dwell_threshold = float(trigger.get("dwellSeconds") or 0.0)
+        people_threshold = int(trigger.get("simultaneousCount") or 0)
+        for event in zone_events:
+            zone_id = str(event.get("zone_id") or "")
+            if not zone_id or zone_id not in selections:
+                continue
+            dwell_seconds = float(event.get("dwell_seconds") or 0.0)
+            if dwell_threshold and dwell_seconds < dwell_threshold:
+                continue
+            description = f"區域 {zone_id} 停留 {dwell_seconds:.1f}s，超過設定門檻"
+            extra = [
+                f"區域：{zone_id}",
+                f"停留秒數：{dwell_seconds:.1f}s",
+                f"門檻：{dwell_threshold or '未設定'}",
+            ]
+            self._send_alert(rule, frame, frame_timestamp, description, extra)
+        if people_threshold <= 0:
+            return
+        for summary in zone_summaries:
+            label = str(summary.get("label") or summary.get("zone_id") or "")
+            if not label or label not in selections:
+                continue
+            current = int(summary.get("current") or 0)
+            if current >= people_threshold:
+                description = f"區域 {label} 目前人數 {current} 人，超過門檻 {people_threshold}"
+                extra = [
+                    f"區域：{label}",
+                    f"目前人數：{current}",
+                    f"門檻：{people_threshold}",
+                ]
+                self._send_alert(rule, frame, frame_timestamp, description, extra)
+
+    def _evaluate_speed(
+        self,
+        rule: dict,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        speed_events: list[dict],
+    ) -> None:
+        trigger = rule.get("trigger") or {}
+        avg_threshold = float(trigger.get("avgSpeedThreshold") or 0.0)
+        max_threshold = float(trigger.get("maxSpeedThreshold") or 0.0)
+        if avg_threshold <= 0 and max_threshold <= 0:
+            return
+        for event in speed_events:
+            avg_speed = float(event.get("speed_avg") or 0.0)
+            max_speed = float(event.get("speed_max") or avg_speed)
+            threshold_hit = False
+            details: list[str] = []
+            if avg_threshold > 0 and avg_speed >= avg_threshold:
+                details.append(f"平均速度 {avg_speed:.2f} m/s ≥ {avg_threshold}")
+                threshold_hit = True
+            if max_threshold > 0 and max_speed >= max_threshold:
+                details.append(f"最大速度 {max_speed:.2f} m/s ≥ {max_threshold}")
+                threshold_hit = True
+            if threshold_hit:
+                description = "；".join(details)
+                extra = [
+                    f"平均速度：{avg_speed:.2f} m/s",
+                    f"最大速度：{max_speed:.2f} m/s",
+                ]
+                self._send_alert(rule, frame, frame_timestamp, description, extra)
+
+    def _evaluate_crowd(
+        self,
+        rule: dict,
+        frame: np.ndarray,
+        frame_timestamp: datetime,
+        person_count: int,
+    ) -> None:
+        trigger = rule.get("trigger") or {}
+        threshold = int(trigger.get("peopleCount") or 0)
+        if threshold <= 0:
+            return
+        if person_count >= threshold:
+            description = f"現場偵測到 {person_count} 人，已超過門檻 {threshold}"
+            extra = [
+                f"當前人數：{person_count}",
+                f"設定門檻：{threshold}",
+            ]
+            self._send_alert(rule, frame, frame_timestamp, description, extra)
+
+
 class DatabaseWriter:
     """負責將偵測資料寫入資料庫。"""
 
@@ -858,6 +1178,29 @@ class DetectionWorker(QtCore.QThread):
         self._emit_lines_changed()
         self._emit_zones_changed()
         self._emit_scale_changed()
+        raw_source = getattr(args, "source", 0)
+        if isinstance(raw_source, str) and raw_source.isdigit():
+            raw_source = int(raw_source)
+        self._source_value = raw_source
+        self._shared_enabled = isinstance(raw_source, int)
+        self._shared_camera_id: str | None = (
+            f"camera_{raw_source}" if self._shared_enabled else None
+        )
+        self._shared_device_index: int | None = raw_source if self._shared_enabled else None
+        self._shared_queue: queue.Queue[FrameData] | None = (
+            queue.Queue(maxsize=1) if self._shared_enabled else None
+        )
+        self._shared_consumer: StreamConsumer | None = None
+        self._shared_running = threading.Event()
+        self._capture: cv2.VideoCapture | None = None
+        alert_rules_path = getattr(args, "alert_rules", None)
+        self._alert_evaluator: AlertRuleEvaluator | None = None
+        if alert_rules_path:
+            self._alert_evaluator = AlertRuleEvaluator(
+                task_id=self._task_id,
+                camera_name=getattr(args, "window_name", None),
+                alert_rules_path=alert_rules_path,
+            )
 
     def _emit_lines_changed(self) -> None:
         with self._config_lock:
@@ -883,6 +1226,51 @@ class DetectionWorker(QtCore.QThread):
     @QtCore.Slot()
     def request_scale_status(self) -> None:
         self._emit_scale_changed()
+
+    def _handle_shared_frame(self, frame_data: FrameData) -> None:
+        if not self._shared_running.is_set() or self._shared_queue is None:
+            return
+        try:
+            self._shared_queue.put_nowait(frame_data)
+        except queue.Full:
+            pass
+
+    def _start_shared_stream(self) -> None:
+        if not self._shared_camera_id or self._shared_device_index is None:
+            raise RuntimeError("共享攝影機資訊不完整，無法啟動")
+        success = camera_stream_manager.start_stream(
+            self._shared_camera_id, self._shared_device_index
+        )
+        if not success:
+            raise RuntimeError("無法啟動共享攝影機流")
+        consumer_id = f"gui-{self._task_id}-{uuid.uuid4().hex[:6]}"
+        consumer = StreamConsumer(consumer_id, self._handle_shared_frame)
+        if not camera_stream_manager.add_consumer(self._shared_camera_id, consumer):
+            raise RuntimeError("無法註冊共享攝影機流消費者")
+        self._shared_consumer = consumer
+        self._shared_running.set()
+
+    def _stop_shared_stream(self) -> None:
+        self._shared_running.clear()
+        if self._shared_consumer and self._shared_camera_id:
+            camera_stream_manager.remove_consumer(
+                self._shared_camera_id, self._shared_consumer.consumer_id
+            )
+        self._shared_consumer = None
+        if self._shared_queue:
+            with self._shared_queue.mutex:
+                self._shared_queue.queue.clear()
+
+    def _wait_shared_frame(self, timeout: float = 1.0) -> tuple[np.ndarray, datetime]:
+        if not self._shared_queue:
+            raise RuntimeError("共享攝影機佇列未初始化")
+        try:
+            frame_data = self._shared_queue.get(timeout=timeout)
+        except queue.Empty:
+            raise TimeoutError("共享攝影機無影格可用")
+        frame = frame_data.frame.copy()
+        timestamp = frame_data.timestamp or datetime.utcnow()
+        return frame, timestamp
 
     def _save_detection_thumbnail(
         self,
@@ -1155,17 +1543,23 @@ class DetectionWorker(QtCore.QThread):
 
     def _processing_loop(self) -> None:
         args = self._args
-        source = args.source
-        if isinstance(source, str) and source.isdigit():
-            source = int(source)
-
-        capture = cv2.VideoCapture(source)
-        if not capture.isOpened():
-            raise RuntimeError(f"無法開啟影像來源：{args.source}")
-
-        success, frame = capture.read()
-        if not success:
-            raise RuntimeError("無法讀取影像來源的第一個影格")
+        capture: cv2.VideoCapture | None = None
+        if self._shared_enabled:
+            self._start_shared_stream()
+            try:
+                frame, frame_timestamp = self._wait_shared_frame(timeout=5.0)
+            except Exception as exc:  # noqa: BLE001
+                self._stop_shared_stream()
+                raise RuntimeError(f"無法從共享攝影機取得影像：{exc}") from exc
+        else:
+            source = self._source_value
+            capture = cv2.VideoCapture(source)
+            if not capture.isOpened():
+                raise RuntimeError(f"無法開啟影像來源：{args.source}")
+            success, frame = capture.read()
+            if not success:
+                raise RuntimeError("無法讀取影像來源的第一個影格")
+            frame_timestamp = datetime.utcnow()
 
         model = YOLO(args.model)
         tracker = sv.ByteTrack()
@@ -1186,6 +1580,19 @@ class DetectionWorker(QtCore.QThread):
 
         try:
             while not self.isInterruptionRequested():
+                if self._shared_enabled:
+                    try:
+                        frame, frame_timestamp = self._wait_shared_frame(timeout=1.0)
+                    except TimeoutError:
+                        continue
+                else:
+                    success, next_frame = capture.read() if capture else (False, None)
+                    if not success or next_frame is None:
+                        self.statusMessage.emit("影像來源結束或中斷，停止串流")
+                        break
+                    frame = next_frame
+                    frame_timestamp = datetime.utcnow()
+
                 current_time = time.perf_counter()
                 elapsed = current_time - last_frame_time
                 last_frame_time = current_time
@@ -1656,20 +2063,32 @@ class DetectionWorker(QtCore.QThread):
                         speed_events=speed_event_records,
                         stats_payload=db_stats_payload,
                     )
+                if self._alert_evaluator:
+                    try:
+                        self._alert_evaluator.evaluate(
+                            frame=frame,
+                            frame_timestamp=frame_timestamp,
+                            line_events=line_event_records,
+                            zone_events=zone_event_records,
+                            speed_events=speed_event_records,
+                            person_count=person_count,
+                            line_summaries=line_summaries,
+                            zone_summaries=zone_summaries,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        detection_logger.error(f"警報規則處理失敗: {exc}")
 
                 if self._reset_heatmap_event.is_set():
                     heatmap_annotator.heat_mask = None
                     self._reset_heatmap_event.clear()
                     self.statusMessage.emit("熱圖已重置")
 
-                success, next_frame = capture.read()
-                if not success:
-                    self.statusMessage.emit("影像來源結束或中斷，停止串流")
-                    break
-                frame = next_frame
         finally:
-            capture.release()
+            if capture:
+                capture.release()
             cv2.destroyAllWindows()
+            if self._shared_enabled:
+                self._stop_shared_stream()
             if self._db_writer:
                 self._db_writer.close()
 
@@ -2228,6 +2647,12 @@ def parse_args() -> argparse.Namespace:
         "--enable-fall-alert",
         action="store_true",
         help="啟用跌倒警報邏輯，偵測到可疑姿態時輸出日誌。",
+    )
+    parser.add_argument(
+        "--alert-rules",
+        type=str,
+        default=None,
+        help="指定警報規則設定檔路徑。",
     )
     return parser.parse_args()
 

@@ -8,7 +8,7 @@ import cv2
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Callable, Optional, Tuple, Any
+from typing import Dict, List, Callable, Optional, Tuple, Any, Set
 from dataclasses import dataclass
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
@@ -351,72 +351,107 @@ class CameraStreamManager:
             return
             
         self.streams: Dict[str, CameraStream] = {}
+        self.camera_aliases: Dict[str, str] = {}
+        self.device_to_stream: Dict[int, str] = {}
+        self.stream_cameras: Dict[str, Set[str]] = {}
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="CameraStreamManager")
         self._initialized = True
         
         detection_logger.info("攝影機流管理器初始化完成")
     
+    def _resolve_camera_id(self, camera_id: str) -> str:
+        return self.camera_aliases.get(camera_id, camera_id)
+    
     def start_stream(self, camera_id: str, device_index: int) -> bool:
         """啟動指定攝影機的流"""
-        if camera_id in self.streams:
-            stream = self.streams[camera_id]
+        canonical_id = self.device_to_stream.get(device_index)
+        if canonical_id and canonical_id in self.streams:
+            self.camera_aliases[camera_id] = canonical_id
+            self.stream_cameras.setdefault(canonical_id, set()).add(camera_id)
+            detection_logger.info(
+                f"攝影機 {camera_id} 共用既有流 {canonical_id} (device_index={device_index})"
+            )
+            return True
+
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id in self.streams:
+            stream = self.streams[canonical_id]
             if stream.status == StreamStatus.RUNNING:
-                detection_logger.info(f"攝影機流 {camera_id} 已在運行")
+                self.camera_aliases[camera_id] = canonical_id
+                self.stream_cameras.setdefault(canonical_id, set()).add(camera_id)
+                detection_logger.info(f"攝影機 {camera_id} 已共用流 {canonical_id}")
                 return True
             else:
-                # 清理舊的流
                 stream.stop()
-                del self.streams[camera_id]
-        
-        # 創建新流
-        stream = CameraStream(camera_id, device_index)
+                del self.streams[canonical_id]
+                self.stream_cameras.pop(canonical_id, None)
+
+        stream = CameraStream(canonical_id, device_index)
         success = stream.start()
         
         if success:
-            self.streams[camera_id] = stream
-            detection_logger.info(f"攝影機流 {camera_id} 啟動成功")
+            self.streams[canonical_id] = stream
+            self.camera_aliases[camera_id] = canonical_id
+            self.stream_cameras[canonical_id] = {camera_id}
+            self.device_to_stream[device_index] = canonical_id
+            detection_logger.info(f"攝影機流 {canonical_id} 啟動成功 (device_index={device_index})")
         else:
-            detection_logger.error(f"攝影機流 {camera_id} 啟動失敗")
+            detection_logger.error(f"攝影機流 {canonical_id} 啟動失敗")
             
         return success
     
     def stop_stream(self, camera_id: str) -> bool:
         """停止指定攝影機的流"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             detection_logger.warning(f"攝影機流 {camera_id} 不存在")
             return False
         
-        stream = self.streams.pop(camera_id)
+        refs = self.stream_cameras.get(canonical_id, set())
+        if camera_id in refs and len(refs) > 1:
+            refs.discard(camera_id)
+            self.camera_aliases.pop(camera_id, None)
+            detection_logger.info(f"攝影機 {camera_id} 已從共用流 {canonical_id} 移除")
+            return True
+
+        stream = self.streams.pop(canonical_id)
         stream.stop()
-        detection_logger.info(f"攝影機流 {camera_id} 已停止")
+        alias_set = self.stream_cameras.pop(canonical_id, {camera_id})
+        for alias in alias_set:
+            self.camera_aliases.pop(alias, None)
+        self.device_to_stream.pop(stream.device_index, None)
+        detection_logger.info(f"攝影機流 {canonical_id} 已停止")
         return True
     
     def add_consumer(self, camera_id: str, consumer: StreamConsumer) -> bool:
         """為指定攝影機添加消費者"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             detection_logger.error(f"攝影機流 {camera_id} 不存在")
             return False
         
-        return self.streams[camera_id].add_consumer(consumer)
+        return self.streams[canonical_id].add_consumer(consumer)
     
     def remove_consumer(self, camera_id: str, consumer_id: str) -> bool:
         """從指定攝影機移除消費者"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             return False
         
-        stream = self.streams[camera_id]
+        stream = self.streams[canonical_id]
         removed = stream.remove_consumer(consumer_id)
         if removed and stream.consumer_count() == 0:
-            detection_logger.info(f"攝影機 {camera_id} 已無消費者，釋放攝影機資源")
-            self.stop_stream(camera_id)
+            detection_logger.info(f"攝影機 {canonical_id} 已無消費者，釋放攝影機資源")
+            self.stop_stream(canonical_id)
         return removed
     
     def get_stream_stats(self, camera_id: str) -> Optional[Dict[str, Any]]:
         """獲取指定攝影機流的統計信息"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             return None
         
-        return self.streams[camera_id].get_stats()
+        return self.streams[canonical_id].get_stats()
     
     def get_all_stats(self) -> Dict[str, Dict[str, Any]]:
         """獲取所有攝影機流的統計信息"""
@@ -426,19 +461,25 @@ class CameraStreamManager:
         """停止所有攝影機流"""
         detection_logger.info("停止所有攝影機流")
         for camera_id in list(self.streams.keys()):
-            self.stop_stream(camera_id)
+            stream = self.streams.pop(camera_id)
+            stream.stop()
+        self.camera_aliases.clear()
+        self.device_to_stream.clear()
+        self.stream_cameras.clear()
     
     def get_latest_frame(self, camera_id: str) -> Optional[FrameData]:
         """獲取攝影機的最新幀數據"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             return None
-        return self.streams[camera_id].get_latest_frame()
+        return self.streams[canonical_id].get_latest_frame()
     
     def is_stream_running(self, camera_id: str) -> bool:
         """檢查指定攝影機流是否在運行"""
-        if camera_id not in self.streams:
+        canonical_id = self._resolve_camera_id(camera_id)
+        if canonical_id not in self.streams:
             return False
-        return self.streams[camera_id].status == StreamStatus.RUNNING
+        return self.streams[canonical_id].status == StreamStatus.RUNNING
     
     def get_camera_resolution(self, device_index: int) -> Optional[Dict[str, Any]]:
         """

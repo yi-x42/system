@@ -37,17 +37,17 @@ class StructuredLogger:
     def __init__(self, name: str):
         self.logger = get_logger(name)
     
-    def info(self, message: str):
-        self.logger.info(message)
+    def info(self, message: str, *args, **kwargs):
+        self.logger.info(message, *args, **kwargs)
     
-    def debug(self, message: str):
-        self.logger.debug(message)
+    def debug(self, message: str, *args, **kwargs):
+        self.logger.debug(message, *args, **kwargs)
     
-    def error(self, message: str):
-        self.logger.error(message)
+    def error(self, message: str, *args, **kwargs):
+        self.logger.error(message, *args, **kwargs)
     
-    def warning(self, message: str):
-        self.logger.warning(message)
+    def warning(self, message: str, *args, **kwargs):
+        self.logger.warning(message, *args, **kwargs)
     
     def log_error(self, error, context=None):
         self.logger.error(f"Error: {str(error)} | Context: {context}")

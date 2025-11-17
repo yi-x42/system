@@ -40,25 +40,21 @@ def _build_message(
     return message
 
 
-def send_fall_email_alert(
-    confidence_score: float,
+def _send_email(
+    *,
+    subject: str,
+    body_lines: list[str],
     receiver_email: str,
     frame_path: Optional[str] = None,
 ) -> bool:
-    """寄送跌倒偵測郵件通知。"""
     if not settings.smtp_username or not settings.smtp_password:
         detection_logger.error("郵件帳號或密碼未設定，無法寄送通知")
         return False
     if not receiver_email:
-        detection_logger.warning("未提供收件者，跳過寄送跌倒通知")
+        detection_logger.warning("未提供收件者，跳過寄送郵件")
         return False
 
-    subject = "FallSafe 警報：偵測到跌倒事件"
-    body = (
-        "系統偵測到疑似跌倒事件。\n"
-        f"模型信心值：{confidence_score:.2f}\n"
-        "請立即確認現場狀況。"
-    )
+    body = "\n".join(body_lines)
     message = _build_message(subject, body, receiver_email, frame_path)
 
     try:
@@ -71,41 +67,72 @@ def send_fall_email_alert(
             with smtplib.SMTP_SSL(settings.smtp_server, settings.smtp_port) as server:
                 server.login(settings.smtp_username, settings.smtp_password)
                 server.sendmail(settings.smtp_username, receiver_email, message.as_string())
-        detection_logger.info(f"跌倒通知郵件已寄送至 {receiver_email}")
+        detection_logger.info(f"通知郵件已寄送至 {receiver_email}")
         return True
     except Exception as exc:  # noqa: BLE001
-        detection_logger.error(f"寄送跌倒通知失敗: {exc}")
+        detection_logger.error(f"寄送郵件失敗: {exc}")
         return False
+
+
+def send_fall_email_alert(
+    confidence_score: float,
+    receiver_email: str,
+    frame_path: Optional[str] = None,
+) -> bool:
+    """寄送跌倒偵測郵件通知。"""
+    subject = "即時警報通知：偵測到跌倒事件"
+    body_lines = [
+        "系統偵測到疑似跌倒事件。",
+        f"模型信心值：{confidence_score:.2f}",
+        "請立即確認現場狀況。",
+    ]
+    return _send_email(
+        subject=subject,
+        body_lines=body_lines,
+        receiver_email=receiver_email,
+        frame_path=frame_path,
+    )
 
 
 def send_test_email(receiver_email: str) -> bool:
     """寄送測試郵件，確認 SMTP 設定是否正確。"""
-    if not settings.smtp_username or not settings.smtp_password:
-        detection_logger.error("郵件帳號或密碼未設定，無法寄送測試郵件")
-        return False
-    if not receiver_email:
-        detection_logger.warning("未提供收件者，跳過寄送測試郵件")
-        return False
-
     subject = "警報通知測試郵件"
-    body = (
-        "這是一封測試郵件，用來確認郵件通知設定是否可以正常運作。\n"
-        "如需停用測試信件，請返回系統的「通知設定」頁調整。"
-    )
-    message = _build_message(subject, body, receiver_email)
+    body_lines = [
+        "這是一封測試郵件，用來確認郵件通知設定是否可以正常運作。",
+        "如需停用測試信件，請返回系統的「通知設定」頁調整。",
+    ]
+    return _send_email(subject=subject, body_lines=body_lines, receiver_email=receiver_email)
 
-    try:
-        if settings.smtp_port == 587:
-            with smtplib.SMTP(settings.smtp_server, settings.smtp_port) as server:
-                server.starttls()
-                server.login(settings.smtp_username, settings.smtp_password)
-                server.sendmail(settings.smtp_username, receiver_email, message.as_string())
-        else:
-            with smtplib.SMTP_SSL(settings.smtp_server, settings.smtp_port) as server:
-                server.login(settings.smtp_username, settings.smtp_password)
-                server.sendmail(settings.smtp_username, receiver_email, message.as_string())
-        detection_logger.info(f"測試郵件已寄送至 {receiver_email}")
-        return True
-    except Exception as exc:  # noqa: BLE001
-        detection_logger.error(f"寄送測試郵件失敗: {exc}")
-        return False
+
+def send_alert_rule_email(
+    *,
+    rule_name: str,
+    rule_type: str,
+    severity: str,
+    receiver_email: str,
+    description: str,
+    body_lines: list[str],
+    frame_path: Optional[str] = None,
+) -> bool:
+    """一般警報規則郵件通知。"""
+    subject = f"即時警報通知：{rule_name or rule_type}"
+    full_body = [
+        f"警報類型：{rule_type}",
+        f"嚴重程度：{severity}",
+        description,
+        "",
+        *body_lines,
+    ]
+    return _send_email(
+        subject=subject,
+        body_lines=full_body,
+        receiver_email=receiver_email,
+        frame_path=frame_path,
+    )
+
+
+__all__ = [
+    "send_fall_email_alert",
+    "send_test_email",
+    "send_alert_rule_email",
+]

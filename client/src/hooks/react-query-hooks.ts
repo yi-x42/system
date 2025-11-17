@@ -115,6 +115,27 @@ export interface CreateAlertRuleRequest {
   actions: AlertRuleActionSettings;
 }
 
+export interface TaskAlertRulePayload {
+  id: string;
+  rule_type: string;
+  name?: string;
+  severity?: string;
+  actions?: AlertRuleActionSettings;
+  trigger_values?: Record<string, unknown>;
+  selections?: string[];
+}
+
+export interface SaveTaskAlertsRequest {
+  taskId: string;
+  rules: TaskAlertRulePayload[];
+}
+
+export interface TaskAlertsResponse {
+  task_id: number;
+  rules: TaskAlertRulePayload[];
+  fall_detection_enabled?: boolean;
+}
+
 const fetchAlertRules = async (): Promise<AlertRule[]> => {
   const { data } = await apiClient.get('/frontend/alerts/rules');
   return data;
@@ -124,6 +145,30 @@ export const useAlertRules = () => {
   return useQuery<AlertRule[], Error>({
     queryKey: ['alertRules'],
     queryFn: fetchAlertRules,
+  });
+};
+
+const saveTaskAlerts = async ({ taskId, rules }: SaveTaskAlertsRequest): Promise<TaskAlertsResponse> => {
+  const { data } = await apiClient.put(`/frontend/analysis/tasks/${taskId}/alerts`, { rules });
+  return data;
+};
+
+export const useSaveTaskAlerts = () => {
+  return useMutation<TaskAlertsResponse, Error, SaveTaskAlertsRequest>({
+    mutationFn: saveTaskAlerts,
+  });
+};
+
+const fetchTaskAlerts = async (taskId: string): Promise<TaskAlertsResponse> => {
+  const { data } = await apiClient.get(`/frontend/analysis/tasks/${taskId}/alerts`);
+  return data;
+};
+
+export const useTaskAlerts = (taskId?: string) => {
+  return useQuery<TaskAlertsResponse, Error>({
+    queryKey: ['taskAlerts', taskId],
+    queryFn: () => fetchTaskAlerts(taskId!),
+    enabled: Boolean(taskId),
   });
 };
 
@@ -700,7 +745,7 @@ export interface LaunchPreviewResponse {
 
 export interface LaunchPreviewRequestPayload {
   taskId: string;
-  alertRules?: { type: string; [key: string]: any }[];
+  alertRules?: TaskAlertRulePayload[];
 }
 
 // 開始 Live Person Camera 分析的非同步函式
