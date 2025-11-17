@@ -86,6 +86,35 @@ const formatDuration = (value: unknown): string => {
   return "0s";
 };
 
+const ensureNumeric = (value: unknown, fallback = 0): number => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+};
+
+const toOptionalNumber = (value: unknown): number | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+};
+
 
 export function DetectionAnalysisOriginal() {
   console.log("DetectionAnalysisOriginal 開始渲染");
@@ -121,6 +150,8 @@ export function DetectionAnalysisOriginal() {
   const [taskAlertBindings, setTaskAlertBindings] = useState<
     Record<string, Record<string, TaskRuleSelection>>
   >({});
+  const [lineSelectionByTask, setLineSelectionByTask] = useState<Record<string, string>>({});
+  const [zoneSelectionByTask, setZoneSelectionByTask] = useState<Record<string, string>>({});
 
   const alertRuleTypeMeta = useMemo(
     () => ({
@@ -232,7 +263,12 @@ export function DetectionAnalysisOriginal() {
   }, [handleDevicesUpdated]);
 
   // 獲取所有分析任務（不限制狀態，包含所有任務）
-  const { data: allTasksData, isLoading: isTasksLoading, error: tasksError, refetch: refetchTasks } = useAnalysisTasks();
+  const {
+    data: allTasksData,
+    isLoading: isTasksLoading,
+    error: tasksError,
+    refetch: refetchTasks,
+  } = useAnalysisTasks(undefined, undefined, 50, 2000);
   
   // 獲取運行中的任務
   const runningTasks = allTasksData?.tasks || [];
@@ -242,13 +278,106 @@ export function DetectionAnalysisOriginal() {
       .filter((task) => task.task_type === "realtime_camera")
       .map((task) => {
         const sourceInfo = task.source_info || {};
-        const stats = sourceInfo.statistics || {};
-        const lineStats = stats.line || stats.crossing || {};
-        const dwellStats = stats.zone || stats.dwell || {};
+        const stats = task.statistics || sourceInfo.statistics || {};
+        const lineStatsRecord: Record<string, any> =
+          (stats.line_stats ?? stats.line ?? stats.crossing ?? {}) || {};
+        const zoneStatsRecord: Record<string, any> =
+          (stats.zone_stats ?? stats.zone ?? stats.dwell ?? {}) || {};
+        const extraRecord: Record<string, any> =
+          (stats.extra ?? stats.extras ?? stats.summary ?? {}) || {};
+
+        const lineOptions = Object.entries(lineStatsRecord)
+          .filter(
+            ([, value]) => value && typeof value === "object" && !Array.isArray(value)
+          )
+          .map(([label, metric]) => {
+            const metrics = metric as Record<string, any>;
+            return {
+              id: String(label),
+              label: String(label),
+              in: ensureNumeric(metrics.in ?? metrics.enter ?? metrics.inbound),
+              out: ensureNumeric(metrics.out ?? metrics.leave ?? metrics.outbound),
+            };
+          });
+
+        const zoneOptionsWithRaw = Object.entries(zoneStatsRecord)
+          .filter(
+            ([, value]) => value && typeof value === "object" && !Array.isArray(value)
+          )
+          .map(([label, metric]) => {
+            const metrics = metric as Record<string, any>;
+            const avgSeconds = ensureNumeric(
+              metrics.avg ?? metrics.avg_duration ?? metrics.average ?? metrics.mean
+            );
+            const maxSeconds = ensureNumeric(
+              metrics.max ?? metrics.max_duration ?? metrics.longest ?? metrics.peak
+            );
+            return {
+              id: String(label),
+              label: String(label),
+              current: ensureNumeric(metrics.current ?? metrics.count),
+              avgDuration: formatDuration(avgSeconds),
+              maxDuration: formatDuration(maxSeconds),
+              avgSeconds,
+              maxSeconds,
+            };
+          });
+
+        const totalLineIn =
+          ensureNumeric(
+            lineStatsRecord?.in ??
+              lineStatsRecord?.enter ??
+              stats.line_total_in ??
+              extraRecord?.line_total_in
+          ) || lineOptions.reduce((sum, option) => sum + option.in, 0);
+        const totalLineOut =
+          ensureNumeric(
+            lineStatsRecord?.out ??
+              lineStatsRecord?.leave ??
+              stats.line_total_out ??
+              extraRecord?.line_total_out
+          ) || lineOptions.reduce((sum, option) => sum + option.out, 0);
+        const totalZoneCurrent =
+          ensureNumeric(
+            zoneStatsRecord?.current ??
+              zoneStatsRecord?.count ??
+              extraRecord?.zone_total_current
+          ) || zoneOptionsWithRaw.reduce((sum, option) => sum + option.current, 0);
+        const avgSource =
+          zoneStatsRecord?.avg ??
+          zoneStatsRecord?.avg_duration ??
+          zoneStatsRecord?.average ??
+          extraRecord?.zone_avg_duration ??
+          zoneOptionsWithRaw[0]?.avgSeconds ??
+          0;
+        const maxSource =
+          zoneStatsRecord?.max ??
+          zoneStatsRecord?.max_duration ??
+          zoneStatsRecord?.longest ??
+          extraRecord?.zone_max_duration ??
+          zoneOptionsWithRaw[0]?.maxSeconds ??
+          0;
+
         const cameraIdValue =
           sourceInfo.camera_id !== undefined && sourceInfo.camera_id !== null
             ? String(sourceInfo.camera_id)
             : undefined;
+        const currentPeopleCount =
+          toOptionalNumber(extraRecord?.current_person_count) ??
+          toOptionalNumber(stats.current_person_count) ??
+          toOptionalNumber(stats.detected_people) ??
+          toOptionalNumber(stats.people_count) ??
+          toOptionalNumber(sourceInfo.detected_people) ??
+          toOptionalNumber(sourceInfo.people_count);
+        const fallbackPeopleCount =
+          toOptionalNumber(extraRecord?.last_person_count) ??
+          toOptionalNumber(stats.person_count) ??
+          toOptionalNumber(sourceInfo.person_count) ??
+          0;
+        const detectedPeople =
+          currentPeopleCount !== undefined
+            ? Math.max(0, currentPeopleCount)
+            : Math.max(0, fallbackPeopleCount ?? 0);
         return {
           id: task.id,
           status: task.status ?? task.task_status ?? "unknown",
@@ -258,22 +387,59 @@ export function DetectionAnalysisOriginal() {
             task.task_name ||
             `任務 ${task.id}`,
           cameraId: cameraIdValue,
-          detectedPeople:
-            stats.detected_people ??
-            stats.people_count ??
-            0,
+          detectedPeople,
           crossingLine: {
-            in: lineStats.in ?? lineStats.enter ?? 0,
-            out: lineStats.out ?? lineStats.leave ?? 0,
+            summary: {
+              in: totalLineIn,
+              out: totalLineOut,
+            },
+            options: lineOptions,
           },
           dwellArea: {
-            current: dwellStats.current ?? dwellStats.count ?? 0,
-            avgDuration: formatDuration(dwellStats.avg ?? dwellStats.avg_duration ?? dwellStats.average),
-            maxDuration: formatDuration(dwellStats.max ?? dwellStats.max_duration),
+            summary: {
+              current: totalZoneCurrent,
+              avgDuration: formatDuration(avgSource),
+              maxDuration: formatDuration(maxSource),
+            },
+            options: zoneOptionsWithRaw.map(({ id, label, current, avgDuration, maxDuration }) => ({
+              id,
+              label,
+              current,
+              avgDuration,
+              maxDuration,
+            })),
           },
         };
       });
   }, [runningTasks]);
+
+  useEffect(() => {
+    const activeTaskIds = new Set(realtimeAnalysisTasks.map((task) => String(task.id)));
+    setLineSelectionByTask((previous) => {
+      const keys = Object.keys(previous);
+      const filtered = keys.filter((key) => activeTaskIds.has(key));
+      if (filtered.length === keys.length) {
+        return previous;
+      }
+      const next: Record<string, string> = {};
+      filtered.forEach((key) => {
+        next[key] = previous[key];
+      });
+      return next;
+    });
+    setZoneSelectionByTask((previous) => {
+      const keys = Object.keys(previous);
+      const filtered = keys.filter((key) => activeTaskIds.has(key));
+      if (filtered.length === keys.length) {
+        return previous;
+      }
+      const next: Record<string, string> = {};
+      filtered.forEach((key) => {
+        next[key] = previous[key];
+      });
+      return next;
+    });
+  }, [realtimeAnalysisTasks]);
 
   const handleOpenAlertConfig = (taskId: string, name: string, cameraId?: string | null) => {
     setAlertConfigTask({ id: taskId, name, cameraId });
@@ -1311,8 +1477,43 @@ export function DetectionAnalysisOriginal() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {realtimeAnalysisTasks.map((task) => (
-                          <div key={task.id} className="border rounded-lg p-4 space-y-4">
+                        {realtimeAnalysisTasks.map((task) => {
+                          const taskKey = String(task.id);
+                          const lineOptions = task.crossingLine?.options ?? [];
+                          const zoneOptions = task.dwellArea?.options ?? [];
+                          const storedLineSelection = lineSelectionByTask[taskKey];
+                          const hasLineOptions = lineOptions.length > 0;
+                          const activeLineSelection =
+                            hasLineOptions &&
+                            storedLineSelection &&
+                            lineOptions.some((option) => option.id === storedLineSelection)
+                              ? storedLineSelection
+                              : hasLineOptions
+                              ? lineOptions[0].id
+                              : undefined;
+                          const displayedLine =
+                            hasLineOptions && activeLineSelection
+                              ? lineOptions.find((option) => option.id === activeLineSelection) ??
+                                task.crossingLine.summary
+                              : task.crossingLine.summary;
+                          const storedZoneSelection = zoneSelectionByTask[taskKey];
+                          const hasZoneOptions = zoneOptions.length > 0;
+                          const activeZoneSelection =
+                            hasZoneOptions &&
+                            storedZoneSelection &&
+                            zoneOptions.some((option) => option.id === storedZoneSelection)
+                              ? storedZoneSelection
+                              : hasZoneOptions
+                              ? zoneOptions[0].id
+                              : undefined;
+                          const displayedZone =
+                            hasZoneOptions && activeZoneSelection
+                              ? zoneOptions.find((option) => option.id === activeZoneSelection) ??
+                                task.dwellArea.summary
+                              : task.dwellArea.summary;
+
+                          return (
+                            <div key={task.id} className="border rounded-lg p-4 space-y-4">
                               <div className="flex justify-between items-start">
                                 <div className="flex items-center gap-2">
                                   <Camera className="h-5 w-5 text-primary" />
@@ -1338,9 +1539,8 @@ export function DetectionAnalysisOriginal() {
                                       variant="outline"
                                       size="sm"
                                       disabled={
-                                      launchLivePersonPreviewMutation.isPending &&
-                                      launchLivePersonPreviewMutation.variables?.taskId ===
-                                        String(task.id)
+                                        launchLivePersonPreviewMutation.isPending &&
+                                        launchLivePersonPreviewMutation.variables?.taskId === String(task.id)
                                       }
                                       onClick={() => {
                                         void handleOpenPreviewWindow(task.id);
@@ -1353,51 +1553,108 @@ export function DetectionAnalysisOriginal() {
                                 )}
                               </div>
 
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <Users className="h-4 w-4" />
-                                  偵測人數
-                                </div>
-                                <p className="text-2xl">{task.detectedPeople}</p>
-                              </div>
-
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <ArrowLeftRight className="h-4 w-4" />
-                                  穿越線
-                                </div>
-                                <div className="flex items-baseline gap-2">
-                                  <span className="text-sm text-muted-foreground">進:</span>
-                                  <span className="text-lg">{task.crossingLine.in}</span>
-                                  <span className="text-sm text-muted-foreground">出:</span>
-                                  <span className="text-lg">{task.crossingLine.out}</span>
-                                </div>
-                              </div>
-
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <Timer className="h-4 w-4" />
-                                  停留區
-                                </div>
-                                <div className="space-y-0.5">
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-muted-foreground">目前:</span>
-                                    <span>{task.dwellArea.current}人</span>
+                              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                    <Users className="h-4 w-4" />
+                                    偵測人數
                                   </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-muted-foreground">平均:</span>
-                                    <span>{task.dwellArea.avgDuration}</span>
+                                  <p className="text-2xl">{task.detectedPeople}</p>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                      <ArrowLeftRight className="h-4 w-4" />
+                                      穿越線
+                                    </div>
+                                    {lineOptions.length > 1 ? (
+                                      <Select
+                                        value={activeLineSelection}
+                                        onValueChange={(value) =>
+                                          setLineSelectionByTask((previous) => ({
+                                            ...previous,
+                                            [taskKey]: value,
+                                          }))
+                                        }
+                                      >
+                                        <SelectTrigger className="h-8 w-[150px] text-xs">
+                                          <SelectValue placeholder="選擇線段" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {lineOptions.map((option) => (
+                                            <SelectItem key={option.id} value={option.id}>
+                                              {option.label}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : lineOptions.length === 1 ? (
+                                      <Badge variant="outline" className="text-xs font-normal">
+                                        {lineOptions[0].label}
+                                      </Badge>
+                                    ) : null}
                                   </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-muted-foreground">最長:</span>
-                                    <span>{task.dwellArea.maxDuration}</span>
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-sm text-muted-foreground">進:</span>
+                                    <span className="text-lg">{displayedLine.in}</span>
+                                    <span className="text-sm text-muted-foreground">出:</span>
+                                    <span className="text-lg">{displayedLine.out}</span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                      <Timer className="h-4 w-4" />
+                                      停留區
+                                    </div>
+                                    {zoneOptions.length > 1 ? (
+                                      <Select
+                                        value={activeZoneSelection}
+                                        onValueChange={(value) =>
+                                          setZoneSelectionByTask((previous) => ({
+                                            ...previous,
+                                            [taskKey]: value,
+                                          }))
+                                        }
+                                      >
+                                        <SelectTrigger className="h-8 w-[150px] text-xs">
+                                          <SelectValue placeholder="選擇區域" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {zoneOptions.map((option) => (
+                                            <SelectItem key={option.id} value={option.id}>
+                                              {option.label}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : zoneOptions.length === 1 ? (
+                                      <Badge variant="outline" className="text-xs font-normal">
+                                        {zoneOptions[0].label}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <div className="flex justify-between text-xs">
+                                      <span className="text-muted-foreground">目前:</span>
+                                      <span>{displayedZone.current}人</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                      <span className="text-muted-foreground">平均:</span>
+                                      <span>{displayedZone.avgDuration}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                      <span className="text-muted-foreground">最長:</span>
+                                      <span>{displayedZone.maxDuration}</span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </section>

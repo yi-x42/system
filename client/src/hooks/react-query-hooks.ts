@@ -471,6 +471,7 @@ export interface AnalysisTask {
   task_type: string;
   status: string;
   source_info: any;
+  statistics?: any;
   source_width?: number;
   source_height?: number;
   source_fps?: number;
@@ -800,7 +801,11 @@ export interface AnalysisTasksResponse {
 }
 
 // 獲取分析任務列表的非同步函式
-const fetchAnalysisTasks = async (taskType?: string, status?: string, limit: number = 50): Promise<AnalysisTasksResponse> => {
+const fetchAnalysisTasks = async (
+  taskType?: string,
+  status?: string,
+  limit: number = 50
+): Promise<AnalysisTasksResponse> => {
   const params = new URLSearchParams();
   if (taskType) params.append('task_type', taskType);
   if (status) params.append('status', status);
@@ -811,12 +816,17 @@ const fetchAnalysisTasks = async (taskType?: string, status?: string, limit: num
 };
 
 // 獲取分析任務列表的Hook
-export const useAnalysisTasks = (taskType?: string, status?: string, limit: number = 50) => {
+export const useAnalysisTasks = (
+  taskType?: string,
+  status?: string,
+  limit: number = 50,
+  refetchIntervalMs: number = 10000
+) => {
   return useQuery<AnalysisTasksResponse, Error>({
     queryKey: ['analysisTasks', taskType, status, limit],
     queryFn: () => fetchAnalysisTasks(taskType, status, limit),
-    // 設定每 10 秒自動重新整理一次資料
-    refetchInterval: 10000,
+    // 允許外部指定自動重新整理頻率
+    refetchInterval: refetchIntervalMs,
   });
 };
 

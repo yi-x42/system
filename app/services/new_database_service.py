@@ -8,8 +8,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, update, delete, func, and_, or_
+from sqlalchemy.orm import selectinload
 
-from app.models.database import AnalysisTask, DetectionResult, DataSource, SystemConfig
+from app.models.database import AnalysisTask, DetectionResult, DataSource, SystemConfig, TaskStatistics
 from app.core.database import AsyncSessionLocal
 import logging
 
@@ -111,7 +112,7 @@ class DatabaseService:
                                status: Optional[str] = None,
                                limit: int = 100) -> List[AnalysisTask]:
         """取得分析任務列表"""
-        query = select(AnalysisTask)
+        query = select(AnalysisTask).options(selectinload(AnalysisTask.statistics))
         
         if task_type:
             query = query.where(AnalysisTask.task_type == task_type)

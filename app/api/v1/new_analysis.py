@@ -513,10 +513,22 @@ async def get_analysis_tasks(
     """取得分析任務列表"""
     try:
         tasks = await db_service.get_analysis_tasks(db, task_type, status, limit)
-        
+
+        task_payloads = []
+        for task in tasks:
+            data = task.to_dict()
+            stats = None
+            if task.statistics:
+                stats = task.statistics.to_dict()
+                source_info = data.get("source_info") or {}
+                source_info["statistics"] = stats
+                data["source_info"] = source_info
+            data["statistics"] = stats
+            task_payloads.append(data)
+
         return {
             'success': True,
-            'tasks': [task.to_dict() for task in tasks],
+            'tasks': task_payloads,
             'count': len(tasks)
         }
         
