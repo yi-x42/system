@@ -101,23 +101,45 @@ class CameraStatusMonitor:
     
     async def test_usb_camera(self, device_id: int) -> bool:
         """
-        測試 USB 攝影機連線
+        測試 USB 攝影機連線（透過共享攝影機管理器，避免與其他任務衝突）
         """
         try:
-            cap = cv2.VideoCapture(device_id)
-            
-            if not cap.isOpened():
+            from app.services.camera_stream_manager import camera_stream_manager
+
+            # 先檢查是否已經有對應裝置的共享串流
+            existing_canonical = None
+            device_map = getattr(camera_stream_manager, "device_to_stream", {})
+            if isinstance(device_map, dict):
+                existing_canonical = device_map.get(device_id)
+
+            if existing_canonical and camera_stream_manager.is_stream_running(existing_canonical):
+                return await self._wait_for_stream_frame(camera_stream_manager, existing_canonical)
+
+            temp_camera_id = f"monitor_camera_{device_id}"
+            started = camera_stream_manager.start_stream(temp_camera_id, device_id)
+            if not started:
                 return False
-            
-            # 嘗試讀取一幀
-            ret, frame = cap.read()
-            cap.release()
-            
-            return ret and frame is not None
-            
+
+            try:
+                return await self._wait_for_stream_frame(camera_stream_manager, temp_camera_id)
+            finally:
+                camera_stream_manager.stop_stream(temp_camera_id)
+
         except Exception as e:
             logger.warning(f"USB 攝影機測試失敗 {device_id}: {e}")
             return False
+
+    async def _wait_for_stream_frame(self, manager, camera_id: str, timeout: float = 2.0) -> bool:
+        """
+        等待共享串流產生畫面
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            frame_data = manager.get_latest_frame(camera_id)
+            if frame_data and getattr(frame_data, "frame", None) is not None:
+                return True
+            await asyncio.sleep(0.1)
+        return False
     
     async def check_camera_status(self, camera: DataSource) -> str:
         """
