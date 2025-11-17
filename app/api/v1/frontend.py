@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from app.core.database import get_db, AsyncSessionLocal, get_async_db
 from app.core.logger import api_logger
 from app.core.config import settings
+from app.core.paths import get_base_dir
 # from app.services.yolo_service import get_yolo_service  # 暫時註解
 from app.services.camera_service import CameraService
 from app.services.task_service import TaskService, get_task_service
@@ -60,6 +61,94 @@ from app.services.alert_runtime_store import (
 from app.models.database import AnalysisTask, DetectionResult, DataSource, TaskStatistics
 
 router = APIRouter(prefix="/frontend", tags=["前端界面"])
+
+UPLOADS_ROOT = get_base_dir() / "uploads"
+ALERT_SNAPSHOT_DIR = UPLOADS_ROOT / "alerts" / "snapshots"
+SNAPSHOT_SUFFIXES = {".jpg", ".jpeg", ".png"}
+
+ALERT_TYPE_LABELS = {
+    "linecrossing": "越線警報",
+    "zonedwell": "區域滯留警報",
+    "speedanomaly": "速度異常警報",
+    "crowdcount": "人數警報",
+    "falldetection": "跌倒警報",
+}
+
+SEVERITY_LABELS = {
+    "critical": "高",
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+}
+
+
+def _normalize_rule_type_label(rule_type: Optional[str]) -> str:
+    normalized = "".join(ch for ch in str(rule_type or "") if ch.isalnum()).lower()
+    if not normalized:
+        return "自訂警報"
+    return ALERT_TYPE_LABELS.get(normalized, rule_type or "自訂警報")
+
+
+def _normalize_severity_label(severity: Optional[str]) -> str:
+    if severity is None:
+        return "中"
+    raw = str(severity).strip()
+    if not raw:
+        return "中"
+    mapped = SEVERITY_LABELS.get(raw.lower())
+    return mapped or raw
+
+
+def _relative_to_uploads(path: Path) -> Optional[str]:
+    try:
+        relative = path.resolve().relative_to(UPLOADS_ROOT)
+    except Exception:  # noqa: BLE001
+        return None
+    return str(relative).replace("\\", "/")
+
+
+def _parse_snapshot_timestamp(raw: str, fallback: float) -> datetime:
+    try:
+        return datetime.strptime(raw[:20], "%Y%m%d%H%M%S%f")
+    except ValueError:
+        return datetime.fromtimestamp(fallback)
+
+
+def _build_rule_lookup(task_id: str) -> Dict[str, Dict[str, Any]]:
+    lookup: Dict[str, Dict[str, Any]] = {}
+    rules = load_alert_runtime_rules(task_id)
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        rule_id = rule.get("id")
+        if not rule_id:
+            continue
+        lookup[str(rule_id)] = rule
+    return lookup
+
+
+def _build_alert_description(
+    rule_name: str,
+    type_label: str,
+    rule_payload: Optional[Dict[str, Any]],
+) -> str:
+    trigger_values = {}
+    if rule_payload:
+        trigger_values = (
+            rule_payload.get("trigger_values")
+            or rule_payload.get("trigger")
+            or {}
+        )
+    if isinstance(trigger_values, dict) and trigger_values:
+        parts: List[str] = []
+        for key, value in trigger_values.items():
+            if value in (None, ""):
+                continue
+            parts.append(f"{key}={value}")
+        if parts:
+            detail = "、".join(parts)
+            return f"{rule_name or type_label} 觸發條件達成（{detail}）"
+    return f"{rule_name or type_label} 規則被觸發，請儘速確認。"
 
 
 def _has_fall_detection_rule(rules: Optional[List[Dict[str, Any]]]) -> bool:
@@ -428,6 +517,23 @@ class AlertRuleResponse(AlertRuleBase):
 
 class AlertRuleToggleRequest(BaseModel):
     enabled: bool
+
+
+class TriggeredAlertResponse(BaseModel):
+    """觸發中的警報事件"""
+    id: str
+    task_id: Optional[int]
+    rule_id: str
+    rule_name: str
+    rule_type: str
+    type: str = Field(..., description="顯示用的警報類型標籤")
+    severity: str
+    status: str = "未處理"
+    description: str
+    timestamp: datetime
+    camera: Optional[str]
+    snapshot_url: Optional[str]
+    assignee: Optional[str] = None
 
 
 class EmailNotificationTestRequest(BaseModel):
@@ -853,6 +959,136 @@ async def send_email_notification_test(
     if not success:
         raise HTTPException(status_code=500, detail="測試郵件寄送失敗，請檢查 SMTP 設定")
     return {"success": True, "message": f"測試郵件已寄出至 {receiver}"}
+
+
+@router.get("/alerts/active", response_model=List[TriggeredAlertResponse])
+async def list_active_alerts_api(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=200, description="最多回傳的警報數量"),
+    task_id: Optional[str] = Query(None, description="只查看指定任務的警報"),
+):
+    """列出最近觸發的警報（依照快照檔案排序）。"""
+    if not ALERT_SNAPSHOT_DIR.exists():
+        return []
+
+    target_dirs: List[Path] = []
+    if task_id is not None:
+        candidate = ALERT_SNAPSHOT_DIR / str(task_id)
+        if not candidate.exists() or not candidate.is_dir():
+            return []
+        target_dirs.append(candidate)
+    else:
+        target_dirs = [p for p in ALERT_SNAPSHOT_DIR.iterdir() if p.is_dir()]
+
+    events: List[Dict[str, Any]] = []
+    for dir_path in target_dirs:
+        for file_path in dir_path.iterdir():
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in SNAPSHOT_SUFFIXES:
+                continue
+            stem = file_path.stem
+            if "_" not in stem:
+                continue
+            rule_id, timestamp_raw = stem.split("_", 1)
+            rule_id = rule_id.strip()
+            if not rule_id:
+                continue
+            mtime = file_path.stat().st_mtime
+            triggered_at = _parse_snapshot_timestamp(timestamp_raw, mtime)
+            events.append(
+                {
+                    "task_id": dir_path.name,
+                    "file_name": file_path.name,
+                    "path": file_path,
+                    "timestamp": triggered_at,
+                    "rule_id": rule_id,
+                }
+            )
+
+    if not events:
+        return []
+
+    events.sort(key=lambda item: item["timestamp"], reverse=True)
+    trimmed_events = events[:limit]
+
+    task_ids = {item["task_id"] for item in trimmed_events}
+    task_info_map: Dict[str, Dict[str, Any]] = {}
+    db_task_ids: List[int] = []
+    for task_id_str in task_ids:
+        try:
+            db_task_ids.append(int(task_id_str))
+        except ValueError:
+            continue
+
+    if db_task_ids:
+        result = await db.execute(
+            select(
+                AnalysisTask.id,
+                AnalysisTask.camera_name,
+                AnalysisTask.task_name,
+            ).where(AnalysisTask.id.in_(db_task_ids))
+        )
+        for row in result.all():
+            task_info_map[str(row.id)] = {
+                "task_id": row.id,
+                "camera": row.camera_name or row.task_name or f"任務 {row.id}",
+            }
+
+    rule_cache: Dict[str, Dict[str, Any]] = {}
+    responses: List[TriggeredAlertResponse] = []
+    for event in trimmed_events:
+        task_id_str = event["task_id"]
+        rule_lookup = rule_cache.get(task_id_str)
+        if rule_lookup is None:
+            rule_lookup = _build_rule_lookup(task_id_str)
+            rule_cache[task_id_str] = rule_lookup
+        rule_payload = rule_lookup.get(event["rule_id"])
+
+        raw_rule_type = (
+            rule_payload.get("rule_type") if rule_payload else None
+        ) or "custom"
+        type_label = _normalize_rule_type_label(raw_rule_type)
+        rule_name = (
+            (rule_payload.get("name") if rule_payload else None)
+            or type_label
+            or event["rule_id"]
+        )
+        severity = _normalize_severity_label(
+            rule_payload.get("severity") if rule_payload else None
+        )
+        description = _build_alert_description(rule_name, type_label, rule_payload)
+
+        task_info = task_info_map.get(task_id_str)
+        camera_label = (
+            task_info.get("camera") if task_info else f"任務 {task_id_str}"
+        )
+        task_id_value = task_info.get("task_id") if task_info else None
+
+        relative_path = _relative_to_uploads(event["path"])
+        snapshot_url = (
+            _build_thumbnail_url(request, relative_path) if relative_path else None
+        )
+
+        responses.append(
+            TriggeredAlertResponse(
+                id=f"{task_id_str}-{event['file_name']}",
+                task_id=task_id_value,
+                rule_id=event["rule_id"],
+                rule_name=rule_name,
+                rule_type=str(raw_rule_type),
+                type=type_label,
+                severity=severity,
+                status="未處理",
+                description=description,
+                timestamp=event["timestamp"],
+                camera=camera_label,
+                snapshot_url=snapshot_url,
+            )
+        )
+
+    return responses
 
 @router.get("/detection-summary")
 async def get_detection_summary(db: AsyncSession = Depends(get_db)):

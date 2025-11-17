@@ -33,6 +33,7 @@ import {
   useDeleteAlertRule,
   useCameras,
   useTestEmailNotification,
+  useActiveAlerts,
 } from "../hooks/react-query-hooks";
 
 type AlertTypeKey =
@@ -187,39 +188,30 @@ export function AlertManagement() {
     setEmailCooldown(emailSettings.cooldown_seconds?.toString() ?? "30");
   }, [emailSettings]);
 
-  // 模擬活躍警報數據
-  const activeAlerts = [
-    {
-      id: "ALERT_001",
-      type: "入侵偵測",
-      camera: "大門入口",
-      severity: "高",
-      timestamp: "2024-01-15 14:30:25",
-      description: "未授權人員進入限制區域",
-      status: "未處理",
-      assignee: null,
-    },
-    {
-      id: "ALERT_002",
-      type: "異常行為",
-      camera: "停車場",
-      severity: "中",
-      timestamp: "2024-01-15 14:28:12",
-      description: "可疑人員長時間逗留",
-      status: "處理中",
-      assignee: "操作員B",
-    },
-    {
-      id: "ALERT_003",
-      type: "設備異常",
-      camera: "後門出口",
-      severity: "低",
-      timestamp: "2024-01-15 14:25:45",
-      description: "攝影機連線不穩定",
-      status: "未處理",
-      assignee: null,
-    },
-  ];
+  const {
+    data: activeAlertsData,
+    isLoading: isActiveAlertsLoading,
+    isError: isActiveAlertsError,
+    error: activeAlertsError,
+  } = useActiveAlerts();
+  const activeAlerts = activeAlertsData ?? [];
+  const [alertStatuses, setAlertStatuses] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!activeAlerts || activeAlerts.length === 0) {
+      setAlertStatuses({});
+      return;
+    }
+    setAlertStatuses((prev) => {
+      const next = { ...prev };
+      activeAlerts.forEach((alert) => {
+        if (!next[alert.id]) {
+          next[alert.id] = alert.status || "未處理";
+        }
+      });
+      return next;
+    });
+  }, [activeAlerts]);
 
   // 模擬警報規則數據
   // 模擬通知設定
@@ -554,6 +546,31 @@ export function AlertManagement() {
     }
   };
 
+  const formatAlertTimestamp = (value?: string) => {
+    if (!value) {
+      return "未知時間";
+    }
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return value;
+    }
+    return parsedDate.toLocaleString();
+  };
+
+  const handleMarkAlertResolved = (alertId: string) => {
+    setAlertStatuses((prev) => ({
+      ...prev,
+      [alertId]: "已處理",
+    }));
+  };
+
+  const handleMarkAlertUnresolved = (alertId: string) => {
+    setAlertStatuses((prev) => ({
+      ...prev,
+      [alertId]: "未處理",
+    }));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -723,58 +740,87 @@ export function AlertManagement() {
         </TabsList>
 
         <TabsContent value="active-alerts">
-          <div className="grid gap-4">
-            {activeAlerts.map((alert) => (
-              <Alert key={alert.id} className="border-l-4 border-l-red-500">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Badge variant={getSeverityColor(alert.severity)}>
-                          {alert.severity}
-                        </Badge>
-                        <Badge variant="outline">{alert.type}</Badge>
-                        <Badge variant={getStatusColor(alert.status)}>
-                          {alert.status}
-                        </Badge>
-                      </div>
-                      <div>
-                        <p className="font-medium">{alert.description}</p>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {alert.timestamp}
-                          </span>
-                          <span>{alert.camera}</span>
-                          {alert.assignee && (
-                            <span className="flex items-center gap-1">
-                              <User className="h-3 w-3" />
-                              {alert.assignee}
-                            </span>
+          {isActiveAlertsError && activeAlertsError ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                無法載入活躍警報：{activeAlertsError.message || "未知錯誤"}
+              </AlertDescription>
+            </Alert>
+          ) : isActiveAlertsLoading ? (
+            <Card>
+              <CardContent className="text-center py-6 text-muted-foreground">
+                載入活躍警報中...
+              </CardContent>
+            </Card>
+          ) : activeAlerts.length === 0 ? (
+            <Card>
+              <CardContent className="text-center py-6 text-muted-foreground">
+                目前沒有觸發中的警報。
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {activeAlerts.map((alert) => {
+                const statusLabel = alertStatuses[alert.id] || alert.status || "未處理";
+                const alertTypeLabel = alert.type || alert.rule_name || "警報";
+                const cameraLabel =
+                  alert.camera || (alert.task_id ? `任務 ${alert.task_id}` : "未知攝影機");
+                const descriptionText =
+                  alert.description || `${alertTypeLabel} 已觸發，請儘速確認。`;
+                return (
+                  <Alert key={alert.id} className="border-l-4 border-l-red-500">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={getSeverityColor(alert.severity)}>{alert.severity}</Badge>
+                            <Badge variant="outline">{alertTypeLabel}</Badge>
+                            <Badge variant={getStatusColor(statusLabel)}>{statusLabel}</Badge>
+                          </div>
+                          <div>
+                            <p className="font-medium">{descriptionText}</p>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatAlertTimestamp(alert.timestamp)}
+                              </span>
+                              <span>{cameraLabel}</span>
+                              {alert.assignee && (
+                                <span className="flex items-center gap-1">
+                                  <User className="h-3 w-3" />
+                                  {alert.assignee}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {statusLabel === "未處理" && (
+                            <Button size="sm" variant="outline">
+                              <User className="h-4 w-4 mr-1" />
+                              指派
+                            </Button>
                           )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleMarkAlertResolved(alert.id)}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleMarkAlertUnresolved(alert.id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {alert.status === "未處理" && (
-                        <Button size="sm" variant="outline">
-                          <User className="h-4 w-4 mr-1" />
-                          指派
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline">
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="outline">
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            ))}
-          </div>
+                    </AlertDescription>
+                  </Alert>
+                );
+              })}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="alert-rules">

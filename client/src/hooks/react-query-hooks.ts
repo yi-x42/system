@@ -86,6 +86,36 @@ export const useTestEmailNotification = () => {
   });
 };
 
+// 活躍警報
+export interface ActiveAlert {
+  id: string;
+  task_id?: number | null;
+  rule_id: string;
+  rule_name: string;
+  rule_type: string;
+  type: string;
+  severity: string;
+  status: string;
+  description: string;
+  timestamp: string;
+  camera?: string;
+  snapshot_url?: string | null;
+  assignee?: string | null;
+}
+
+const fetchActiveAlerts = async (): Promise<ActiveAlert[]> => {
+  const { data } = await apiClient.get('/frontend/alerts/active');
+  return data;
+};
+
+export const useActiveAlerts = () => {
+  return useQuery<ActiveAlert[], Error>({
+    queryKey: ['activeAlerts'],
+    queryFn: fetchActiveAlerts,
+    refetchInterval: 5000,
+  });
+};
+
 // 警報規則設定
 export interface AlertRuleActionSettings {
   email: boolean;
