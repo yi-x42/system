@@ -8,7 +8,7 @@ import json
 import os
 import time
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import (
@@ -238,6 +238,15 @@ def _build_thumbnail_url(request: Optional[Request], thumbnail_path: Optional[st
         return None
     base = str(request.base_url) if request else ""
     return f"{base}uploads/{normalized}" if base else f"/uploads/{normalized}"
+
+
+def _normalize_datetime_input(value: Optional[datetime]) -> Optional[datetime]:
+    """將帶時區的時間轉為 UTC 並移除 tzinfo，避免與資料庫欄位比較時出錯。"""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 # ===== 工具函數 =====
 
@@ -2248,6 +2257,8 @@ async def get_detection_results(
     """
     try:
         offset = (page - 1) * limit
+        normalized_start = _normalize_datetime_input(start_time)
+        normalized_end = _normalize_datetime_input(end_time)
 
         tracker_group = func.coalesce(DetectionResult.tracker_id, DetectionResult.id)
         partition_key = (DetectionResult.task_id, tracker_group)
@@ -2306,11 +2317,11 @@ async def get_detection_results(
         if camera_id:
             filters.append(AnalysisTask.camera_id == camera_id)
 
-        if start_time:
-            filters.append(DetectionResult.frame_timestamp >= start_time)
+        if normalized_start:
+            filters.append(DetectionResult.frame_timestamp >= normalized_start)
 
-        if end_time:
-            filters.append(DetectionResult.frame_timestamp <= end_time)
+        if normalized_end:
+            filters.append(DetectionResult.frame_timestamp <= normalized_end)
 
         if min_confidence is not None:
             filters.append(DetectionResult.confidence >= min_confidence)

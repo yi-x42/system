@@ -47,7 +47,6 @@ import {
 } from "../hooks/react-query-hooks";
 
 type FilterState = {
-  searchQuery: string;
   startTime: string;
   endTime: string;
   cameraKey: string;
@@ -60,7 +59,6 @@ type PaginationIndicator = number | "ellipsis-left" | "ellipsis-right";
 const DEFAULT_PAGE_SIZE = 5;
 
 const createDefaultFilters = (): FilterState => ({
-  searchQuery: "",
   startTime: "",
   endTime: "",
   cameraKey: "all",
@@ -184,11 +182,6 @@ export function RecordQuery() {
       page: currentPage,
       limit: pageSize,
     };
-
-    const trimmedSearch = appliedFilters.searchQuery.trim();
-    if (trimmedSearch) {
-      payload.search = trimmedSearch;
-    }
 
     const startIso = toIsoString(appliedFilters.startTime);
     const endIso = toIsoString(appliedFilters.endTime);
@@ -404,27 +397,7 @@ export function RecordQuery() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-4">
-            <div>
-              <Label htmlFor="search-query">關鍵字搜尋</Label>
-              <Input
-                id="search-query"
-                placeholder="輸入搜尋關鍵字..."
-                value={formFilters.searchQuery}
-                onChange={(event) =>
-                  setFormFilters((prev) => ({
-                    ...prev,
-                    searchQuery: event.target.value,
-                  }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleSearch();
-                  }
-                }}
-              />
-            </div>
+          <div className="grid gap-4 md:grid-cols-3">
             <div>
               <Label htmlFor="date-from">開始日期時間</Label>
               <Input
