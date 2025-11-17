@@ -24,13 +24,14 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtMultimedia import QSoundEffect
 from ultralytics import YOLO
 
 import cv2
@@ -615,6 +616,7 @@ class AlertRuleEvaluator:
         task_id: int,
         camera_name: str | None,
         alert_rules_path: str | None,
+        alert_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self._task_id = str(task_id)
         self._camera_name = camera_name or f"Task {task_id}"
@@ -625,6 +627,8 @@ class AlertRuleEvaluator:
         self._last_trigger_time: dict[str, float] = {}
         self._snapshot_dir = PROJECT_ROOT / "uploads" / "alerts" / "snapshots" / self._task_id
         self._email_disabled_logged = False
+        self._alert_callback = alert_callback
+        self._zone_alert_active: dict[str, set[tuple[str, str]]] = {}
 
     def _reload_rules_if_needed(self) -> None:
         if not self._config_path:
@@ -713,6 +717,33 @@ class AlertRuleEvaluator:
             detection_logger.error(f"儲存警報快照失敗: {exc}")
             return None
 
+    def _emit_alert_notification(
+        self,
+        rule: dict,
+        frame_timestamp: datetime,
+        description: str,
+        extra_lines: list[str] | None = None,
+    ) -> None:
+        if not self._alert_callback:
+            return
+        label = self.RULE_LABELS.get(rule.get("rule_type"), rule.get("rule_type"))
+        payload = {
+            "rule_id": rule.get("id"),
+            "rule_name": rule.get("name", label),
+            "rule_type": rule.get("rule_type"),
+            "rule_label": label,
+            "severity": rule.get("severity", "中"),
+            "description": description,
+            "extra_lines": list(extra_lines or []),
+            "timestamp": frame_timestamp.isoformat(),
+            "task_id": self._task_id,
+            "camera_name": self._camera_name,
+        }
+        try:
+            self._alert_callback(payload)
+        except Exception as exc:  # noqa: BLE001
+            detection_logger.error(f"推送通知回呼失敗: {exc}")
+
     def _send_alert(
         self,
         rule: dict,
@@ -721,9 +752,13 @@ class AlertRuleEvaluator:
         description: str,
         extra_lines: list[str] | None = None,
     ) -> None:
+        email_settings = get_email_settings() or {}
+        cooldown = max(5.0, float(email_settings.get("cooldown_seconds", 30)))
+        if not self._can_trigger(rule["id"], cooldown):
+            return
+        self._emit_alert_notification(rule, frame_timestamp, description, extra_lines)
         if not rule.get("actions", {}).get("email", True):
             return
-        email_settings = get_email_settings()
         if not email_settings.get("enabled"):
             if not self._email_disabled_logged:
                 detection_logger.info("郵件通知未啟用，警報僅記錄不寄送")
@@ -732,9 +767,6 @@ class AlertRuleEvaluator:
         receiver = email_settings.get("address")
         if not receiver:
             detection_logger.warning("郵件通知未設定收件者，無法寄送警報郵件")
-            return
-        cooldown = max(5.0, float(email_settings.get("cooldown_seconds", 30)))
-        if not self._can_trigger(rule["id"], cooldown):
             return
         snapshot_path = self._save_snapshot(frame, frame_timestamp, rule["id"])
         label = self.RULE_LABELS.get(rule["rule_type"], rule["rule_type"])
@@ -763,6 +795,7 @@ class AlertRuleEvaluator:
         frame_timestamp: datetime,
         line_events: list[dict],
         zone_events: list[dict],
+        zone_live_events: list[dict],
         speed_events: list[dict],
         person_count: int,
         line_summaries: list[dict],
@@ -775,6 +808,7 @@ class AlertRuleEvaluator:
             return
         line_events = line_events or []
         zone_events = zone_events or []
+        zone_live_events = zone_live_events or []
         speed_events = speed_events or []
         line_summaries = line_summaries or []
         zone_summaries = zone_summaries or []
@@ -783,7 +817,14 @@ class AlertRuleEvaluator:
             if rule_type == "lineCrossing":
                 self._evaluate_line_crossing(rule, frame, frame_timestamp, line_events)
             elif rule_type == "zoneDwell":
-                self._evaluate_zone(rule, frame, frame_timestamp, zone_events, zone_summaries)
+                self._evaluate_zone(
+                    rule,
+                    frame,
+                    frame_timestamp,
+                    zone_events,
+                    zone_live_events,
+                    zone_summaries,
+                )
             elif rule_type == "speedAnomaly":
                 self._evaluate_speed(rule, frame, frame_timestamp, speed_events)
             elif rule_type == "crowdCount":
@@ -821,6 +862,7 @@ class AlertRuleEvaluator:
         frame: np.ndarray,
         frame_timestamp: datetime,
         zone_events: list[dict],
+        zone_live_events: list[dict],
         zone_summaries: list[dict],
     ) -> None:
         selections = rule["selections"]
@@ -829,20 +871,64 @@ class AlertRuleEvaluator:
         trigger = rule.get("trigger") or {}
         dwell_threshold = float(trigger.get("dwellSeconds") or 0.0)
         people_threshold = int(trigger.get("simultaneousCount") or 0)
-        for event in zone_events:
-            zone_id = str(event.get("zone_id") or "")
-            if not zone_id or zone_id not in selections:
-                continue
-            dwell_seconds = float(event.get("dwell_seconds") or 0.0)
-            if dwell_threshold and dwell_seconds < dwell_threshold:
-                continue
-            description = f"區域 {zone_id} 停留 {dwell_seconds:.1f}s，超過設定門檻"
-            extra = [
-                f"區域：{zone_id}",
-                f"停留秒數：{dwell_seconds:.1f}s",
-                f"門檻：{dwell_threshold or '未設定'}",
-            ]
-            self._send_alert(rule, frame, frame_timestamp, description, extra)
+        active_keys = self._zone_alert_active.setdefault(rule["id"], set())
+        current_live_keys: set[tuple[str, str]] = set()
+
+        if dwell_threshold > 0:
+            for entry in zone_live_events:
+                zone_id = str(entry.get("zone_id") or "")
+                tracker_id = entry.get("tracker_id")
+                if not zone_id or zone_id not in selections or tracker_id is None:
+                    continue
+                tracker_key = str(int(tracker_id))
+                key = (zone_id, tracker_key)
+                current_live_keys.add(key)
+                dwell_seconds = float(entry.get("dwell_seconds") or 0.0)
+                if dwell_seconds < dwell_threshold or key in active_keys:
+                    continue
+                description = f"區域 {zone_id} 停留 {dwell_seconds:.1f}s，超過設定門檻"
+                extra = [
+                    f"區域：{zone_id}",
+                    f"停留秒數：{dwell_seconds:.1f}s",
+                    f"門檻：{dwell_threshold:.1f}s",
+                ]
+                entered_at = entry.get("entered_at")
+                if isinstance(entered_at, datetime):
+                    extra.append(f"進入時間：{entered_at.isoformat()}")
+                self._send_alert(rule, frame, frame_timestamp, description, extra)
+                active_keys.add(key)
+
+            for event in zone_events:
+                zone_id = str(event.get("zone_id") or "")
+                if not zone_id or zone_id not in selections:
+                    continue
+                dwell_seconds = float(event.get("dwell_seconds") or 0.0)
+                if dwell_seconds < dwell_threshold:
+                    continue
+                tracker_id = event.get("tracker_id")
+                key = None
+                if tracker_id is not None:
+                    key = (zone_id, str(int(tracker_id)))
+                if key and key in active_keys:
+                    continue
+                description = f"區域 {zone_id} 停留 {dwell_seconds:.1f}s，超過設定門檻"
+                extra = [
+                    f"區域：{zone_id}",
+                    f"停留秒數：{dwell_seconds:.1f}s",
+                    f"門檻：{dwell_threshold:.1f}s",
+                ]
+                entered_at = event.get("entered_at")
+                if isinstance(entered_at, datetime):
+                    extra.append(f"進入時間：{entered_at.isoformat()}")
+                self._send_alert(rule, frame, frame_timestamp, description, extra)
+
+            for key in list(active_keys):
+                if key not in current_live_keys:
+                    active_keys.remove(key)
+        else:
+            if rule["id"] in self._zone_alert_active:
+                self._zone_alert_active[rule["id"]].clear()
+
         if people_threshold <= 0:
             return
         for summary in zone_summaries:
@@ -1139,6 +1225,7 @@ class DetectionWorker(QtCore.QThread):
     linesChanged = QtCore.Signal(list)
     zonesChanged = QtCore.Signal(list)
     scaleChanged = QtCore.Signal(dict)
+    alertTriggered = QtCore.Signal(dict)
 
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__()
@@ -1200,6 +1287,7 @@ class DetectionWorker(QtCore.QThread):
                 task_id=self._task_id,
                 camera_name=getattr(args, "window_name", None),
                 alert_rules_path=alert_rules_path,
+                alert_callback=self._notify_alert,
             )
 
     def _emit_lines_changed(self) -> None:
@@ -1226,6 +1314,12 @@ class DetectionWorker(QtCore.QThread):
     @QtCore.Slot()
     def request_scale_status(self) -> None:
         self._emit_scale_changed()
+
+    def _notify_alert(self, payload: dict) -> None:
+        """Emit alert payload to GUI thread."""
+        if not isinstance(payload, dict):
+            return
+        self.alertTriggered.emit(payload)
 
     def _handle_shared_frame(self, frame_data: FrameData) -> None:
         if not self._shared_running.is_set() or self._shared_queue is None:
@@ -1651,6 +1745,7 @@ class DetectionWorker(QtCore.QThread):
                 zone_labels_per_detection = [[] for _ in range(num_detections)]
                 line_event_records: list[dict[str, object]] = []
                 zone_event_records: list[dict[str, object]] = []
+                zone_live_event_records: list[dict[str, object]] = []
                 speed_event_records: list[dict[str, object]] = []
                 fall_events: list[tuple[int | None, float]] = []
 
@@ -1839,6 +1934,22 @@ class DetectionWorker(QtCore.QThread):
                                 if not state.is_inside:
                                     state.entered_at = now_wall
                                 state.is_inside = True
+                                entered_at_wall = state.entered_at
+                                if entered_at_wall is not None:
+                                    dwell_seconds_live = max(0.0, now_wall - entered_at_wall)
+                                    zone_live_event_records.append(
+                                        {
+                                            "tracker_id": tracker_int,
+                                            "zone_id": zone_state.label,
+                                            "entered_at": datetime.utcfromtimestamp(
+                                                entered_at_wall
+                                            ),
+                                            "dwell_seconds": dwell_seconds_live,
+                                            "frame_number": frame_number,
+                                            "event_timestamp": frame_timestamp,
+                                            "extra": None,
+                                        }
+                                    )
                             else:
                                 if state.is_inside:
                                     dwell_increment = 0.0
@@ -2070,6 +2181,7 @@ class DetectionWorker(QtCore.QThread):
                             frame_timestamp=frame_timestamp,
                             line_events=line_event_records,
                             zone_events=zone_event_records,
+                            zone_live_events=zone_live_event_records,
                             speed_events=speed_event_records,
                             person_count=person_count,
                             line_summaries=line_summaries,
@@ -2103,6 +2215,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._shutdown_requested = False
         self._control_server: ControlCommandServer | None = None
         self._parent_watcher: ParentWatcher | None = None
+        self._alert_sound: QSoundEffect | None = None
 
         self.worker = DetectionWorker(args)
         self.worker.frameReady.connect(self.update_image)
@@ -2112,7 +2225,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.linesChanged.connect(self.refresh_line_list)
         self.worker.zonesChanged.connect(self.refresh_zone_list)
         self.worker.scaleChanged.connect(self.update_scale_info)
+        self.worker.alertTriggered.connect(self.handle_alert_notification)
 
+        self._init_alert_sound()
         self._build_ui()
         self.worker.request_scale_status()
         self.worker.start()
@@ -2128,6 +2243,24 @@ class MainWindow(QtWidgets.QMainWindow):
         watcher = ParentWatcher(parent_pid, self)
         watcher.start()
         self._parent_watcher = watcher
+
+    def _init_alert_sound(self) -> None:
+        sound_path = PROJECT_ROOT / "assets" / "sounds" / "alert.wav"
+        if sound_path.exists():
+            sound = QSoundEffect(self)
+            sound.setSource(QtCore.QUrl.fromLocalFile(str(sound_path)))
+            sound.setLoopCount(1)
+            sound.setVolume(0.8)
+            self._alert_sound = sound
+        else:
+            self._alert_sound = None
+
+    def _play_alert_sound(self) -> None:
+        if self._alert_sound and self._alert_sound.status() == QSoundEffect.Status.Ready:
+            self._alert_sound.stop()
+            self._alert_sound.play()
+        else:
+            QtWidgets.QApplication.beep()
 
     def _build_ui(self) -> None:
         self.setWindowTitle(self._args.window_name or "Supervision Live")
@@ -2484,6 +2617,43 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(str)
     def show_status_message(self, message: str) -> None:
         self.status_bar.showMessage(message, 5000)
+
+    @QtCore.Slot(dict)
+    def handle_alert_notification(self, payload: dict) -> None:
+        self._play_alert_sound()
+        severity_raw = str(payload.get("severity") or "")
+        severity_lower = severity_raw.lower()
+        icon = QtWidgets.QMessageBox.Icon.Information
+        if "高" in severity_raw or severity_lower in {"high", "critical"}:
+            icon = QtWidgets.QMessageBox.Icon.Critical
+        elif "低" in severity_raw or severity_lower in {"low", "info"}:
+            icon = QtWidgets.QMessageBox.Icon.Warning
+        title = payload.get("rule_name") or payload.get("rule_label") or "警報通知"
+        details = []
+        description = payload.get("description")
+        if description:
+            details.append(str(description))
+        for line in payload.get("extra_lines") or []:
+            if line:
+                details.append(str(line))
+        timestamp_text = payload.get("timestamp")
+        if timestamp_text:
+            details.append(f"發生時間：{timestamp_text}")
+        camera_name = payload.get("camera_name")
+        if camera_name:
+            details.append(f"攝影機：{camera_name}")
+        task_id = payload.get("task_id")
+        if task_id:
+            details.append(f"任務 ID：{task_id}")
+        message = "\n".join(details) if details else "偵測到警報事件。"
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(icon)
+        box.setText(message)
+        box.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+        box.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        box.setModal(False)
+        box.show()
 
     @QtCore.Slot(str)
     def handle_worker_error(self, message: str) -> None:
