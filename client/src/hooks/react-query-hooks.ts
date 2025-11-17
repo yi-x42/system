@@ -244,7 +244,11 @@ export interface CameraInfo {
 
 // 獲取攝影機列表的非同步函式
 const fetchCameras = async (): Promise<CameraInfo[]> => {
-  const { data } = await apiClient.get('/frontend/cameras');
+  const { data } = await apiClient.get('/frontend/cameras', {
+    params: {
+      real_time_check: true,
+    },
+  });
   return data;
 };
 
@@ -254,9 +258,10 @@ export const useCameras = () => {
     queryKey: ['cameras'],
     queryFn: fetchCameras,
     refetchOnWindowFocus: false,
-    // 預設不自動輪詢，改由使用者操作或背景任務更新狀態
-    refetchInterval: false,
-    staleTime: 30000,
+    // 儀表板需要即時狀態，因此改為定期輪詢後端
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
   });
 };
 
