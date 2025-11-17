@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SidebarProvider } from "./components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { Dashboard } from "./components/Dashboard";
@@ -11,8 +11,25 @@ import { AlertManagement } from "./components/AlertManagement";
 import { SystemSettings } from "./components/SystemSettings";
 import ErrorBoundary from "./components/ErrorBoundary";
 
+declare global {
+  interface Window {
+    __APP_CURRENT_PAGE?: string;
+  }
+
+  interface WindowEventMap {
+    "app:page-change": CustomEvent<{ page: string }>;
+  }
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
+
+  useEffect(() => {
+    window.__APP_CURRENT_PAGE = currentPage;
+    window.dispatchEvent(
+      new CustomEvent("app:page-change", { detail: { page: currentPage } })
+    );
+  }, [currentPage]);
 
   const renderPage = () => {
     switch (currentPage) {

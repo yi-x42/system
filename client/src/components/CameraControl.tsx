@@ -55,10 +55,12 @@ interface VideoStreamProps {
   camera: CameraWithMeta | null;
   availableDevices: MediaDeviceInfo[];
   onDevicesUpdated?: (devices: MediaDeviceInfo[]) => void;
+  active: boolean;
 }
 
-function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStreamProps) {
+function VideoStream({ camera, availableDevices, onDevicesUpdated, active }: VideoStreamProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("");
 
   useEffect(() => {
@@ -72,7 +74,7 @@ function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStream
     };
 
     const stopTracks = () => {
-      const current = videoRef.current?.srcObject as MediaStream | null;
+      const current = streamRef.current;
       if (current) {
         current.getTracks().forEach((track) => {
           try {
@@ -81,6 +83,11 @@ function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStream
             /* ignore */
           }
         });
+        streamRef.current = null;
+      }
+      const video = videoRef.current;
+      if (video && video.srcObject) {
+        video.srcObject = null;
       }
     };
 
@@ -88,6 +95,17 @@ function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStream
       stopTracks();
       clearVideo();
       setStatusMessage("選擇攝影機以檢視即時影像");
+      return () => {
+        cancelled = true;
+        stopTracks();
+        clearVideo();
+      };
+    }
+
+    if (!active) {
+      stopTracks();
+      clearVideo();
+      setStatusMessage("預覽暫停");
       return () => {
         cancelled = true;
         stopTracks();
@@ -183,6 +201,7 @@ function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStream
         }
 
         stopTracks();
+        streamRef.current = stream;
 
         const video = videoRef.current;
         if (video) {
@@ -232,6 +251,7 @@ function VideoStream({ camera, availableDevices, onDevicesUpdated }: VideoStream
     camera?.list_index,
     availableDevices,
     onDevicesUpdated,
+    active,
   ]);
 
   if (!camera) {
@@ -306,6 +326,68 @@ export function CameraControl() {
   const [editCameraLocation, setEditCameraLocation] = useState("");
   const [activeTab, setActiveTab] = useState("device-list");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [pageVisible, setPageVisible] = useState(true);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
+  const [previewInView, setPreviewInView] = useState(true);
+  const [pageActive, setPageActive] = useState(true);
+  const previewPauseMessage =
+    !pageActive
+      ? "目前不在攝影機控制中心，預覽已暫停"
+      : activeTab !== "live-view"
+      ? "回到「即時監控」頁面即可再次啟動預覽"
+      : !pageVisible
+      ? "頁面不在前景，預覽已暫停"
+      : !previewInView
+      ? "預覽區域不在視窗內，捲動回來即可恢復"
+      : null;
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      setPageVisible(!document.hidden);
+    };
+    const handlePageHide = () => {
+      setPageVisible(false);
+    };
+    window.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+    return () => {
+      window.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.__APP_CURRENT_PAGE) {
+      setPageActive(window.__APP_CURRENT_PAGE === "camera-control");
+    }
+    const handler = (event: CustomEvent<{ page: string }>) => {
+      setPageActive(event.detail?.page === "camera-control");
+    };
+    window.addEventListener("app:page-change", handler);
+    return () => {
+      window.removeEventListener("app:page-change", handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const container = previewContainerRef.current;
+    if (!container || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        setPreviewInView(entry?.isIntersecting ?? true);
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, [previewContainerRef]);
 
   const handleDevicesUpdated = useCallback((devices: MediaDeviceInfo[]) => {
     const videoOnly = devices.filter((device) => device.kind === "videoinput");
@@ -833,12 +915,27 @@ export function CameraControl() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
+                <div
+                  ref={previewContainerRef}
+                  className="aspect-video bg-black rounded-lg overflow-hidden relative"
+                >
                   <VideoStream
                     camera={selectedCameraData}
                     availableDevices={videoDevices}
                     onDevicesUpdated={handleDevicesUpdated}
+                    active={
+                      pageActive &&
+                      activeTab === "live-view" &&
+                      pageVisible &&
+                      previewInView
+                    }
                   />
+                  {previewPauseMessage && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-2 bg-black/70">
+                      <MonitorPlay className="h-10 w-10 opacity-80" />
+                      <p className="text-sm opacity-90">{previewPauseMessage}</p>
+                    </div>
+                  )}
                 </div>
                 
               </CardContent>
