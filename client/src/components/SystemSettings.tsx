@@ -36,7 +36,6 @@ import {
   useRestartSystem,
   useDatabaseBackupInfo,
   useUpdateDatabaseBackupSettings,
-  useManualDatabaseBackup,
   useRestoreDatabaseBackup,
   useClearDatabase,
   type DatabaseBackupSettingsPayload,
@@ -251,7 +250,10 @@ export function SystemSettings() {
   const [clearConfirmText, setClearConfirmText] = useState("");
   const [clearAcknowledge, setClearAcknowledge] = useState(false);
   const [clearMessage, setClearMessage] = useState<{ text: string; isError?: boolean } | null>(null);
-  const [isManualBackupDialogOpen, setIsManualBackupDialogOpen] = useState(false);
+  const [disabledFeatureNotice, setDisabledFeatureNotice] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: "",
+  });
   const [activeTab, setActiveTab] = useState("general");
   const {
     data: backupInfo,
@@ -260,7 +262,6 @@ export function SystemSettings() {
     refetch: refetchBackupInfo,
   } = useDatabaseBackupInfo(activeTab === "security");
   const updateBackupSettingsMutation = useUpdateDatabaseBackupSettings();
-  const manualBackupMutation = useManualDatabaseBackup();
   const restoreBackupMutation = useRestoreDatabaseBackup();
   const clearDatabaseMutation = useClearDatabase();
   const [backupForm, setBackupForm] = useState<DatabaseBackupSettingsPayload>(defaultBackupConfig);
@@ -298,6 +299,17 @@ export function SystemSettings() {
       });
     }
   }, [backupInfo]);
+
+  const showDisabledFeatureNotice = (message = "此功能目前尚未啟用") => {
+    setDisabledFeatureNotice({ open: true, message });
+  };
+
+  const handleDisabledFeatureNoticeChange = (open: boolean) => {
+    setDisabledFeatureNotice((prev) => ({
+      open,
+      message: open ? prev.message : "",
+    }));
+  };
 
   const handleGeneralInputChange = (
     field: "systemName" | "timezone" | "language",
@@ -437,25 +449,6 @@ export function SystemSettings() {
     }
   };
 
-  const handleRunBackup = async () => {
-    setBackupMessage(null);
-    try {
-      const result = await manualBackupMutation.mutateAsync(undefined);
-      setBackupMessage({ text: result.message });
-      if (result.download_url) {
-        await downloadBackupFile(result.download_url, result.backup_file);
-      }
-    } catch (error) {
-      console.error("Manual backup failed", error);
-      setBackupMessage({ text: "備份失敗，請稍後再試", isError: true });
-    }
-  };
-
-  const confirmManualBackup = async () => {
-    await handleRunBackup();
-    setIsManualBackupDialogOpen(false);
-  };
-
 
   const handleRestoreFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -545,7 +538,6 @@ export function SystemSettings() {
   };
 
   const isSavingBackupSettings = updateBackupSettingsMutation.isPending;
-  const isRunningBackup = manualBackupMutation.isPending;
   const isRestoringBackup = restoreBackupMutation.isPending;
   const backupStatsLoading =
     activeTab === "security" && ((isBackupLoading && !backupInfo) || isBackupFetching);
@@ -744,26 +736,6 @@ export function SystemSettings() {
                       : t("systemSettings.actions.save")}
                   </Button>
                 </div>
-                <Dialog open={isManualBackupDialogOpen} onOpenChange={setIsManualBackupDialogOpen}>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>確認備份位置</DialogTitle>
-                      <DialogDescription>
-                        系統將把備份檔案輸出到目前設定的路徑：
-                        <br />
-                        <span className="font-mono">{backupForm.backup_location}</span>
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsManualBackupDialogOpen(false)} disabled={isRunningBackup}>
-                        取消
-                      </Button>
-                      <Button onClick={confirmManualBackup} disabled={isRunningBackup}>
-                        {isRunningBackup ? "備份中..." : "開始備份"}
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
               </div>
             </CardContent>
           </Card>
@@ -1157,36 +1129,10 @@ export function SystemSettings() {
                   <Button variant="outline" onClick={handleBackupSettingsSave} disabled={isSavingBackupSettings}>
                     {isSavingBackupSettings ? "儲存中..." : "儲存設定"}
                   </Button>
-                  <Dialog open={isManualBackupDialogOpen} onOpenChange={setIsManualBackupDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button disabled={isRunningBackup}>
-                        <Download className="h-4 w-4 mr-2" />
-                        {isRunningBackup ? "備份中..." : "立即備份"}
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>確認備份位置</DialogTitle>
-                        <DialogDescription>
-                          系統將把備份檔案輸出到目前設定的路徑：
-                          <br />
-                          <span className="font-mono break-all">{backupForm.backup_location}</span>
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsManualBackupDialogOpen(false)}
-                          disabled={isRunningBackup}
-                        >
-                          取消
-                        </Button>
-                        <Button onClick={confirmManualBackup} disabled={isRunningBackup}>
-                          {isRunningBackup ? "備份中..." : "開始備份"}
-                        </Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                  <Button onClick={() => showDisabledFeatureNotice("系統備份功能目前尚未啟用")}>
+                    <Download className="h-4 w-4 mr-2" />
+                    立即備份
+                  </Button>
                   <Button variant="outline" onClick={handleRestoreClick} disabled={isRestoringBackup}>
                     <Upload className="h-4 w-4 mr-2" />
                     {isRestoringBackup ? "還原中..." : "還原備份"}
@@ -1309,7 +1255,7 @@ export function SystemSettings() {
                   </div>
                 )}
 
-                <Button className="w-full">
+                <Button className="w-full" onClick={() => showDisabledFeatureNotice("系統備份功能目前尚未啟用")}>
                   <Download className="h-4 w-4 mr-2" />
                   立即備份
                 </Button>
@@ -1352,7 +1298,13 @@ export function SystemSettings() {
                     <p className="text-sm text-muted-foreground">
                       上傳備份檔案進行還原
                     </p>
-                    <Button variant="outline" className="mt-2">選擇檔案</Button>
+                    <Button
+                      variant="outline"
+                      className="mt-2"
+                      onClick={() => showDisabledFeatureNotice("備份還原功能目前尚未啟用")}
+                    >
+                      選擇檔案
+                    </Button>
                   </div>
                 </div>
 
@@ -1495,6 +1447,19 @@ export function SystemSettings() {
 
           </div>
         </TabsContent>
+        <Dialog open={disabledFeatureNotice.open} onOpenChange={handleDisabledFeatureNoticeChange}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>功能未啟用</DialogTitle>
+              <DialogDescription>
+                {disabledFeatureNotice.message || "此功能目前尚未啟用"}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end">
+              <Button onClick={() => handleDisabledFeatureNoticeChange(false)}>了解</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </Tabs>
     </div>
   );
