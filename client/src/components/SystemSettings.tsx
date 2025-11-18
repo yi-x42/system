@@ -38,6 +38,7 @@ import {
   useUpdateDatabaseBackupSettings,
   useManualDatabaseBackup,
   useRestoreDatabaseBackup,
+  useClearDatabase,
   type DatabaseBackupSettingsPayload,
 } from "../hooks/react-query-hooks";
 import apiClient from "../lib/api";
@@ -247,10 +248,21 @@ export function SystemSettings() {
   );
   const [isStorageSaving, setIsStorageSaving] = useState(false);
   const [storageSaveHint, setStorageSaveHint] = useState<{ message: string; isError?: boolean } | null>(null);
-  const { data: backupInfo, isLoading: isBackupLoading, isFetching: isBackupFetching } = useDatabaseBackupInfo();
+  const [clearConfirmText, setClearConfirmText] = useState("");
+  const [clearAcknowledge, setClearAcknowledge] = useState(false);
+  const [clearMessage, setClearMessage] = useState<{ text: string; isError?: boolean } | null>(null);
+  const [isManualBackupDialogOpen, setIsManualBackupDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("general");
+  const {
+    data: backupInfo,
+    isLoading: isBackupLoading,
+    isFetching: isBackupFetching,
+    refetch: refetchBackupInfo,
+  } = useDatabaseBackupInfo(activeTab === "security");
   const updateBackupSettingsMutation = useUpdateDatabaseBackupSettings();
   const manualBackupMutation = useManualDatabaseBackup();
   const restoreBackupMutation = useRestoreDatabaseBackup();
+  const clearDatabaseMutation = useClearDatabase();
   const [backupForm, setBackupForm] = useState<DatabaseBackupSettingsPayload>(defaultBackupConfig);
   const [backupMessage, setBackupMessage] = useState<{ text: string; isError?: boolean } | null>(null);
   const restoreInputRef = useRef<HTMLInputElement | null>(null);
@@ -439,6 +451,12 @@ export function SystemSettings() {
     }
   };
 
+  const confirmManualBackup = async () => {
+    await handleRunBackup();
+    setIsManualBackupDialogOpen(false);
+  };
+
+
   const handleRestoreFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -448,6 +466,7 @@ export function SystemSettings() {
     try {
       const response = await restoreBackupMutation.mutateAsync(file);
       setBackupMessage({ text: response.message });
+      await refetchBackupInfo();
     } catch (error) {
       console.error("Restore backup failed", error);
       setBackupMessage({ text: "還原失敗，請確認備份檔案", isError: true });
@@ -458,6 +477,20 @@ export function SystemSettings() {
 
   const handleRestoreClick = () => {
     restoreInputRef.current?.click();
+  };
+
+  const handleClearDatabase = async () => {
+    setClearMessage(null);
+    try {
+      const response = await clearDatabaseMutation.mutateAsync();
+      setClearMessage({ text: response.message });
+      setClearConfirmText("");
+      setClearAcknowledge(false);
+      await refetchBackupInfo();
+    } catch (error) {
+      console.error("Clear database failed", error);
+      setClearMessage({ text: "清空失敗，請稍後再試", isError: true });
+    }
   };
 
   const getApiRootUrl = () => {
@@ -514,7 +547,11 @@ export function SystemSettings() {
   const isSavingBackupSettings = updateBackupSettingsMutation.isPending;
   const isRunningBackup = manualBackupMutation.isPending;
   const isRestoringBackup = restoreBackupMutation.isPending;
-  const backupStatsLoading = (isBackupLoading && !backupInfo) || isBackupFetching;
+  const backupStatsLoading =
+    activeTab === "security" && ((isBackupLoading && !backupInfo) || isBackupFetching);
+  const clearConfirmationValid = clearConfirmText.trim().toUpperCase() === "CLEAR DATABASE";
+  const isClearDatabaseDisabled =
+    !clearConfirmationValid || !clearAcknowledge || clearDatabaseMutation.isPending;
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -607,7 +644,7 @@ export function SystemSettings() {
         </div>
       </div>
 
-      <Tabs defaultValue="general">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="general">{t("systemSettings.tabs.general")}</TabsTrigger>
           <TabsTrigger value="users">{t("systemSettings.tabs.users")}</TabsTrigger>
@@ -707,6 +744,26 @@ export function SystemSettings() {
                       : t("systemSettings.actions.save")}
                   </Button>
                 </div>
+                <Dialog open={isManualBackupDialogOpen} onOpenChange={setIsManualBackupDialogOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>確認備份位置</DialogTitle>
+                      <DialogDescription>
+                        系統將把備份檔案輸出到目前設定的路徑：
+                        <br />
+                        <span className="font-mono">{backupForm.backup_location}</span>
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setIsManualBackupDialogOpen(false)} disabled={isRunningBackup}>
+                        取消
+                      </Button>
+                      <Button onClick={confirmManualBackup} disabled={isRunningBackup}>
+                        {isRunningBackup ? "備份中..." : "開始備份"}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </CardContent>
           </Card>
@@ -1062,7 +1119,7 @@ export function SystemSettings() {
                       {backupStatsLoading ? (
                         <Skeleton className="h-6 w-24" />
                       ) : (
-                        (backupInfo?.total_record_estimate ?? 0).toLocaleString()
+                        Math.max(0, backupInfo?.total_record_estimate ?? 0).toLocaleString()
                       )}
                     </p>
                   </div>
@@ -1100,10 +1157,36 @@ export function SystemSettings() {
                   <Button variant="outline" onClick={handleBackupSettingsSave} disabled={isSavingBackupSettings}>
                     {isSavingBackupSettings ? "儲存中..." : "儲存設定"}
                   </Button>
-                  <Button onClick={handleRunBackup} disabled={isRunningBackup}>
-                    <Download className="h-4 w-4 mr-2" />
-                    {isRunningBackup ? "備份中..." : "立即備份"}
-                  </Button>
+                  <Dialog open={isManualBackupDialogOpen} onOpenChange={setIsManualBackupDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button disabled={isRunningBackup}>
+                        <Download className="h-4 w-4 mr-2" />
+                        {isRunningBackup ? "備份中..." : "立即備份"}
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>確認備份位置</DialogTitle>
+                        <DialogDescription>
+                          系統將把備份檔案輸出到目前設定的路徑：
+                          <br />
+                          <span className="font-mono break-all">{backupForm.backup_location}</span>
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsManualBackupDialogOpen(false)}
+                          disabled={isRunningBackup}
+                        >
+                          取消
+                        </Button>
+                        <Button onClick={confirmManualBackup} disabled={isRunningBackup}>
+                          {isRunningBackup ? "備份中..." : "開始備份"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Button variant="outline" onClick={handleRestoreClick} disabled={isRestoringBackup}>
                     <Upload className="h-4 w-4 mr-2" />
                     {isRestoringBackup ? "還原中..." : "還原備份"}
@@ -1140,19 +1223,41 @@ export function SystemSettings() {
                       <Input 
                         id="clear-confirmation" 
                         placeholder="輸入 'CLEAR DATABASE' 以確認"
+                        value={clearConfirmText}
+                        onChange={(event) => setClearConfirmText(event.target.value)}
                       />
                     </div>
                     
                     <div className="flex items-center space-x-2">
-                      <input type="checkbox" id="understand-risk" className="rounded" />
+                      <input
+                        type="checkbox"
+                        id="understand-risk"
+                        className="rounded"
+                        checked={clearAcknowledge}
+                        onChange={(event) => setClearAcknowledge(event.target.checked)}
+                      />
                       <Label htmlFor="understand-risk" className="text-sm">
                         我理解此操作的風險並同意繼續
                       </Label>
                     </div>
-                    
-                    <Button variant="destructive" disabled>
+
+                    {clearMessage && (
+                      <p
+                        className={`text-sm ${
+                          clearMessage.isError ? "text-destructive" : "text-muted-foreground"
+                        }`}
+                      >
+                        {clearMessage.text}
+                      </p>
+                    )}
+
+                    <Button
+                      variant="destructive"
+                      disabled={isClearDatabaseDisabled}
+                      onClick={handleClearDatabase}
+                    >
                       <Trash2 className="h-4 w-4 mr-2" />
-                      清空資料庫
+                      {clearDatabaseMutation.isPending ? "清空中..." : "清空資料庫"}
                     </Button>
                   </div>
                 </div>

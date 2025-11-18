@@ -1099,10 +1099,12 @@ const fetchDatabaseBackupInfo = async (): Promise<DatabaseBackupInfo> => {
   return data;
 };
 
-export const useDatabaseBackupInfo = () => {
+export const useDatabaseBackupInfo = (enabled: boolean = true) => {
   return useQuery<DatabaseBackupInfo, Error>({
     queryKey: ['databaseBackupInfo'],
     queryFn: fetchDatabaseBackupInfo,
+    enabled,
+    refetchOnWindowFocus: false,
   });
 };
 
@@ -1183,6 +1185,26 @@ const restartSystem = async (): Promise<ShutdownResponse> => {
 export const useRestartSystem = () => {
   return useMutation<ShutdownResponse, Error, void>({
     mutationFn: restartSystem,
+  });
+};
+
+// 清空資料庫
+interface ClearDatabaseResponse {
+  message: string;
+}
+
+const clearDatabase = async (): Promise<ClearDatabaseResponse> => {
+  const { data } = await apiClient.post('/frontend/clear-database');
+  return data;
+};
+
+export const useClearDatabase = () => {
+  const queryClient = useQueryClient();
+  return useMutation<ClearDatabaseResponse, Error, void>({
+    mutationFn: clearDatabase,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['databaseBackupInfo'] });
+    },
   });
 };
 

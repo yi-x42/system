@@ -170,17 +170,16 @@ async def _get_database_stats() -> Dict[str, int]:
             text("SELECT pg_database_size(current_database()) AS size_bytes")
         )
         size_bytes = int(size_result.scalar() or 0)
-        rows_result = await session.execute(
-            text(
-                """
-                SELECT COALESCE(SUM(reltuples),0)::bigint
-                FROM pg_class
-                WHERE relkind='r'
-                  AND relname IN ('analysis_tasks','detection_results','behavior_events')
-                """
-            )
-        )
-        total_rows = int(rows_result.scalar() or 0)
+
+        total_rows = 0
+        for table in ("analysis_tasks", "detection_results", "behavior_events"):
+            try:
+                rows_result = await session.execute(
+                    text(f"SELECT COUNT(*) FROM {table}")
+                )
+                total_rows += int(rows_result.scalar() or 0)
+            except Exception:
+                continue
     return {"database_size_bytes": size_bytes, "total_record_estimate": total_rows}
 
 
@@ -257,6 +256,8 @@ def _run_pg_dump_to_file(output_path: Path) -> None:
     env = _pg_env()
     base_cmd = [
         "pg_dump",
+        "--clean",
+        "--if-exists",
         "-h",
         settings.postgres_server,
         "-p",
@@ -272,6 +273,8 @@ def _run_pg_dump_to_file(output_path: Path) -> None:
     except FileNotFoundError:
         docker_cmd = _docker_exec_prefix() + [
             "pg_dump",
+            "--clean",
+            "--if-exists",
             "-h",
             "localhost",
             "-p",
@@ -3713,10 +3716,18 @@ async def clear_database():
     """清空資料庫（危險操作）"""
     try:
         async with AsyncSessionLocal() as db:
-            # 按照外鍵依賴順序刪除
-            await db.execute(text("DELETE FROM behavior_events"))
-            await db.execute(text("DELETE FROM detection_results"))
-            await db.execute(text("DELETE FROM analysis_tasks"))
+            async def table_exists(table: str) -> bool:
+                result = await db.execute(
+                    text("SELECT to_regclass(:table_name)"),
+                    {"table_name": f"public.{table}"},
+                )
+                return result.scalar() is not None
+
+            tables = ["behavior_events", "detection_results", "analysis_tasks"]
+            for table in tables:
+                if await table_exists(table):
+                    await db.execute(text(f'DELETE FROM {table}'))
+
             await db.commit()
             
         return {"message": "資料庫已清空"}
@@ -3801,6 +3812,12 @@ async def restore_database_backup(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"還原失敗: {exc.stderr or exc.stdout}")
     finally:
         temp_path.unlink(missing_ok=True)
+    try:
+        from app.services.camera_stream_manager import camera_stream_manager
+        camera_stream_manager.stop_all_streams()
+        api_logger.info("已在資料庫還原後重置所有攝影機串流")
+    except Exception as exc:  # noqa: BLE001
+        api_logger.warning(f"重置攝影機串流失敗: {exc}")
 
     return RestoreBackupResponse(message="資料庫還原完成", restored_at=datetime.now())
 
