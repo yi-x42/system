@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, ChangeEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -30,7 +30,17 @@ import {
   Server,
   Power,
 } from "lucide-react";
-import { useSystemStats, useShutdownSystem, useRestartSystem } from "../hooks/react-query-hooks";
+import {
+  useSystemStats,
+  useShutdownSystem,
+  useRestartSystem,
+  useDatabaseBackupInfo,
+  useUpdateDatabaseBackupSettings,
+  useManualDatabaseBackup,
+  useRestoreDatabaseBackup,
+  type DatabaseBackupSettingsPayload,
+} from "../hooks/react-query-hooks";
+import apiClient from "../lib/api";
 import {
   DEFAULT_LANGUAGE,
   languageOptions,
@@ -51,15 +61,18 @@ type GeneralConfig = {
   maxLoginAttempts: number;
 };
 
+type StorageConfig = {
+  videoRetention: number;
+  alertRetention: number;
+  logRetention: number;
+  autoCleanup: boolean;
+  storageWarning: number;
+  storageLimit: number;
+};
+
 type SystemConfig = {
   general: GeneralConfig;
-  storage: {
-    videoRetention: number;
-    alertRetention: number;
-    logRetention: number;
-    autoCleanup: boolean;
-    storageWarning: number;
-  };
+  storage: StorageConfig;
   performance: {
     maxConcurrentStreams: number;
     videoQuality: string;
@@ -83,6 +96,23 @@ const defaultGeneralConfig: GeneralConfig = {
   language: DEFAULT_LANGUAGE,
   sessionTimeout: 30,
   maxLoginAttempts: 5,
+};
+
+const defaultStorageConfig: StorageConfig = {
+  videoRetention: 30,
+  alertRetention: 90,
+  logRetention: 180,
+  autoCleanup: true,
+  storageWarning: 80,
+  storageLimit: 5,
+};
+
+const defaultBackupConfig: DatabaseBackupSettingsPayload = {
+  backup_type: "full",
+  backup_location: "C:\\Users\\yi_x\\Downloads",
+  auto_backup_enabled: false,
+  backup_frequency: "daily",
+  retention_days: 30,
 };
 
 const loadGeneralConfig = (
@@ -117,18 +147,33 @@ const loadGeneralConfig = (
   return fallback;
 };
 
+const loadStorageConfig = (): StorageConfig => {
+  if (typeof window === "undefined") {
+    return defaultStorageConfig;
+  }
+
+  try {
+    const raw = localStorage.getItem("storageSystemConfig");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaultStorageConfig,
+        ...parsed,
+      };
+    }
+  } catch (error) {
+    console.warn("Failed to parse stored storage config", error);
+  }
+
+  return defaultStorageConfig;
+};
+
 const createInitialSystemConfig = (
   language: LanguageCode,
   timezone: TimezoneValue,
 ): SystemConfig => ({
   general: loadGeneralConfig(language, timezone),
-  storage: {
-    videoRetention: 30,
-    alertRetention: 90,
-    logRetention: 180,
-    autoCleanup: true,
-    storageWarning: 80,
-  },
+  storage: loadStorageConfig(),
   performance: {
     maxConcurrentStreams: 20,
     videoQuality: "high",
@@ -200,6 +245,15 @@ export function SystemSettings() {
   const [saveHint, setSaveHint] = useState<{ key: string; isError?: boolean } | null>(
     null,
   );
+  const [isStorageSaving, setIsStorageSaving] = useState(false);
+  const [storageSaveHint, setStorageSaveHint] = useState<{ message: string; isError?: boolean } | null>(null);
+  const { data: backupInfo, isLoading: isBackupLoading, isFetching: isBackupFetching } = useDatabaseBackupInfo();
+  const updateBackupSettingsMutation = useUpdateDatabaseBackupSettings();
+  const manualBackupMutation = useManualDatabaseBackup();
+  const restoreBackupMutation = useRestoreDatabaseBackup();
+  const [backupForm, setBackupForm] = useState<DatabaseBackupSettingsPayload>(defaultBackupConfig);
+  const [backupMessage, setBackupMessage] = useState<{ text: string; isError?: boolean } | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setSystemConfig((prev) => ({
@@ -220,6 +274,18 @@ export function SystemSettings() {
       },
     }));
   }, [timezone]);
+
+  useEffect(() => {
+    if (backupInfo) {
+      setBackupForm({
+        backup_type: backupInfo.backup_type,
+        backup_location: backupInfo.backup_location,
+        auto_backup_enabled: backupInfo.auto_backup_enabled,
+        backup_frequency: backupInfo.backup_frequency,
+        retention_days: backupInfo.retention_days,
+      });
+    }
+  }, [backupInfo]);
 
   const handleGeneralInputChange = (
     field: "systemName" | "timezone" | "language",
@@ -281,6 +347,174 @@ export function SystemSettings() {
     setTimezone(defaultGeneralConfig.timezone);
     setSaveHint({ key: "systemSettings.messages.reset" });
   };
+
+  const handleStorageInputChange = <T extends keyof StorageConfig>(
+    field: T,
+    value: StorageConfig[T],
+  ) => {
+    setSystemConfig((prev) => ({
+      ...prev,
+      storage: {
+        ...prev.storage,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleStorageNumberChange = <
+    T extends Exclude<keyof StorageConfig, "autoCleanup">
+  >(
+    field: T,
+    value: string,
+  ) => {
+    const numericValue = value === "" ? 0 : Number(value);
+    handleStorageInputChange(field, numericValue as StorageConfig[T]);
+  };
+
+  const handleSaveStorage = async () => {
+    setIsStorageSaving(true);
+    setStorageSaveHint(null);
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("storageSystemConfig", JSON.stringify(systemConfig.storage));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      setStorageSaveHint({ message: "儲存設定已更新" });
+    } catch (error) {
+      console.error("Failed to save storage settings", error);
+      setStorageSaveHint({ message: "儲存失敗，請稍後再試", isError: true });
+    } finally {
+      setIsStorageSaving(false);
+    }
+  };
+
+  const handleResetStorage = () => {
+    const resetStorage = { ...defaultStorageConfig };
+    setSystemConfig((prev) => ({
+      ...prev,
+      storage: resetStorage,
+    }));
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("storageSystemConfig");
+    }
+    setStorageSaveHint({ message: "已還原預設值" });
+  };
+
+  const handleBackupFormChange = <K extends keyof DatabaseBackupSettingsPayload>(
+    field: K,
+    value: DatabaseBackupSettingsPayload[K],
+  ) => {
+    let nextValue = value;
+    if (field === "backup_location" && typeof value === "string") {
+      nextValue = value.replace(/["']/g, "") as DatabaseBackupSettingsPayload[K];
+    }
+    setBackupForm((prev) => ({
+      ...prev,
+      [field]: nextValue,
+    }));
+  };
+
+  const handleBackupSettingsSave = async () => {
+    setBackupMessage(null);
+    try {
+      await updateBackupSettingsMutation.mutateAsync(backupForm);
+      setBackupMessage({ text: "備份設定已更新" });
+    } catch (error) {
+      console.error("Failed to update backup settings", error);
+      setBackupMessage({ text: "儲存備份設定失敗", isError: true });
+    }
+  };
+
+  const handleRunBackup = async () => {
+    setBackupMessage(null);
+    try {
+      const result = await manualBackupMutation.mutateAsync(undefined);
+      setBackupMessage({ text: result.message });
+      if (result.download_url) {
+        await downloadBackupFile(result.download_url, result.backup_file);
+      }
+    } catch (error) {
+      console.error("Manual backup failed", error);
+      setBackupMessage({ text: "備份失敗，請稍後再試", isError: true });
+    }
+  };
+
+  const handleRestoreFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    setBackupMessage(null);
+    try {
+      const response = await restoreBackupMutation.mutateAsync(file);
+      setBackupMessage({ text: response.message });
+    } catch (error) {
+      console.error("Restore backup failed", error);
+      setBackupMessage({ text: "還原失敗，請確認備份檔案", isError: true });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const handleRestoreClick = () => {
+    restoreInputRef.current?.click();
+  };
+
+  const getApiRootUrl = () => {
+    const baseURL = apiClient.defaults.baseURL ?? window.location.origin;
+    const trimmed = baseURL.replace(/\/$/, "");
+    const match = trimmed.match(/(.*)\/api\/v1$/);
+    return match ? match[1] : trimmed;
+  };
+
+  const downloadBackupFile = async (downloadUrl: string, fileName?: string) => {
+    if (!downloadUrl) {
+      return;
+    }
+    const resolvedUrl = downloadUrl.startsWith("http")
+      ? downloadUrl
+      : `${getApiRootUrl()}${downloadUrl}`;
+    const response = await fetch(resolvedUrl, { credentials: "include" });
+    if (!response.ok) {
+      throw new Error("下載備份失敗");
+    }
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = fileName || "database_backup.sql";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  const formatBytes = (value?: number | null) => {
+    if (!value || value <= 0) {
+      return "0 B";
+    }
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let index = 0;
+    let size = value;
+    while (size >= 1024 && index < units.length - 1) {
+      size /= 1024;
+      index += 1;
+    }
+    const digits = size >= 10 ? 1 : 2;
+    return `${size.toFixed(digits)} ${units[index]}`;
+  };
+
+  const formatBackupDate = (value?: string | null) => {
+    if (!value) {
+      return "尚未備份";
+    }
+    return new Date(value).toLocaleString();
+  };
+
+  const isSavingBackupSettings = updateBackupSettingsMutation.isPending;
+  const isRunningBackup = manualBackupMutation.isPending;
+  const isRestoringBackup = restoreBackupMutation.isPending;
+  const backupStatsLoading = (isBackupLoading && !backupInfo) || isBackupFetching;
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -617,7 +851,8 @@ export function SystemSettings() {
                   <Input 
                     id="video-retention" 
                     type="number"
-                    defaultValue={systemConfig.storage.videoRetention}
+                    value={systemConfig.storage.videoRetention}
+                    onChange={(event) => handleStorageNumberChange("videoRetention", event.target.value)}
                     placeholder="30" 
                   />
                 </div>
@@ -626,7 +861,8 @@ export function SystemSettings() {
                   <Input 
                     id="alert-retention" 
                     type="number"
-                    defaultValue={systemConfig.storage.alertRetention}
+                    value={systemConfig.storage.alertRetention}
+                    onChange={(event) => handleStorageNumberChange("alertRetention", event.target.value)}
                     placeholder="90" 
                   />
                 </div>
@@ -635,7 +871,8 @@ export function SystemSettings() {
                   <Input 
                     id="log-retention" 
                     type="number"
-                    defaultValue={systemConfig.storage.logRetention}
+                    value={systemConfig.storage.logRetention}
+                    onChange={(event) => handleStorageNumberChange("logRetention", event.target.value)}
                     placeholder="180" 
                   />
                 </div>
@@ -644,7 +881,11 @@ export function SystemSettings() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="auto-cleanup">自動清理過期檔案</Label>
-                  <Switch id="auto-cleanup" checked={systemConfig.storage.autoCleanup} />
+                  <Switch
+                    id="auto-cleanup"
+                    checked={systemConfig.storage.autoCleanup}
+                    onCheckedChange={(checked) => handleStorageInputChange("autoCleanup", checked)}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="storage-limit">儲存空間上限 (TB)</Label>
@@ -652,7 +893,8 @@ export function SystemSettings() {
                     id="storage-limit" 
                     type="number"
                     step="0.1"
-                    defaultValue="5.0"
+                    value={systemConfig.storage.storageLimit}
+                    onChange={(event) => handleStorageNumberChange("storageLimit", event.target.value)}
                     placeholder="5.0" 
                   />
                 </div>
@@ -661,7 +903,8 @@ export function SystemSettings() {
                   <Input 
                     id="storage-warning" 
                     type="number"
-                    defaultValue={systemConfig.storage.storageWarning}
+                    value={systemConfig.storage.storageWarning}
+                    onChange={(event) => handleStorageNumberChange("storageWarning", event.target.value)}
                     placeholder="80" 
                   />
                 </div>
@@ -698,9 +941,24 @@ export function SystemSettings() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline">重置</Button>
-                <Button>儲存設定</Button>
+              <div className="flex flex-col items-end gap-2">
+                {storageSaveHint && (
+                  <span
+                    className={`text-sm ${
+                      storageSaveHint.isError ? "text-destructive" : "text-muted-foreground"
+                    }`}
+                  >
+                    {storageSaveHint.message}
+                  </span>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={handleResetStorage} disabled={isStorageSaving}>
+                    重置
+                  </Button>
+                  <Button onClick={handleSaveStorage} disabled={isStorageSaving}>
+                    {isStorageSaving ? "儲存中..." : "儲存設定"}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -715,94 +973,151 @@ export function SystemSettings() {
                   資料庫備份
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <Label htmlFor="db-backup-type">備份類型</Label>
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="選擇備份類型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="full">完整備份</SelectItem>
-                        <SelectItem value="incremental">增量備份</SelectItem>
-                        <SelectItem value="differential">差異備份</SelectItem>
-                      </SelectContent>
-                    </Select>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="db-backup-type">備份類型</Label>
+                  <Select
+                    value={backupForm.backup_type}
+                    onValueChange={(value) =>
+                      handleBackupFormChange("backup_type", value as DatabaseBackupSettingsPayload["backup_type"])
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="選擇備份類型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="full">完整備份</SelectItem>
+                      <SelectItem value="incremental">增量備份</SelectItem>
+                      <SelectItem value="differential">差異備份</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="db-backup-location">備份位置</Label>
+                  <Input
+                    id="db-backup-location"
+                    placeholder="/backup/database"
+                    value={backupForm.backup_location}
+                    onChange={(event) => handleBackupFormChange("backup_location", event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="auto-db-backup">啟用自動備份</Label>
+                  <p className="text-sm text-muted-foreground">定期自動備份資料庫</p>
+                </div>
+                <Switch
+                  id="auto-db-backup"
+                  checked={backupForm.auto_backup_enabled}
+                  onCheckedChange={(checked) => handleBackupFormChange("auto_backup_enabled", checked)}
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="backup-frequency">備份頻率</Label>
+                  <Select
+                    value={backupForm.backup_frequency}
+                    onValueChange={(value) =>
+                      handleBackupFormChange("backup_frequency", value as DatabaseBackupSettingsPayload["backup_frequency"])
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="選擇頻率" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hourly">每小時</SelectItem>
+                      <SelectItem value="daily">每日</SelectItem>
+                      <SelectItem value="weekly">每週</SelectItem>
+                      <SelectItem value="monthly">每月</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="backup-retention">備份保留期限 (天)</Label>
+                  <Input
+                    id="backup-retention"
+                    type="number"
+                    value={backupForm.retention_days}
+                    onChange={(event) => handleBackupFormChange("retention_days", Number(event.target.value) || 0)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4>資料庫狀態</h4>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="p-3 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">資料庫大小</p>
+                    <p className="text-lg font-medium">
+                      {backupStatsLoading ? <Skeleton className="h-6 w-20" /> : formatBytes(backupInfo?.database_size_bytes)}
+                    </p>
                   </div>
-                  <div>
-                    <Label htmlFor="db-backup-location">備份位置</Label>
-                    <Input 
-                      id="db-backup-location" 
-                      placeholder="/backup/database"
-                      defaultValue="/backup/database"
-                    />
+                  <div className="p-3 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">總記錄數</p>
+                    <p className="text-lg font-medium">
+                      {backupStatsLoading ? (
+                        <Skeleton className="h-6 w-24" />
+                      ) : (
+                        (backupInfo?.total_record_estimate ?? 0).toLocaleString()
+                      )}
+                    </p>
+                  </div>
+                  <div className="p-3 border rounded-lg">
+                    <p className="text-sm text-muted-foreground">最後備份</p>
+                    <p className="text-lg font-medium">
+                      {backupStatsLoading ? <Skeleton className="h-6 w-28" /> : formatBackupDate(backupInfo?.last_backup_time)}
+                    </p>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="auto-db-backup">啟用自動備份</Label>
-                    <p className="text-sm text-muted-foreground">定期自動備份資料庫</p>
-                  </div>
-                  <Switch id="auto-db-backup" />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <Label htmlFor="backup-frequency">備份頻率</Label>
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="選擇頻率" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="hourly">每小時</SelectItem>
-                        <SelectItem value="daily">每日</SelectItem>
-                        <SelectItem value="weekly">每週</SelectItem>
-                        <SelectItem value="monthly">每月</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="backup-retention">備份保留期限 (天)</Label>
-                    <Input 
-                      id="backup-retention" 
-                      type="number"
-                      placeholder="30"
-                      defaultValue="30"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h4>資料庫狀態</h4>
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="p-3 border rounded-lg">
-                      <p className="text-sm text-muted-foreground">資料庫大小</p>
-                      <p className="text-lg font-medium">2.34 GB</p>
+                {backupInfo?.recent_backups?.length ? (
+                  <div className="rounded-lg border p-3 text-sm text-muted-foreground">
+                    <p className="font-medium mb-2 text-foreground">最近備份</p>
+                    <div className="space-y-1">
+                      {backupInfo.recent_backups.map((file) => (
+                        <div key={file.name} className="flex justify-between">
+                          <span>{file.name}</span>
+                          <span>{formatBytes(file.size)}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div className="p-3 border rounded-lg">
-                      <p className="text-sm text-muted-foreground">總記錄數</p>
-                      <p className="text-lg font-medium">1,245,890</p>
-                    </div>
-                    <div className="p-3 border rounded-lg">
-                      <p className="text-sm text-muted-foreground">最後備份</p>
-                      <p className="text-lg font-medium">2024-01-15 03:00</p>
-                    </div>
                   </div>
-                </div>
+                ) : null}
+              </div>
 
-                <div className="flex gap-2">
-                  <Button>
+              <div className="flex flex-col items-end gap-2">
+                {backupMessage && (
+                  <span
+                    className={`text-sm ${backupMessage.isError ? "text-destructive" : "text-muted-foreground"}`}
+                  >
+                    {backupMessage.text}
+                  </span>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={handleBackupSettingsSave} disabled={isSavingBackupSettings}>
+                    {isSavingBackupSettings ? "儲存中..." : "儲存設定"}
+                  </Button>
+                  <Button onClick={handleRunBackup} disabled={isRunningBackup}>
                     <Download className="h-4 w-4 mr-2" />
-                    立即備份
+                    {isRunningBackup ? "備份中..." : "立即備份"}
                   </Button>
-                  <Button variant="outline">
+                  <Button variant="outline" onClick={handleRestoreClick} disabled={isRestoringBackup}>
                     <Upload className="h-4 w-4 mr-2" />
-                    還原備份
+                    {isRestoringBackup ? "還原中..." : "還原備份"}
                   </Button>
                 </div>
-              </CardContent>
+                <input
+                  type="file"
+                  ref={restoreInputRef}
+                  className="hidden"
+                  accept=".sql"
+                  onChange={handleRestoreFileChange}
+                />
+              </div>
+            </CardContent>
             </Card>
 
             <Card>

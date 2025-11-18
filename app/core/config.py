@@ -88,6 +88,7 @@ class Settings:
         self.postgres_password = os.getenv("POSTGRES_PASSWORD", "__DEFAULT_FALLBACK_PASSWORD__")
         self.postgres_db = os.getenv("POSTGRES_DB", "yolo_analysis")
         self.postgres_port = int(os.getenv("POSTGRES_PORT", "5432"))
+        self.postgres_container_name = os.getenv("POSTGRES_CONTAINER_NAME")
 
         self.DATABASE_URL = (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"

@@ -1,0 +1,10 @@
+{
+  "backup_type": "full",
+  "backup_location": "\"C:\\Users\\yi_x\\Downloads\\",
+  "auto_backup_enabled": false,
+  "backup_frequency": "daily",
+  "retention_days": 30,
+  "last_backup_time": "2025-11-19T00:02:02.427181",
+  "last_backup_file": "postgres_backup_20251119_000201.sql",
+  "last_backup_size": 193726
+}

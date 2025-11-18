@@ -1048,6 +1048,115 @@ export const useDetectionResults = (params: DetectionRecordsQuery = {}) => {
   });
 };
 
+// ===== 資料庫備份 =====
+export type BackupType = "full" | "incremental" | "differential";
+export type BackupFrequency = "hourly" | "daily" | "weekly" | "monthly";
+
+export interface DatabaseBackupFile {
+  name: string;
+  size: number;
+  created_at: string;
+}
+
+export interface DatabaseBackupInfo {
+  backup_type: BackupType;
+  backup_location: string;
+  auto_backup_enabled: boolean;
+  backup_frequency: BackupFrequency;
+  retention_days: number;
+  last_backup_time?: string | null;
+  last_backup_file?: string | null;
+  last_backup_size?: number | null;
+  database_size_bytes: number;
+  total_record_estimate: number;
+  recent_backups: DatabaseBackupFile[];
+}
+
+export interface DatabaseBackupSettingsPayload {
+  backup_type: BackupType;
+  backup_location: string;
+  auto_backup_enabled: boolean;
+  backup_frequency: BackupFrequency;
+  retention_days: number;
+}
+
+export interface ManualDatabaseBackupResponse {
+  message: string;
+  backup_file: string;
+  backup_path: string;
+  size: number;
+  download_url: string;
+  finished_at: string;
+}
+
+export interface RestoreDatabaseBackupResponse {
+  message: string;
+  restored_at: string;
+}
+
+const fetchDatabaseBackupInfo = async (): Promise<DatabaseBackupInfo> => {
+  const { data } = await apiClient.get('/frontend/database/backup/settings');
+  return data;
+};
+
+export const useDatabaseBackupInfo = () => {
+  return useQuery<DatabaseBackupInfo, Error>({
+    queryKey: ['databaseBackupInfo'],
+    queryFn: fetchDatabaseBackupInfo,
+  });
+};
+
+const updateDatabaseBackupSettings = async (
+  payload: DatabaseBackupSettingsPayload,
+): Promise<DatabaseBackupInfo> => {
+  const { data } = await apiClient.put('/frontend/database/backup/settings', payload);
+  return data;
+};
+
+export const useUpdateDatabaseBackupSettings = () => {
+  const queryClient = useQueryClient();
+  return useMutation<DatabaseBackupInfo, Error, DatabaseBackupSettingsPayload>({
+    mutationFn: updateDatabaseBackupSettings,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['databaseBackupInfo'] });
+    },
+  });
+};
+
+const runManualDatabaseBackup = async (): Promise<ManualDatabaseBackupResponse> => {
+  const { data } = await apiClient.post('/frontend/database/backup/run');
+  return data;
+};
+
+export const useManualDatabaseBackup = () => {
+  const queryClient = useQueryClient();
+  return useMutation<ManualDatabaseBackupResponse, Error, void>({
+    mutationFn: runManualDatabaseBackup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['databaseBackupInfo'] });
+    },
+  });
+};
+
+const restoreDatabaseBackup = async (file: File): Promise<RestoreDatabaseBackupResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await apiClient.post('/frontend/database/backup/restore', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+};
+
+export const useRestoreDatabaseBackup = () => {
+  const queryClient = useQueryClient();
+  return useMutation<RestoreDatabaseBackupResponse, Error, File>({
+    mutationFn: restoreDatabaseBackup,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['databaseBackupInfo'] });
+    },
+  });
+};
+
 // ===== 系統控制相關 =====
 interface ShutdownResponse {
   message: string;

@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import detection, health
 # 使用簡化版 analysis
 from app.api.v1.endpoints import analysis_simple
+from app.api.v1 import frontend
 from app.core.config import get_settings
 
 api_router = APIRouter()
@@ -27,6 +28,10 @@ api_router.include_router(
 # 包含影片分析端點 (簡化版)
 api_router.include_router(
     analysis_simple.router
+)
+
+api_router.include_router(
+    frontend.router
 )
 
 # 影片列表端點

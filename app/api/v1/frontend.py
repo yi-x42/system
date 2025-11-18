@@ -8,9 +8,10 @@ import json
 import os
 import time
 import base64
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple, Union, Literal
 import subprocess
 from fastapi import (
     APIRouter,
@@ -24,8 +25,7 @@ from fastapi import (
     WebSocketDisconnect,
     Request,
 )
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, delete, select, text, func, desc, or_
 from pydantic import BaseModel, Field
@@ -81,6 +81,238 @@ SEVERITY_LABELS = {
     "medium": "中",
     "low": "低",
 }
+
+BACKUP_CONFIG_PATH = get_base_dir() / "data" / "database_backup_config.json"
+DEFAULT_BACKUP_DIR = Path(r"C:/Users/yi_x/Downloads")
+
+
+class BackupFileInfo(BaseModel):
+    name: str
+    size: int
+    created_at: datetime
+
+
+class DatabaseBackupSettings(BaseModel):
+    backup_type: Literal["full", "incremental", "differential"] = "full"
+    backup_location: str = str(DEFAULT_BACKUP_DIR)
+    auto_backup_enabled: bool = False
+    backup_frequency: Literal["hourly", "daily", "weekly", "monthly"] = "daily"
+    retention_days: int = 30
+    last_backup_time: Optional[datetime] = None
+    last_backup_file: Optional[str] = None
+    last_backup_size: Optional[int] = None
+
+
+class DatabaseBackupInfo(DatabaseBackupSettings):
+    database_size_bytes: int = 0
+    total_record_estimate: int = 0
+    recent_backups: List[BackupFileInfo] = []
+
+class UpdateDatabaseBackupSettingsRequest(BaseModel):
+    backup_type: Literal["full", "incremental", "differential"] = "full"
+    backup_location: str = str(DEFAULT_BACKUP_DIR)
+    auto_backup_enabled: bool = False
+    backup_frequency: Literal["hourly", "daily", "weekly", "monthly"] = "daily"
+    retention_days: int = 30
+
+
+class ManualBackupResponse(BaseModel):
+    message: str
+    backup_file: str
+    backup_path: str
+    size: int
+    download_url: str
+    finished_at: datetime
+
+
+class RestoreBackupResponse(BaseModel):
+    message: str
+    restored_at: datetime
+
+
+def _resolve_backup_location(path_value: str) -> Path:
+    clean_value = path_value.strip().strip("\"'")
+    path = Path(clean_value).expanduser()
+    if not path.is_absolute():
+        path = get_base_dir() / path
+    return path
+
+
+def _load_backup_config() -> DatabaseBackupSettings:
+    BACKUP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if BACKUP_CONFIG_PATH.exists():
+        try:
+            data = json.loads(BACKUP_CONFIG_PATH.read_text(encoding="utf-8"))
+            if data.get("last_backup_time"):
+                try:
+                    data["last_backup_time"] = datetime.fromisoformat(data["last_backup_time"])
+                except ValueError:
+                    data["last_backup_time"] = None
+            return DatabaseBackupSettings(**data)
+        except Exception as exc:
+            api_logger.warning(f"載入備份設定失敗，使用預設值: {exc}")
+    default_settings = DatabaseBackupSettings()
+    _save_backup_config(default_settings)
+    return default_settings
+
+
+def _save_backup_config(settings_model: DatabaseBackupSettings) -> None:
+    BACKUP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = settings_model.model_dump()
+    if payload.get("last_backup_time"):
+        payload["last_backup_time"] = payload["last_backup_time"].isoformat()
+    BACKUP_CONFIG_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+async def _get_database_stats() -> Dict[str, int]:
+    async with AsyncSessionLocal() as session:
+        size_result = await session.execute(
+            text("SELECT pg_database_size(current_database()) AS size_bytes")
+        )
+        size_bytes = int(size_result.scalar() or 0)
+        rows_result = await session.execute(
+            text(
+                """
+                SELECT COALESCE(SUM(reltuples),0)::bigint
+                FROM pg_class
+                WHERE relkind='r'
+                  AND relname IN ('analysis_tasks','detection_results','behavior_events')
+                """
+            )
+        )
+        total_rows = int(rows_result.scalar() or 0)
+    return {"database_size_bytes": size_bytes, "total_record_estimate": total_rows}
+
+
+def _collect_recent_backups(location: str, limit: int = 5) -> List[BackupFileInfo]:
+    backup_dir = _resolve_backup_location(location)
+    if not backup_dir.exists():
+        return []
+    files = [
+        BackupFileInfo(
+            name=item.name,
+            size=item.stat().st_size,
+            created_at=datetime.fromtimestamp(item.stat().st_mtime),
+        )
+        for item in backup_dir.glob("*.sql")
+        if item.is_file()
+    ]
+    files.sort(key=lambda item: item.created_at, reverse=True)
+    return files[:limit]
+
+
+def _cleanup_expired_backups(location: str, retention_days: int) -> None:
+    if retention_days <= 0:
+        return
+    backup_dir = _resolve_backup_location(location)
+    if not backup_dir.exists():
+        return
+    threshold = datetime.now() - timedelta(days=retention_days)
+    for file_path in backup_dir.glob("*.sql"):
+        try:
+            file_time = datetime.fromtimestamp(file_path.stat().st_mtime)
+            if file_time < threshold:
+                file_path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            continue
+
+
+def _build_pg_connection_uri() -> str:
+    return settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _build_backup_info(
+    config: Optional[DatabaseBackupSettings] = None,
+) -> DatabaseBackupInfo:
+    settings_model = config or _load_backup_config()
+    stats = await _get_database_stats()
+    recent_files = _collect_recent_backups(settings_model.backup_location)
+    return DatabaseBackupInfo(
+        **settings_model.model_dump(),
+        **stats,
+        recent_backups=recent_files,
+    )
+
+
+def _pg_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    if settings.postgres_password:
+        env["PGPASSWORD"] = settings.postgres_password
+    return env
+
+
+def _docker_exec_prefix() -> List[str]:
+    container = settings.postgres_container_name or os.getenv("POSTGRES_DOCKER_CONTAINER")
+    if not container:
+        raise FileNotFoundError("pg_dump not found and POSTGRES_CONTAINER_NAME 未設定")
+
+    prefix = ["docker", "exec", "-i"]
+    if settings.postgres_password:
+        prefix.extend(["-e", f"PGPASSWORD={settings.postgres_password}"])
+    prefix.append(container)
+    return prefix
+
+
+def _run_pg_dump_to_file(output_path: Path) -> None:
+    env = _pg_env()
+    base_cmd = [
+        "pg_dump",
+        "-h",
+        settings.postgres_server,
+        "-p",
+        str(settings.postgres_port),
+        "-U",
+        settings.postgres_user,
+        settings.postgres_db,
+    ]
+    try:
+        with open(output_path, "wb") as outfile:
+            subprocess.run(base_cmd, stdout=outfile, check=True, env=env)
+        return
+    except FileNotFoundError:
+        docker_cmd = _docker_exec_prefix() + [
+            "pg_dump",
+            "-h",
+            "localhost",
+            "-p",
+            str(settings.postgres_port),
+            "-U",
+            settings.postgres_user,
+            settings.postgres_db,
+        ]
+        with open(output_path, "wb") as outfile:
+            subprocess.run(docker_cmd, stdout=outfile, check=True, env=_pg_env())
+
+
+def _run_psql_restore_from_file(source_path: Path) -> None:
+    env = _pg_env()
+    base_cmd = [
+        "psql",
+        "-h",
+        settings.postgres_server,
+        "-p",
+        str(settings.postgres_port),
+        "-U",
+        settings.postgres_user,
+        settings.postgres_db,
+    ]
+    try:
+        with open(source_path, "rb") as infile:
+            subprocess.run(base_cmd, stdin=infile, check=True, env=env)
+        return
+    except FileNotFoundError:
+        docker_cmd = _docker_exec_prefix() + [
+            "psql",
+            "-h",
+            "localhost",
+            "-p",
+            str(settings.postgres_port),
+            "-U",
+            settings.postgres_user,
+            settings.postgres_db,
+        ]
+        with open(source_path, "rb") as infile:
+            subprocess.run(docker_cmd, stdin=infile, check=True, env=_pg_env())
 
 
 def _normalize_rule_type_label(rule_type: Optional[str]) -> str:
@@ -3491,6 +3723,110 @@ async def clear_database():
     except Exception as e:
         api_logger.error(f"清空資料庫失敗: {e}")
         raise HTTPException(status_code=500, detail=f"清空資料庫失敗: {str(e)}")
+
+
+@router.get("/database/backup/settings", response_model=DatabaseBackupInfo)
+async def get_database_backup_settings():
+    """取得資料庫備份設定與狀態"""
+    return await _build_backup_info()
+
+
+@router.put("/database/backup/settings", response_model=DatabaseBackupInfo)
+async def update_database_backup_settings(payload: UpdateDatabaseBackupSettingsRequest):
+    """更新資料庫備份設定"""
+    config = _load_backup_config()
+    config.backup_type = payload.backup_type
+    config.backup_location = payload.backup_location
+    config.auto_backup_enabled = payload.auto_backup_enabled
+    config.backup_frequency = payload.backup_frequency
+    config.retention_days = payload.retention_days
+    _save_backup_config(config)
+    return await _build_backup_info(config)
+
+
+@router.post("/database/backup/run", response_model=ManualBackupResponse)
+async def run_manual_database_backup():
+    """立即執行資料庫備份"""
+    config = _load_backup_config()
+    backup_dir = _resolve_backup_location(config.backup_location)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"postgres_backup_{timestamp}.sql"
+    backup_path = backup_dir / backup_filename
+
+    try:
+        _run_pg_dump_to_file(backup_path)
+    except FileNotFoundError:
+        if backup_path.exists():
+            backup_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="找不到 pg_dump 工具，且未設定 POSTGRES_CONTAINER_NAME 供 docker exec 使用")
+    except subprocess.CalledProcessError as exc:
+        if backup_path.exists():
+            backup_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"備份執行失敗: {exc.stderr or exc.stdout}")
+
+    size = backup_path.stat().st_size if backup_path.exists() else 0
+    config.last_backup_time = datetime.now()
+    config.last_backup_file = backup_filename
+    config.last_backup_size = size
+    _save_backup_config(config)
+    _cleanup_expired_backups(config.backup_location, config.retention_days)
+
+    return ManualBackupResponse(
+        message="資料庫備份完成",
+        backup_file=backup_filename,
+        backup_path=str(backup_path),
+        size=size,
+        download_url=f"/api/v1/frontend/database/backup/download/{backup_filename}",
+        finished_at=config.last_backup_time,
+    )
+
+
+@router.post("/database/backup/restore", response_model=RestoreBackupResponse)
+async def restore_database_backup(file: UploadFile = File(...)):
+    """從上傳的 SQL 檔案還原資料庫"""
+    if not file.filename.lower().endswith(".sql"):
+        raise HTTPException(status_code=400, detail="僅支援 .sql 備份檔案")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".sql") as tmp:
+        temp_path = Path(tmp.name)
+        content = await file.read()
+        tmp.write(content)
+
+    try:
+        _run_psql_restore_from_file(temp_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="找不到 psql 工具，且未設定 POSTGRES_CONTAINER_NAME 供 docker exec 使用")
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=500, detail=f"還原失敗: {exc.stderr or exc.stdout}")
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    return RestoreBackupResponse(message="資料庫還原完成", restored_at=datetime.now())
+
+
+@router.get("/database/backup/download/{backup_name}")
+async def download_database_backup(backup_name: str):
+    """下載指定的備份檔案"""
+    config = _load_backup_config()
+    backup_dir = _resolve_backup_location(config.backup_location)
+    if not backup_dir.exists():
+        raise HTTPException(status_code=404, detail="備份目錄不存在")
+
+    requested_path = (backup_dir / backup_name).resolve()
+    try:
+        requested_path.relative_to(backup_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="備份檔案名稱不合法")
+
+    if not requested_path.exists():
+        raise HTTPException(status_code=404, detail="找不到指定的備份檔案")
+
+    return FileResponse(
+        requested_path,
+        filename=backup_name,
+        media_type="application/sql",
+    )
 
 @router.get("/backup-database")
 async def backup_database():
