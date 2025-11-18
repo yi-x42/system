@@ -21,7 +21,11 @@ import {
   Area,
 } from "recharts";
 import { Download, Filter } from "lucide-react";
-import { useCameraPerformance } from "../hooks/react-query-hooks";
+import {
+  useCameraPerformance,
+  useAlertTrends,
+  useAlertCategoryStats,
+} from "../hooks/react-query-hooks";
 
 const RANGE_DAY_MAP = {
   "1day": 1,
@@ -46,6 +50,26 @@ const STATUS_VARIANT_MAP: Record<string, "default" | "secondary" | "destructive"
   failed: "destructive",
 };
 
+const CATEGORY_COLOR_MAP: Record<string, string> = {
+  linecrossing: "#f87171",
+  zonedwell: "#fb923c",
+  speedanomaly: "#facc15",
+  crowdcount: "#60a5fa",
+  falldetection: "#c026d3",
+};
+
+const DEFAULT_CATEGORY_COLOR = "#3b82f6";
+
+const normalizeRuleTypeKey = (value?: string | null) => {
+  if (!value) return "";
+  return value.replace(/[^a-zA-Z]/g, "").toLowerCase();
+};
+
+const getCategoryColor = (ruleType?: string | null) => {
+  const key = normalizeRuleTypeKey(ruleType);
+  return CATEGORY_COLOR_MAP[key] ?? DEFAULT_CATEGORY_COLOR;
+};
+
 export function StatisticalAnalysis() {
   const [range, setRange] = useState<RangeOption>("7days");
   const selectedDays = RANGE_DAY_MAP[range];
@@ -54,6 +78,37 @@ export function StatisticalAnalysis() {
     isLoading: cameraPerformanceLoading,
     isError: cameraPerformanceError,
   } = useCameraPerformance({ days: selectedDays, limit: 5 });
+  const {
+    data: alertTrends = [],
+    isLoading: alertTrendsLoading,
+    isError: alertTrendsError,
+  } = useAlertTrends({ days: selectedDays });
+  const {
+    data: alertCategoryStats = [],
+    isLoading: alertCategoryLoading,
+    isError: alertCategoryError,
+  } = useAlertCategoryStats({ days: selectedDays, limit: 4 });
+
+  const formatChartDate = (value: string) => {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      const month = String(parsed.getMonth() + 1).padStart(2, "0");
+      const day = String(parsed.getDate()).padStart(2, "0");
+      return `${month}/${day}`;
+    }
+    return value;
+  };
+
+  const alertTrendChartData = alertTrends.map((item) => ({
+    ...item,
+    date: formatChartDate(item.date),
+  }));
+
+  const maxCategoryCount = alertCategoryStats.reduce(
+    (max, item) => Math.max(max, item.count),
+    0
+  );
+
 
   // 模擬統計數據
   const dailyDetections = [
@@ -98,16 +153,6 @@ export function StatisticalAnalysis() {
     { name: "車輛", value: 632, color: "#82ca9d" },
     { name: "自行車", value: 189, color: "#ffc658" },
     { name: "其他", value: 94, color: "#ff7c7c" },
-  ];
-
-  const alertTrends = [
-    { date: "01/01", high: 8, medium: 15, low: 23 },
-    { date: "01/02", high: 12, medium: 18, low: 19 },
-    { date: "01/03", high: 6, medium: 22, low: 25 },
-    { date: "01/04", high: 9, medium: 16, low: 21 },
-    { date: "01/05", high: 14, medium: 20, low: 18 },
-    { date: "01/06", high: 11, medium: 24, low: 22 },
-    { date: "01/07", high: 7, medium: 19, low: 26 },
   ];
 
   const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7c7c"];
@@ -206,38 +251,56 @@ export function StatisticalAnalysis() {
                 <CardTitle>警報趨勢分析</CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={alertTrends}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip />
-                    <Area
-                      type="monotone"
-                      dataKey="high"
-                      stackId="1"
-                      stroke="#ff4d4f"
-                      fill="#ff4d4f"
-                      name="高級別"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="medium"
-                      stackId="1"
-                      stroke="#faad14"
-                      fill="#faad14"
-                      name="中級別"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="low"
-                      stackId="1"
-                      stroke="#52c41a"
-                      fill="#52c41a"
-                      name="低級別"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                {alertTrendsLoading && (
+                  <p className="text-sm text-muted-foreground">載入警報趨勢中...</p>
+                )}
+                {alertTrendsError && (
+                  <p className="text-sm text-destructive">無法取得警報趨勢資料</p>
+                )}
+                {!alertTrendsLoading && !alertTrendsError && alertTrends.length === 0 && (
+                  <p className="text-sm text-muted-foreground">選定期間內沒有警報紀錄。</p>
+                )}
+                {!alertTrendsLoading && !alertTrendsError && alertTrends.length > 0 && (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={alertTrendChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Area
+                        type="monotone"
+                        dataKey="high"
+                        stackId="1"
+                        stroke="#ff4d4f"
+                        fill="#ff4d4f"
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        name="高級別"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="medium"
+                        stackId="1"
+                        stroke="#faad14"
+                        fill="#faad14"
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        name="中級別"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="low"
+                        stackId="1"
+                        stroke="#52c41a"
+                        fill="#52c41a"
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                        name="低級別"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+                
               </CardContent>
             </Card>
 
@@ -246,44 +309,42 @@ export function StatisticalAnalysis() {
                 <CardTitle>警報分類統計</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span>入侵偵測</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-32 bg-gray-200 rounded-full h-2">
-                        <div className="bg-red-500 h-2 rounded-full w-3/4"></div>
-                      </div>
-                      <span className="text-sm">75</span>
+                {alertCategoryLoading && (
+                  <p className="text-sm text-muted-foreground">載入警報分類中...</p>
+                )}
+                {alertCategoryError && (
+                  <p className="text-sm text-destructive">無法取得警報分類資料</p>
+                )}
+                {!alertCategoryLoading && !alertCategoryError && alertCategoryStats.length === 0 && (
+                  <p className="text-sm text-muted-foreground">選定期間內沒有警報分類資料。</p>
+                )}
+                {!alertCategoryLoading &&
+                  !alertCategoryError &&
+                  alertCategoryStats.length > 0 && (
+                    <div className="space-y-4">
+                      {alertCategoryStats.map((category) => {
+                        const barColor = getCategoryColor(category.rule_type);
+                        const widthPercentage = maxCategoryCount
+                          ? `${Math.min(100, (category.count / maxCategoryCount) * 100)}%`
+                          : "0%";
+                        const key = category.rule_type || category.label;
+                        return (
+                          <div key={key} className="flex justify-between items-center">
+                            <span>{category.label}</span>
+                            <div className="flex items-center gap-2">
+                              <div className="w-32 bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="h-2 rounded-full"
+                                  style={{ width: widthPercentage, backgroundColor: barColor }}
+                                ></div>
+                              </div>
+                              <span className="text-sm">{category.count}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>異常行為</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-32 bg-gray-200 rounded-full h-2">
-                        <div className="bg-orange-500 h-2 rounded-full w-1/2"></div>
-                      </div>
-                      <span className="text-sm">42</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>移動偵測</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-32 bg-gray-200 rounded-full h-2">
-                        <div className="bg-yellow-500 h-2 rounded-full w-1/3"></div>
-                      </div>
-                      <span className="text-sm">28</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>設備異常</span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-32 bg-gray-200 rounded-full h-2">
-                        <div className="bg-blue-500 h-2 rounded-full w-1/6"></div>
-                      </div>
-                      <span className="text-sm">11</span>
-                    </div>
-                  </div>
-                </div>
+                  )}
               </CardContent>
             </Card>
           </div>

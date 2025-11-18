@@ -71,6 +71,74 @@ export const useCameraPerformance = (
   });
 };
 
+export interface AlertTrendPoint {
+  date: string;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+interface AlertTrendParams {
+  days?: number;
+  taskId?: string;
+}
+
+const fetchAlertTrends = async (
+  params: AlertTrendParams
+): Promise<AlertTrendPoint[]> => {
+  const { data } = await apiClient.get('/frontend/analytics/alert-trends', {
+    params,
+  });
+  return data;
+};
+
+export const useAlertTrends = (
+  { days = 7, taskId }: AlertTrendParams = {}
+) => {
+  return useQuery<AlertTrendPoint[], Error>({
+    queryKey: ['alertTrends', days, taskId],
+    queryFn: () => fetchAlertTrends({ days, taskId }),
+    placeholderData: keepPreviousData,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: false,
+  });
+};
+
+export interface AlertCategoryStat {
+  rule_type: string;
+  label: string;
+  count: number;
+}
+
+interface AlertCategoryParams {
+  days?: number;
+  limit?: number;
+  taskId?: string;
+}
+
+const fetchAlertCategories = async (
+  params: AlertCategoryParams
+): Promise<AlertCategoryStat[]> => {
+  const { data } = await apiClient.get('/frontend/analytics/alert-categories', {
+    params,
+  });
+  return data;
+};
+
+export const useAlertCategoryStats = (
+  { days = 7, limit = 4, taskId }: AlertCategoryParams = {}
+) => {
+  return useQuery<AlertCategoryStat[], Error>({
+    queryKey: ['alertCategories', days, limit, taskId],
+    queryFn: () => fetchAlertCategories({ days, limit, taskId }),
+    placeholderData: keepPreviousData,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: false,
+  });
+};
+
 // 郵件通知設定
 export interface EmailNotificationSettings {
   enabled: boolean;

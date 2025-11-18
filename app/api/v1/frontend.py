@@ -11,7 +11,7 @@ import base64
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union, Literal
+from typing import List, Dict, Any, Optional, Tuple, Union, Literal, Iterable
 import subprocess
 from fastapi import (
     APIRouter,
@@ -322,7 +322,7 @@ def _normalize_rule_type_label(rule_type: Optional[str]) -> str:
     normalized = "".join(ch for ch in str(rule_type or "") if ch.isalnum()).lower()
     if not normalized:
         return "自訂警報"
-    return ALERT_TYPE_LABELS.get(normalized, rule_type or "自訂警報")
+    return ALERT_TYPE_LABELS.get(normalized, "自訂警報")
 
 
 def _normalize_severity_label(severity: Optional[str]) -> str:
@@ -333,6 +333,23 @@ def _normalize_severity_label(severity: Optional[str]) -> str:
         return "中"
     mapped = SEVERITY_LABELS.get(raw.lower())
     return mapped or raw
+
+
+def _severity_bucket_key(value: Optional[str]) -> str:
+    """將任意嚴重度描述映射到 high/medium/low 三種 bucket。"""
+    if not value:
+        return "medium"
+    normalized = str(value).strip().lower()
+    if normalized in {"高", "critical", "high"}:
+        return "high"
+    if normalized in {"低", "low"}:
+        return "low"
+    return "medium"
+
+
+def _normalize_rule_type_key(rule_type: Optional[str]) -> str:
+    normalized = "".join(ch for ch in str(rule_type or "") if ch.isalnum()).lower()
+    return normalized or "custom"
 
 
 def _relative_to_uploads(path: Path) -> Optional[str]:
@@ -348,6 +365,56 @@ def _parse_snapshot_timestamp(raw: str, fallback: float) -> datetime:
         return datetime.strptime(raw[:20], "%Y%m%d%H%M%S%f")
     except ValueError:
         return datetime.fromtimestamp(fallback)
+
+
+def _resolve_alert_task_dirs(task_id: Optional[str]) -> List[Path]:
+    if not ALERT_SNAPSHOT_DIR.exists():
+        return []
+    if task_id is not None:
+        candidate = ALERT_SNAPSHOT_DIR / str(task_id)
+        if candidate.exists() and candidate.is_dir():
+            return [candidate]
+        return []
+    return [p for p in ALERT_SNAPSHOT_DIR.iterdir() if p.is_dir()]
+
+
+def _collect_alert_snapshot_events(
+    task_dirs: Iterable[Path],
+    start_boundary: datetime,
+    end_boundary: datetime,
+) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    rule_cache: Dict[str, Dict[str, Any]] = {}
+    for dir_path in task_dirs:
+        if not dir_path.exists() or not dir_path.is_dir():
+            continue
+        task_id_str = dir_path.name
+        lookup = rule_cache.get(task_id_str)
+        for file_path in dir_path.iterdir():
+            if not file_path.is_file() or file_path.suffix.lower() not in SNAPSHOT_SUFFIXES:
+                continue
+            stem = file_path.stem
+            if "_" not in stem:
+                continue
+            rule_id, timestamp_raw = stem.split("_", 1)
+            if not rule_id:
+                continue
+            triggered_at = _parse_snapshot_timestamp(timestamp_raw, file_path.stat().st_mtime)
+            if triggered_at < start_boundary or triggered_at > end_boundary:
+                continue
+            if lookup is None:
+                lookup = _build_rule_lookup(task_id_str)
+                rule_cache[task_id_str] = lookup
+            rule_payload = lookup.get(rule_id) if lookup else None
+            events.append(
+                {
+                    "task_id": task_id_str,
+                    "rule_id": rule_id,
+                    "timestamp": triggered_at,
+                    "rule_payload": rule_payload,
+                }
+            )
+    return events
 
 
 def _build_rule_lookup(task_id: str) -> Dict[str, Dict[str, Any]]:
@@ -841,6 +908,19 @@ class CameraPerformanceItem(BaseModel):
     runtime_hours: float = Field(0.0, description="指定期間內的運行小時數")
     status: Optional[str] = Field(None, description="最近一次任務的狀態")
     last_active: Optional[datetime] = Field(None, description="最後一次活動時間")
+
+
+class AlertTrendPoint(BaseModel):
+    date: str = Field(..., description="日期（ISO 8601）")
+    high: int = Field(0, ge=0, description="高級別警報數")
+    medium: int = Field(0, ge=0, description="中級別警報數")
+    low: int = Field(0, ge=0, description="低級別警報數")
+
+
+class AlertCategoryStat(BaseModel):
+    rule_type: str = Field(..., description="警報規則類型")
+    label: str = Field(..., description="顯示名稱")
+    count: int = Field(0, ge=0, description="指定期間內的警報次數")
 
 # ===== 資料來源管理模型 =====
 
@@ -2578,6 +2658,91 @@ async def get_camera_performance(
     except Exception as exc:
         api_logger.error(f"獲取攝影機效能數據失敗: {exc}")
         raise HTTPException(status_code=500, detail="無法取得攝影機效能數據")
+
+
+@router.get(
+    "/analytics/alert-trends",
+    response_model=List[AlertTrendPoint],
+)
+async def get_alert_trends(
+    days: int = Query(7, ge=1, le=90, description="統計最近幾天的警報趨勢"),
+    task_id: Optional[str] = Query(None, description="僅統計指定任務的警報"),
+):
+    """由快照檔案彙整警報趨勢資料。"""
+    now = datetime.utcnow()
+    effective_days = max(1, min(days, 90))
+    start_date = (now - timedelta(days=effective_days - 1)).date()
+    start_boundary = datetime.combine(start_date, datetime.min.time())
+    end_boundary = datetime.combine(now.date(), datetime.max.time())
+
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for offset in range(effective_days):
+        day = start_date + timedelta(days=offset)
+        day_key = day.isoformat()
+        buckets[day_key] = {"date": day_key, "high": 0, "medium": 0, "low": 0}
+
+    task_dirs = _resolve_alert_task_dirs(task_id)
+    if not task_dirs:
+        return []
+
+    events = _collect_alert_snapshot_events(task_dirs, start_boundary, end_boundary)
+    if not events:
+        return []
+
+    for event in events:
+        day_key = event["timestamp"].date().isoformat()
+        bucket = buckets.get(day_key)
+        if bucket is None:
+            continue
+        rule_payload = event.get("rule_payload") or {}
+        severity_label = _normalize_severity_label(rule_payload.get("severity"))
+        bucket_key = _severity_bucket_key(severity_label)
+        bucket[bucket_key] += 1
+
+    return list(buckets.values())
+
+
+@router.get(
+    "/analytics/alert-categories",
+    response_model=List[AlertCategoryStat],
+)
+async def get_alert_category_stats(
+    days: int = Query(7, ge=1, le=90, description="統計最近幾天的警報類別"),
+    limit: int = Query(4, ge=1, le=20, description="最多顯示的類別數"),
+    task_id: Optional[str] = Query(None, description="僅統計指定任務的警報"),
+):
+    now = datetime.utcnow()
+    effective_days = max(1, min(days, 90))
+    start_date = (now - timedelta(days=effective_days - 1)).date()
+    start_boundary = datetime.combine(start_date, datetime.min.time())
+    end_boundary = datetime.combine(now.date(), datetime.max.time())
+
+    task_dirs = _resolve_alert_task_dirs(task_id)
+    if not task_dirs:
+        return []
+
+    events = _collect_alert_snapshot_events(task_dirs, start_boundary, end_boundary)
+    if not events:
+        return []
+
+    aggregates: Dict[str, Dict[str, Any]] = {}
+    for event in events:
+        rule_payload = event.get("rule_payload") or {}
+        raw_rule_type = rule_payload.get("rule_type") if rule_payload else None
+        key = _normalize_rule_type_key(raw_rule_type)
+        label = _normalize_rule_type_label(raw_rule_type)
+        entry = aggregates.get(key)
+        if entry is None:
+            entry = {"rule_type": key, "label": label, "count": 0}
+            aggregates[key] = entry
+        entry["count"] += 1
+
+    if not aggregates:
+        return []
+
+    stats = [AlertCategoryStat(**payload) for payload in aggregates.values()]
+    stats.sort(key=lambda item: item.count, reverse=True)
+    return stats[:limit]
 
 
 @router.get("/analytics", response_model=AnalyticsData)
