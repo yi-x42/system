@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -32,12 +32,114 @@ import {
 } from "lucide-react";
 import { useSystemStats } from "../hooks/react-query-hooks";
 import { useShutdownSystem } from "../hooks/react-query-hooks";
+import {
+  DEFAULT_LANGUAGE,
+  languageOptions,
+  useLanguage,
+  type LanguageCode,
+} from "../lib/language";
+
+type GeneralConfig = {
+  systemName: string;
+  timezone: string;
+  language: LanguageCode;
+  sessionTimeout: number;
+  maxLoginAttempts: number;
+};
+
+type SystemConfig = {
+  general: GeneralConfig;
+  storage: {
+    videoRetention: number;
+    alertRetention: number;
+    logRetention: number;
+    autoCleanup: boolean;
+    storageWarning: number;
+  };
+  performance: {
+    maxConcurrentStreams: number;
+    videoQuality: string;
+    cpuThreshold: number;
+    memoryThreshold: number;
+    gpuThreshold: number;
+    enableGPU: boolean;
+  };
+  security: {
+    enableSSL: boolean;
+    forcePasswordChange: boolean;
+    passwordExpiry: number;
+    enableTwoFactor: boolean;
+    ipWhitelist: boolean;
+  };
+};
+
+const defaultGeneralConfig: GeneralConfig = {
+  systemName: "智慧偵測監控系統",
+  timezone: "Asia/Taipei",
+  language: DEFAULT_LANGUAGE,
+  sessionTimeout: 30,
+  maxLoginAttempts: 5,
+};
+
+const loadGeneralConfig = (language: LanguageCode): GeneralConfig => {
+  const fallback: GeneralConfig = {
+    ...defaultGeneralConfig,
+    language,
+  };
+
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  try {
+    const raw = localStorage.getItem("generalSystemConfig");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...fallback,
+        ...parsed,
+        language: parsed.language ?? fallback.language,
+      };
+    }
+  } catch (error) {
+    console.warn("Failed to parse stored general config", error);
+  }
+
+  return fallback;
+};
+
+const createInitialSystemConfig = (language: LanguageCode): SystemConfig => ({
+  general: loadGeneralConfig(language),
+  storage: {
+    videoRetention: 30,
+    alertRetention: 90,
+    logRetention: 180,
+    autoCleanup: true,
+    storageWarning: 80,
+  },
+  performance: {
+    maxConcurrentStreams: 20,
+    videoQuality: "high",
+    cpuThreshold: 80,
+    memoryThreshold: 85,
+    gpuThreshold: 75,
+    enableGPU: true,
+  },
+  security: {
+    enableSSL: true,
+    forcePasswordChange: true,
+    passwordExpiry: 90,
+    enableTwoFactor: false,
+    ipWhitelist: true,
+  },
+});
 
 export function SystemSettings() {
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   const { mutate: triggerShutdown, isPending: isShuttingDown, isSuccess: shutdownSuccess, error: shutdownError, data: shutdownData } = useShutdownSystem();
+  const { language, setLanguage, t } = useLanguage();
   
   // 獲取真實系統統計數據
   const { data: systemStats, isLoading, isError } = useSystemStats();
@@ -77,36 +179,71 @@ export function SystemSettings() {
   ];
 
   // 模擬系統配置
-  const systemConfig = {
-    general: {
-      systemName: "智慧偵測監控系統",
-      timezone: "Asia/Taipei",
-      language: "zh-TW",
-      sessionTimeout: 30,
-      maxLoginAttempts: 5,
-    },
-    storage: {
-      videoRetention: 30,
-      alertRetention: 90,
-      logRetention: 180,
-      autoCleanup: true,
-      storageWarning: 80,
-    },
-    performance: {
-      maxConcurrentStreams: 20,
-      videoQuality: "high",
-      cpuThreshold: 80,
-      memoryThreshold: 85,
-      gpuThreshold: 75,
-      enableGPU: true,
-    },
-    security: {
-      enableSSL: true,
-      forcePasswordChange: true,
-      passwordExpiry: 90,
-      enableTwoFactor: false,
-      ipWhitelist: true,
-    },
+  const [systemConfig, setSystemConfig] = useState<SystemConfig>(() =>
+    createInitialSystemConfig(language),
+  );
+  const [isGeneralSaving, setIsGeneralSaving] = useState(false);
+  const [saveHint, setSaveHint] = useState<{ key: string; isError?: boolean } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setSystemConfig((prev) => ({
+      ...prev,
+      general: {
+        ...prev.general,
+        language,
+      },
+    }));
+  }, [language]);
+
+  const handleGeneralInputChange = (
+    field: "systemName" | "timezone" | "language",
+    value: string,
+  ) => {
+    setSystemConfig((prev) => ({
+      ...prev,
+      general: {
+        ...prev.general,
+        [field]: field === "language" ? (value as LanguageCode) : value,
+      },
+    }));
+  };
+
+  const handleLanguageChange = (value: string) => {
+    const languageCode = value as LanguageCode;
+    setLanguage(languageCode);
+    handleGeneralInputChange("language", languageCode);
+  };
+
+  const handleSaveGeneral = async () => {
+    setIsGeneralSaving(true);
+    setSaveHint(null);
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("generalSystemConfig", JSON.stringify(systemConfig.general));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      setSaveHint({ key: "systemSettings.messages.saved" });
+    } catch (error) {
+      console.error("Failed to save general settings", error);
+      setSaveHint({ key: "systemSettings.messages.saveError", isError: true });
+    } finally {
+      setIsGeneralSaving(false);
+    }
+  };
+
+  const handleResetGeneral = () => {
+    const resetGeneral = { ...defaultGeneralConfig };
+    setSystemConfig((prev) => ({
+      ...prev,
+      general: resetGeneral,
+    }));
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("generalSystemConfig");
+    }
+    setLanguage(DEFAULT_LANGUAGE);
+    setSaveHint({ key: "systemSettings.messages.reset" });
   };
 
   const getRoleColor = (role: string) => {
@@ -136,7 +273,7 @@ export function SystemSettings() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1>系統設定</h1>
+        <h1>{t("systemSettings.title")}</h1>
         <div className="flex gap-2">
           <div className="flex gap-2">
             <Button variant="outline" className="text-[14px]">
@@ -193,12 +330,14 @@ export function SystemSettings() {
 
       <Tabs defaultValue="general">
         <TabsList>
-          <TabsTrigger value="general">一般設定</TabsTrigger>
-          <TabsTrigger value="users">用戶管理</TabsTrigger>
-          <TabsTrigger value="storage">存儲設定</TabsTrigger>
-          <TabsTrigger value="security">資料庫管理</TabsTrigger>
-          <TabsTrigger value="backup">備份還原</TabsTrigger>
-          <TabsTrigger value="performance">效能監控</TabsTrigger>
+          <TabsTrigger value="general">{t("systemSettings.tabs.general")}</TabsTrigger>
+          <TabsTrigger value="users">{t("systemSettings.tabs.users")}</TabsTrigger>
+          <TabsTrigger value="storage">{t("systemSettings.tabs.storage")}</TabsTrigger>
+          <TabsTrigger value="security">{t("systemSettings.tabs.security")}</TabsTrigger>
+          <TabsTrigger value="backup">{t("systemSettings.tabs.backup")}</TabsTrigger>
+          <TabsTrigger value="performance">
+            {t("systemSettings.tabs.performance")}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
@@ -206,22 +345,30 @@ export function SystemSettings() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Settings className="h-5 w-5" />
-                一般系統設定
+                {t("systemSettings.general.title")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <Label htmlFor="system-name">系統名稱</Label>
+                  <Label htmlFor="system-name">
+                    {t("systemSettings.fields.systemName")}
+                  </Label>
                   <Input 
                     id="system-name" 
-                    defaultValue={systemConfig.general.systemName}
-                    placeholder="輸入系統名稱" 
+                    value={systemConfig.general.systemName}
+                    onChange={(event) => handleGeneralInputChange("systemName", event.target.value)}
+                    placeholder={t("systemSettings.fields.systemNamePlaceholder")} 
                   />
                 </div>
                 <div>
-                  <Label htmlFor="timezone">時區</Label>
-                  <Select value={systemConfig.general.timezone}>
+                  <Label htmlFor="timezone">
+                    {t("systemSettings.fields.timezone")}
+                  </Label>
+                  <Select
+                    value={systemConfig.general.timezone}
+                    onValueChange={(value) => handleGeneralInputChange("timezone", value)}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -234,13 +381,19 @@ export function SystemSettings() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <Label htmlFor="language">系統語言</Label>
-                  <Select value={systemConfig.general.language}>
+                  <Label htmlFor="language">
+                    {t("systemSettings.fields.language")}
+                  </Label>
+                  <Select value={systemConfig.general.language} onValueChange={handleLanguageChange}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="zh-TW">繁體中文</SelectItem>
+                      {languageOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -251,9 +404,26 @@ export function SystemSettings() {
                 
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline">重置</Button>
-                <Button>儲存設定</Button>
+              <div className="flex flex-col items-end gap-2">
+                {saveHint && (
+                  <span
+                    className={`text-sm ${
+                      saveHint.isError ? "text-destructive" : "text-muted-foreground"
+                    }`}
+                  >
+                    {t(saveHint.key)}
+                  </span>
+                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleResetGeneral} disabled={isGeneralSaving}>
+                    {t("systemSettings.actions.reset")}
+                  </Button>
+                  <Button onClick={handleSaveGeneral} disabled={isGeneralSaving}>
+                    {isGeneralSaving
+                      ? t("systemSettings.actions.saving")
+                      : t("systemSettings.actions.save")}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
