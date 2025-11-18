@@ -23,6 +23,7 @@ import {
 } from "./ui/sidebar";
 import { useLanguage } from "../lib/language";
 import { useTimezone } from "../lib/timezone";
+import { useSystemName } from "../hooks/useSystemName";
 
 interface AppSidebarProps {
   currentPage: string;
@@ -90,6 +91,7 @@ const menuGroups = [
 export function AppSidebar({ currentPage, onPageChange }: AppSidebarProps) {
   const { t, language } = useLanguage();
   const { timezone } = useTimezone();
+  const systemName = useSystemName();
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
   useEffect(() => {
@@ -122,7 +124,9 @@ export function AppSidebar({ currentPage, onPageChange }: AppSidebarProps) {
         <div className="flex items-center gap-2">
           <Camera className="h-8 w-8 text-primary" />
           <div>
-            <h2 className="font-semibold">{t("sidebar.brand.title")}</h2>
+            <h2 className="font-semibold">
+              {systemName?.trim() || t("sidebar.brand.title")}
+            </h2>
             <p className="text-sm text-muted-foreground">
               {t("sidebar.brand.subtitle")}
             </p>

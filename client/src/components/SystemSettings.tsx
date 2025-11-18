@@ -52,6 +52,11 @@ import {
   useTimezone,
   type TimezoneValue,
 } from "../lib/timezone";
+import {
+  DEFAULT_SYSTEM_NAME,
+  GENERAL_CONFIG_EVENT,
+  GENERAL_CONFIG_STORAGE_KEY,
+} from "../lib/systemBranding";
 
 type GeneralConfig = {
   systemName: string;
@@ -113,7 +118,7 @@ const normalizePercentages = (segments: number[]) => {
 };
 
 const defaultGeneralConfig: GeneralConfig = {
-  systemName: "智慧偵測監控系統",
+  systemName: DEFAULT_SYSTEM_NAME,
   timezone: "Asia/Taipei" as TimezoneValue,
   language: DEFAULT_LANGUAGE,
   sessionTimeout: 30,
@@ -152,7 +157,7 @@ const loadGeneralConfig = (
   }
 
   try {
-    const raw = localStorage.getItem("generalSystemConfig");
+    const raw = localStorage.getItem(GENERAL_CONFIG_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
@@ -411,7 +416,15 @@ export function SystemSettings() {
     setSaveHint(null);
     try {
       if (typeof window !== "undefined") {
-        localStorage.setItem("generalSystemConfig", JSON.stringify(systemConfig.general));
+        localStorage.setItem(
+          GENERAL_CONFIG_STORAGE_KEY,
+          JSON.stringify(systemConfig.general),
+        );
+        window.dispatchEvent(
+          new CustomEvent(GENERAL_CONFIG_EVENT, {
+            detail: { general: systemConfig.general },
+          }),
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, 600));
       setSaveHint({ key: "systemSettings.messages.saved" });
@@ -430,7 +443,10 @@ export function SystemSettings() {
       general: resetGeneral,
     }));
     if (typeof window !== "undefined") {
-      localStorage.removeItem("generalSystemConfig");
+      localStorage.removeItem(GENERAL_CONFIG_STORAGE_KEY);
+      window.dispatchEvent(
+        new CustomEvent(GENERAL_CONFIG_EVENT, { detail: { general: resetGeneral } }),
+      );
     }
     setLanguage(DEFAULT_LANGUAGE);
     setTimezone(defaultGeneralConfig.timezone);
