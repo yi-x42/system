@@ -14,12 +14,23 @@ import {
   XCircle,
   Clock,
 } from "lucide-react";
-import { useSystemStats, useCameras } from "../hooks/react-query-hooks";
+import {
+  useSystemStats,
+  useCameras,
+  useActiveAlerts,
+  type ActiveAlert,
+} from "../hooks/react-query-hooks";
 import { Skeleton } from "./ui/skeleton";
 
 export function Dashboard() {
   const { data: systemStats, isLoading, isError, error } = useSystemStats();
   const { data: camerasData, isLoading: camerasLoading, error: camerasError } = useCameras();
+  const {
+    data: activeAlertsData,
+    isLoading: activeAlertsLoading,
+    isError: activeAlertsError,
+    error: activeAlertsErrorInstance,
+  } = useActiveAlerts();
   
   // 添加調試資訊
   console.log('🔍 Dashboard - 攝影機資料更新:', {
@@ -46,31 +57,75 @@ export function Dashboard() {
       return `${days} 天 ${minutes} 分鐘`;
     }
   };
+  const formatAlertTimestamp = (value?: string | null) => {
+    if (!value) {
+      return "時間未知";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  };
 
+  const getSeverityBadgeVariant = (severity?: string | null) => {
+    const normalized = severity?.toLowerCase?.() ?? "";
+    if (
+      normalized === "critical" ||
+      normalized === "high" ||
+      (severity?.includes("高") ?? false) ||
+      (severity?.includes("嚴") ?? false)
+    ) {
+      return "destructive" as const;
+    }
+    if (
+      normalized === "medium" ||
+      normalized === "moderate" ||
+      (severity?.includes("中") ?? false)
+    ) {
+      return "secondary" as const;
+    }
+    return "outline" as const;
+  };
 
-  const recentAlerts = [
-    {
-      id: 1,
-      type: "入侵偵測",
-      camera: "攝影機-01",
-      time: "2024-01-15 14:30:25",
-      severity: "高",
-    },
-    {
-      id: 2,
-      type: "移動偵測",
-      camera: "攝影機-05",
-      time: "2024-01-15 14:28:12",
-      severity: "中",
-    },
-    {
-      id: 3,
-      type: "異常行為",
-      camera: "攝影機-12",
-      time: "2024-01-15 14:25:45",
-      severity: "高",
-    },
-  ];
+  const getSeverityLabel = (severity?: string | null) => {
+    const normalized = severity?.toLowerCase?.() ?? "";
+    if (normalized === "critical") {
+      return "嚴重";
+    }
+    if (normalized === "high") {
+      return "高";
+    }
+    if (normalized === "medium" || normalized === "moderate") {
+      return "中";
+    }
+    if (normalized === "low") {
+      return "低";
+    }
+    return severity || "未知";
+  };
+
+  const getAlertSourceLabel = (alert: ActiveAlert) => {
+    if (alert.camera) {
+      return alert.camera;
+    }
+    if (alert.task_id) {
+      return `任務 #${alert.task_id}`;
+    }
+    if (alert.rule_name) {
+      return alert.rule_name;
+    }
+    return "未指定來源";
+  };
+
+  const topActiveAlerts = (activeAlertsData ?? [])
+    .slice()
+    .sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    })
+    .slice(0, 3);
 
   // 使用真實的攝影機數據，直接使用API返回的即時狀態
   const cameras = camerasData?.map(camera => {
@@ -272,28 +327,49 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {recentAlerts.map((alert) => (
-                <Alert key={alert.id}>
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="font-medium">{alert.type}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {alert.camera} • {alert.time}
-                        </p>
+              {activeAlertsLoading ? (
+                Array.from({ length: 3 }).map((_, index) => (
+                  <Alert key={`alert-skeleton-${index}`}>
+                    <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                    <AlertDescription>
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-2 w-full">
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="h-3 w-32" />
+                        </div>
+                        <Skeleton className="h-5 w-12 rounded-full" />
                       </div>
-                      <Badge
-                        variant={
-                          alert.severity === "高" ? "destructive" : "secondary"
-                        }
-                      >
-                        {alert.severity}
-                      </Badge>
-                    </div>
-                  </AlertDescription>
-                </Alert>
-              ))}
+                    </AlertDescription>
+                  </Alert>
+                ))
+              ) : activeAlertsError ? (
+                <div className="text-sm text-destructive">
+                  取得活躍警報失敗：{activeAlertsErrorInstance?.message || "請稍後再試"}
+                </div>
+              ) : topActiveAlerts.length === 0 ? (
+                <div className="text-sm text-muted-foreground text-center py-4">
+                  目前沒有活躍警報
+                </div>
+              ) : (
+                topActiveAlerts.map((alert) => (
+                  <Alert key={alert.id}>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium">{alert.type || alert.rule_name || "警報"}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {getAlertSourceLabel(alert)} • {formatAlertTimestamp(alert.timestamp)}
+                          </p>
+                        </div>
+                        <Badge variant={getSeverityBadgeVariant(alert.severity)}>
+                          {getSeverityLabel(alert.severity)}
+                        </Badge>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
