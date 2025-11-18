@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Camera,
@@ -18,8 +19,10 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  SidebarFooter,
 } from "./ui/sidebar";
 import { useLanguage } from "../lib/language";
+import { useTimezone } from "../lib/timezone";
 
 interface AppSidebarProps {
   currentPage: string;
@@ -85,7 +88,33 @@ const menuGroups = [
 ];
 
 export function AppSidebar({ currentPage, onPageChange }: AppSidebarProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const { timezone } = useTimezone();
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const { timeLabel, dateLabel } = useMemo(() => {
+    const timeLabel = currentTime.toLocaleTimeString(language, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: timezone,
+    });
+    const dateLabel = currentTime.toLocaleDateString(language, {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone: timezone,
+    });
+    return { timeLabel, dateLabel };
+  }, [currentTime, language, timezone]);
 
   return (
     <Sidebar>
@@ -124,6 +153,13 @@ export function AppSidebar({ currentPage, onPageChange }: AppSidebarProps) {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      <SidebarFooter className="border-t p-4">
+        <p className="text-xs text-muted-foreground mb-1">
+          {t("sidebar.clock.title")}
+        </p>
+        <p className="text-lg font-semibold leading-none">{timeLabel}</p>
+        <p className="text-xs text-muted-foreground">{dateLabel}</p>
+      </SidebarFooter>
     </Sidebar>
   );
 }

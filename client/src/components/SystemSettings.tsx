@@ -38,10 +38,15 @@ import {
   useLanguage,
   type LanguageCode,
 } from "../lib/language";
+import {
+  timezoneOptions,
+  useTimezone,
+  type TimezoneValue,
+} from "../lib/timezone";
 
 type GeneralConfig = {
   systemName: string;
-  timezone: string;
+  timezone: TimezoneValue;
   language: LanguageCode;
   sessionTimeout: number;
   maxLoginAttempts: number;
@@ -75,16 +80,20 @@ type SystemConfig = {
 
 const defaultGeneralConfig: GeneralConfig = {
   systemName: "智慧偵測監控系統",
-  timezone: "Asia/Taipei",
+  timezone: "Asia/Taipei" as TimezoneValue,
   language: DEFAULT_LANGUAGE,
   sessionTimeout: 30,
   maxLoginAttempts: 5,
 };
 
-const loadGeneralConfig = (language: LanguageCode): GeneralConfig => {
+const loadGeneralConfig = (
+  language: LanguageCode,
+  timezone: TimezoneValue,
+): GeneralConfig => {
   const fallback: GeneralConfig = {
     ...defaultGeneralConfig,
     language,
+    timezone,
   };
 
   if (typeof window === "undefined") {
@@ -99,6 +108,7 @@ const loadGeneralConfig = (language: LanguageCode): GeneralConfig => {
         ...fallback,
         ...parsed,
         language: parsed.language ?? fallback.language,
+        timezone: parsed.timezone ?? fallback.timezone,
       };
     }
   } catch (error) {
@@ -108,8 +118,11 @@ const loadGeneralConfig = (language: LanguageCode): GeneralConfig => {
   return fallback;
 };
 
-const createInitialSystemConfig = (language: LanguageCode): SystemConfig => ({
-  general: loadGeneralConfig(language),
+const createInitialSystemConfig = (
+  language: LanguageCode,
+  timezone: TimezoneValue,
+): SystemConfig => ({
+  general: loadGeneralConfig(language, timezone),
   storage: {
     videoRetention: 30,
     alertRetention: 90,
@@ -140,6 +153,7 @@ export function SystemSettings() {
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   const { mutate: triggerShutdown, isPending: isShuttingDown, isSuccess: shutdownSuccess, error: shutdownError, data: shutdownData } = useShutdownSystem();
   const { language, setLanguage, t } = useLanguage();
+  const { timezone, setTimezone } = useTimezone();
   
   // 獲取真實系統統計數據
   const { data: systemStats, isLoading, isError } = useSystemStats();
@@ -180,7 +194,7 @@ export function SystemSettings() {
 
   // 模擬系統配置
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(() =>
-    createInitialSystemConfig(language),
+    createInitialSystemConfig(language, timezone),
   );
   const [isGeneralSaving, setIsGeneralSaving] = useState(false);
   const [saveHint, setSaveHint] = useState<{ key: string; isError?: boolean } | null>(
@@ -197,6 +211,16 @@ export function SystemSettings() {
     }));
   }, [language]);
 
+  useEffect(() => {
+    setSystemConfig((prev) => ({
+      ...prev,
+      general: {
+        ...prev.general,
+        timezone,
+      },
+    }));
+  }, [timezone]);
+
   const handleGeneralInputChange = (
     field: "systemName" | "timezone" | "language",
     value: string,
@@ -205,7 +229,12 @@ export function SystemSettings() {
       ...prev,
       general: {
         ...prev.general,
-        [field]: field === "language" ? (value as LanguageCode) : value,
+        [field]:
+          field === "language"
+            ? (value as LanguageCode)
+            : field === "timezone"
+            ? (value as TimezoneValue)
+            : value,
       },
     }));
   };
@@ -214,6 +243,12 @@ export function SystemSettings() {
     const languageCode = value as LanguageCode;
     setLanguage(languageCode);
     handleGeneralInputChange("language", languageCode);
+  };
+
+  const handleTimezoneChange = (value: string) => {
+    const tzValue = value as TimezoneValue;
+    setTimezone(tzValue);
+    handleGeneralInputChange("timezone", tzValue);
   };
 
   const handleSaveGeneral = async () => {
@@ -243,6 +278,7 @@ export function SystemSettings() {
       localStorage.removeItem("generalSystemConfig");
     }
     setLanguage(DEFAULT_LANGUAGE);
+    setTimezone(defaultGeneralConfig.timezone);
     setSaveHint({ key: "systemSettings.messages.reset" });
   };
 
@@ -367,13 +403,17 @@ export function SystemSettings() {
                   </Label>
                   <Select
                     value={systemConfig.general.timezone}
-                    onValueChange={(value) => handleGeneralInputChange("timezone", value)}
+                    onValueChange={handleTimezoneChange}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Asia/Taipei">台北 (GMT+8)</SelectItem>
+                      {timezoneOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
