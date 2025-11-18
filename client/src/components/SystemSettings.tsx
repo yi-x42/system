@@ -30,8 +30,7 @@ import {
   Server,
   Power,
 } from "lucide-react";
-import { useSystemStats } from "../hooks/react-query-hooks";
-import { useShutdownSystem } from "../hooks/react-query-hooks";
+import { useSystemStats, useShutdownSystem, useRestartSystem } from "../hooks/react-query-hooks";
 import {
   DEFAULT_LANGUAGE,
   languageOptions,
@@ -152,6 +151,7 @@ export function SystemSettings() {
   const [backupProgress, setBackupProgress] = useState(0);
   const [confirmingShutdown, setConfirmingShutdown] = useState(false);
   const { mutate: triggerShutdown, isPending: isShuttingDown, isSuccess: shutdownSuccess, error: shutdownError, data: shutdownData } = useShutdownSystem();
+  const { mutate: triggerRestart, isPending: isRestarting, isSuccess: restartSuccess, error: restartError } = useRestartSystem();
   const { language, setLanguage, t } = useLanguage();
   const { timezone, setTimezone } = useTimezone();
   
@@ -308,13 +308,18 @@ export function SystemSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1>{t("systemSettings.title")}</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-col items-end gap-1">
           <div className="flex gap-2">
-            <Button variant="outline" className="text-[14px]">
+            <Button
+              variant="outline"
+              className="text-[14px]"
+              disabled={isRestarting || restartSuccess}
+              onClick={() => triggerRestart()}
+            >
               <RefreshCw className="h-4 w-4 mr-2" />
-              重新啟動系統
+              {isRestarting ? '重新啟動中...' : '重新啟動系統'}
             </Button>
             <div className="relative">
               {!confirmingShutdown && (
@@ -352,11 +357,15 @@ export function SystemSettings() {
                 </div>
               )}
             </div>
-            {shutdownError && (
-              <span className="text-xs text-destructive absolute mt-10">關閉失敗</span>
+          </div>
+          <div className="flex flex-col items-end text-xs min-h-[1.5rem]">
+            {restartError && <span className="text-destructive">重新啟動失敗</span>}
+            {restartSuccess && !restartError && (
+              <span className="text-muted-foreground">系統即將重新啟動</span>
             )}
+            {shutdownError && <span className="text-destructive">關閉失敗</span>}
             {shutdownSuccess && shutdownData?.scheduled_in_seconds !== undefined && (
-              <span className="text-xs text-muted-foreground absolute mt-10">
+              <span className="text-muted-foreground">
                 系統將於 {shutdownData.scheduled_in_seconds}s 後關閉
               </span>
             )}

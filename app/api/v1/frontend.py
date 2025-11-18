@@ -10,7 +10,8 @@ import time
 import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Union
+import subprocess
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -3602,6 +3603,143 @@ async def shutdown_system():
                 "message": f"停止系統失敗: {str(e)}",
                 "timestamp": datetime.now().isoformat()
             }
+        )
+
+@router.post("/system/restart")
+async def restart_system():
+    """重新啟動整個系統"""
+    try:
+        import sys
+        import threading
+
+        api_logger.info("收到系統重新啟動請求")
+
+        project_root = get_base_dir()
+        env_command = os.environ.get("SYSTEM_RESTART_COMMAND")
+        restart_commands: List[Tuple[Union[str, List[str]], bool]] = []
+        if env_command:
+            restart_commands.append((env_command, True))
+
+        # 預設改以 uv run poe dev-api 重新啟動；若環境沒有 uv 則退回 uvicorn
+        restart_commands.append(("uv run poe dev-api", True))
+        restart_commands.append(
+            ([sys.executable, "-m", "uvicorn", "main:app", "--reload"], False)
+        )
+
+        def _spawn_command(command: Union[str, List[str]], use_shell: bool) -> None:
+            """
+            啟動新的後端進程，必要時在 Windows 上建立新的 process group，
+            避免稍後終止父進程時連帶被中斷。
+            """
+            popen_kwargs: Dict[str, Any] = {
+                "cwd": str(project_root),
+                "close_fds": True,
+            }
+            if os.name == "nt":  # Windows
+                creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                popen_kwargs["creationflags"] = creationflags
+            else:  # Unix-like
+                popen_kwargs["start_new_session"] = True
+
+            if use_shell:
+                subprocess.Popen(command, shell=True, **popen_kwargs)
+            else:
+                subprocess.Popen(command, **popen_kwargs)
+
+        def _stop_parent_reloader() -> None:
+            """
+            當前 API 執行環境位於 uvicorn --reload 的子進程內時，
+            需要連同父層重載進程一起終止，避免殘留多個 uvicorn 實例。
+            """
+            try:
+                import psutil
+            except Exception as exc:  # noqa: BLE001
+                api_logger.warning(f"無法匯入 psutil，略過父進程清理: {exc}")
+                return
+
+            try:
+                current = psutil.Process()
+                parent = current.parent()
+            except Exception as exc:  # noqa: BLE001
+                api_logger.warning(f"無法取得進程資訊，略過清理: {exc}")
+                return
+
+            if not parent:
+                return
+
+            try:
+                parent_name = (parent.name() or "").lower()
+            except Exception:  # noqa: BLE001
+                parent_name = ""
+            try:
+                parent_cmd = " ".join(parent.cmdline()).lower()
+            except Exception:  # noqa: BLE001
+                parent_cmd = ""
+
+            if not parent_name.startswith("python") or "uvicorn" not in parent_cmd:
+                api_logger.debug(
+                    "父進程 %s 非 uvicorn 監控進程，略過終止", parent.pid
+                )
+                return
+
+            try:
+                api_logger.info(f"終止 uvicorn 重載父進程 (PID {parent.pid})")
+                parent.terminate()
+                try:
+                    parent.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    api_logger.warning("父進程未於 5 秒內結束，改以 kill 強制終止")
+                    parent.kill()
+            except Exception as exc:  # noqa: BLE001
+                api_logger.error(f"終止父進程失敗 (PID {parent.pid}): {exc}")
+
+        def delayed_restart():
+            time.sleep(1)
+            launched = False
+            for command, use_shell in restart_commands:
+                if not command:
+                    continue
+                try:
+                    api_logger.info(
+                        f"嘗試以命令重新啟動系統: {command} (shell={use_shell})"
+                    )
+                    _spawn_command(command, use_shell)
+                    launched = True
+                    break
+                except Exception as launch_error:  # noqa: BLE001
+                    api_logger.error(
+                        f"重新啟動命令失敗: {command} ({launch_error})"
+                    )
+                    continue
+
+            if launched:
+                api_logger.info("新系統進程啟動成功，開始清理既有進程")
+                _stop_parent_reloader()
+            else:
+                api_logger.error("無法啟動新的系統進程，保留原進程運作")
+                return
+
+            os._exit(0)
+
+        threading.Thread(target=delayed_restart, daemon=True).start()
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": "系統重新啟動指令已發送",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+    except Exception as e:  # noqa: BLE001
+        api_logger.error(f"重新啟動系統失敗: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"重新啟動系統失敗: {str(e)}",
+                "timestamp": datetime.now().isoformat(),
+            },
         )
 
 @router.get("/system/status")

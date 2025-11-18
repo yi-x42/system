@@ -1066,5 +1066,16 @@ export const useShutdownSystem = () => {
   });
 };
 
+const restartSystem = async (): Promise<ShutdownResponse> => {
+  const { data } = await apiClient.post('/frontend/system/restart');
+  return data;
+};
+
+export const useRestartSystem = () => {
+  return useMutation<ShutdownResponse, Error, void>({
+    mutationFn: restartSystem,
+  });
+};
+
 
 

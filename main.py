@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
 from app.core.config import get_settings
 from app.core.logger import main_logger, api_logger
 from app.core.database import engine, get_db
@@ -273,32 +275,37 @@ app.include_router(db_query_router, tags=["資料庫查詢"])
 from app.api.v1.test_coordinates import router as test_coord_router
 app.include_router(test_coord_router, prefix="/api/v1/test", tags=["座標測試"])
 
-# 靜態檔案服務 - 指向正確的現代化網站
-# 您的現代化 YOLO AI v2.0 網站
-website_path = Path("website_prototype")
-if website_path.exists():
+# 靜態檔案服務 - 指向現代化網站（優先 React build，退回舊版 prototype）
+website_candidates = [
+    PROJECT_ROOT / "client" / "build",
+    PROJECT_ROOT / "website_prototype",
+]
+website_path = next((path for path in website_candidates if path.exists()), None)
+if website_path:
     app.mount("/website", StaticFiles(directory=str(website_path), html=True), name="website")
-    print(f"✅ YOLO AI v2.0 網站已掛載: {website_path.absolute()}")
+    main_logger.info(f"✅ 現代化網站已掛載: {website_path.absolute()}")
 else:
-    print(f"❌ 網站目錄不存在: {website_path.absolute()}")
+    main_logger.warning(
+        "❌ 找不到網站靜態檔案。請執行 npm run build (位於 client/) 產生 client/build 或提供 website_prototype。"
+    )
 
 # 管理後台靜態檔案 (保留作為備用)
-admin_static_path = Path("app/admin/static")
+admin_static_path = PROJECT_ROOT / "app" / "admin" / "static"
 if admin_static_path.exists():
     app.mount("/admin/static", StaticFiles(directory=str(admin_static_path)), name="admin_static")
 
 # 管理後台模板檔案 (保留作為備用)
-admin_templates_path = Path("app/admin/templates")
+admin_templates_path = PROJECT_ROOT / "app" / "admin" / "templates"
 if admin_templates_path.exists():
     app.mount("/admin", StaticFiles(directory=str(admin_templates_path), html=True), name="admin")
 
 # 前端靜態檔案
-frontend_static_path = Path("app/static")
+frontend_static_path = PROJECT_ROOT / "app" / "static"
 if frontend_static_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_static_path)), name="frontend_static")
 
 # 上傳資源（縮圖 / 影片等）
-uploads_path = Path("uploads")
+uploads_path = PROJECT_ROOT / "uploads"
 uploads_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 
@@ -306,17 +313,25 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 @app.get("/", include_in_schema=False)
 async def root():
     """根路由 - 重定向到現代化 YOLO AI v2.0 系統"""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/website/")
+    from fastapi.responses import RedirectResponse, JSONResponse
+    if website_path:
+        return RedirectResponse(url="/website/")
+    return JSONResponse(
+        {
+            "message": "靜態網站尚未建置。請先在 client/ 執行 npm run build 後重新啟動。",
+        }
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
     settings = get_settings()
     uvicorn.run(
-        "app.main:app",
+        "main:app",
         host="0.0.0.0",
         port=settings.port,
         reload=False,
         log_level="info"
     )
+# 專案根目錄
+PROJECT_ROOT = Path(__file__).resolve().parent
