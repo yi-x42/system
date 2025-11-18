@@ -90,6 +90,28 @@ type SystemConfig = {
   };
 };
 
+type StorageAnalysisStats = {
+  detection_size: number;
+  video_size: number;
+  log_size: number;
+  total_size: number;
+  free_space: number;
+};
+
+const BYTES_PER_TB = 1024 ** 4;
+const STORAGE_ANALYSIS_REFRESH_MS = 30_000;
+
+const normalizePercentages = (segments: number[]) => {
+  const sanitized = segments.map((value) =>
+    Number.isFinite(value) ? Math.max(0, value) : 0,
+  );
+  const total = sanitized.reduce((sum, value) => sum + value, 0);
+  if (total <= 100) {
+    return sanitized.map((value) => Math.min(value, 100));
+  }
+  return sanitized.map((value) => (value / total) * 100);
+};
+
 const defaultGeneralConfig: GeneralConfig = {
   systemName: "智慧偵測監控系統",
   timezone: "Asia/Taipei" as TimezoneValue,
@@ -247,6 +269,9 @@ export function SystemSettings() {
   );
   const [isStorageSaving, setIsStorageSaving] = useState(false);
   const [storageSaveHint, setStorageSaveHint] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [storageAnalysis, setStorageAnalysis] = useState<StorageAnalysisStats | null>(null);
+  const [storageAnalysisLoading, setStorageAnalysisLoading] = useState(false);
+  const [storageAnalysisError, setStorageAnalysisError] = useState<string | null>(null);
   const [clearConfirmText, setClearConfirmText] = useState("");
   const [clearAcknowledge, setClearAcknowledge] = useState(false);
   const [clearMessage, setClearMessage] = useState<{ text: string; isError?: boolean } | null>(null);
@@ -255,6 +280,46 @@ export function SystemSettings() {
     message: "",
   });
   const [activeTab, setActiveTab] = useState("general");
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchStorageAnalysis = async (silent = false) => {
+      if (!silent) {
+        setStorageAnalysisLoading(true);
+      }
+      try {
+        const { data } = await apiClient.get<StorageAnalysisStats>(
+          "/frontend/storage-analysis",
+        );
+        if (!isMounted) {
+          return;
+        }
+        setStorageAnalysis(data);
+        setStorageAnalysisError(null);
+      } catch (error) {
+        console.error("Failed to fetch storage analysis", error);
+        if (!isMounted) {
+          return;
+        }
+        setStorageAnalysisError("無法取得儲存資訊");
+      } finally {
+        if (isMounted && !silent) {
+          setStorageAnalysisLoading(false);
+        }
+      }
+    };
+
+    fetchStorageAnalysis();
+    const intervalId = setInterval(
+      () => fetchStorageAnalysis(true),
+      STORAGE_ANALYSIS_REFRESH_MS,
+    );
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, []);
   const {
     data: backupInfo,
     isLoading: isBackupLoading,
@@ -544,6 +609,34 @@ export function SystemSettings() {
   const clearConfirmationValid = clearConfirmText.trim().toUpperCase() === "CLEAR DATABASE";
   const isClearDatabaseDisabled =
     !clearConfirmationValid || !clearAcknowledge || clearDatabaseMutation.isPending;
+  const storageLimitBytes =
+    systemConfig.storage.storageLimit > 0
+      ? systemConfig.storage.storageLimit * BYTES_PER_TB
+      : 0;
+  const displayStorageLimitBytes =
+    storageLimitBytes > 0 ? storageLimitBytes : storageAnalysis?.total_size ?? 0;
+  const storagePercentBase =
+    displayStorageLimitBytes || storageAnalysis?.total_size || 1;
+  const storageSegments = [
+    { label: "影片檔案", color: "bg-blue-500", value: storageAnalysis?.video_size ?? 0 },
+    { label: "系統數據", color: "bg-green-500", value: storageAnalysis?.detection_size ?? 0 },
+    { label: "其他", color: "bg-orange-500", value: storageAnalysis?.log_size ?? 0 },
+  ];
+  const storageSegmentPercents = normalizePercentages(
+    storageSegments.map((segment) => (segment.value / storagePercentBase) * 100),
+  );
+  const storageUsageSummary = storageAnalysis
+    ? `${formatBytes(storageAnalysis.total_size)} / ${formatBytes(
+        displayStorageLimitBytes || storageAnalysis.total_size,
+      )}`
+    : storageAnalysisLoading
+    ? "載入中..."
+    : "尚無資料";
+  const isStorageOverLimit = Boolean(
+    storageAnalysis &&
+      displayStorageLimitBytes > 0 &&
+      storageAnalysis.total_size > displayStorageLimitBytes,
+  );
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -944,28 +1037,34 @@ export function SystemSettings() {
                 <div>
                   <div className="flex justify-between text-sm mb-1">
                     <span>總存儲使用量</span>
-                    <span>3.2TB / 5.0TB</span>
+                    <span>{storageUsageSummary}</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
                     <div className="flex h-2 bg-gray-200 rounded-full overflow-hidden dark:bg-gray-700">
-                      <div className="bg-blue-500 transition-all duration-300 ease-in-out" style={{ width: '50%' }}></div>
-                      <div className="bg-green-500 transition-all duration-300 ease-in-out" style={{ width: '9%' }}></div>
-                      <div className="bg-orange-500 transition-all duration-300 ease-in-out" style={{ width: '5%' }}></div>
+                      {storageSegments.map((segment, index) => (
+                        <div
+                          key={segment.label}
+                          className={`${segment.color} transition-all duration-300 ease-in-out`}
+                          style={{ width: `${storageSegmentPercents[index] ?? 0}%` }}
+                        />
+                      ))}
                     </div>
                   </div>
+                  {storageAnalysisError && (
+                    <p className="text-xs text-destructive mt-2">{storageAnalysisError}</p>
+                  )}
+                  {isStorageOverLimit && (
+                    <p className="text-xs text-destructive mt-2">
+                      已超過設定的儲存空間上限，請調整清理策略或擴充容量。
+                    </p>
+                  )}
                   <div className="grid gap-2 mt-2 text-xs text-muted-foreground md:grid-cols-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-sm bg-blue-500"></div>
-                      影片檔案: 2.5TB
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-sm bg-green-500"></div>
-                      系統數據: 450GB
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-sm bg-orange-500"></div>
-                      其他: 250GB
-                    </div>
+                    {storageSegments.map((segment) => (
+                      <div className="flex items-center gap-2" key={segment.label}>
+                        <div className={`w-3 h-3 rounded-sm ${segment.color}`}></div>
+                        {segment.label}: {storageAnalysis ? formatBytes(segment.value) : "--"}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
