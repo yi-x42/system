@@ -834,6 +834,14 @@ class AnalyticsData(BaseModel):
     category_distribution: Dict[str, int]
     time_period_analysis: Dict[str, int]
 
+class CameraPerformanceItem(BaseModel):
+    camera_name: str = Field(..., description="攝影機名稱")
+    camera_id: Optional[str] = Field(None, description="攝影機唯一識別 ID")
+    detections: int = Field(0, description="指定期間內的偵測次數")
+    runtime_hours: float = Field(0.0, description="指定期間內的運行小時數")
+    status: Optional[str] = Field(None, description="最近一次任務的狀態")
+    last_active: Optional[datetime] = Field(None, description="最後一次活動時間")
+
 # ===== 資料來源管理模型 =====
 
 class DataSourceCreate(BaseModel):
@@ -2435,6 +2443,142 @@ async def camera_stream(camera_index: int):
         raise HTTPException(status_code=500, detail=f"攝影機掃描失敗: {str(e)}")
 
 # ===== 分析統計 API =====
+
+@router.get(
+    "/analytics/camera-performance",
+    response_model=List[CameraPerformanceItem],
+)
+async def get_camera_performance(
+    days: int = Query(7, ge=1, le=90, description="統計回溯天數"),
+    limit: int = Query(5, ge=1, le=50, description="回傳的攝影機數量"),
+    db: AsyncSession = Depends(get_db),
+):
+    """依據歷史偵測結果與任務資料輸出攝影機效能指標"""
+    try:
+        now = datetime.utcnow()
+        start_time = now - timedelta(days=days)
+
+        detection_stmt = (
+            select(
+                AnalysisTask.camera_name.label("camera_name"),
+                AnalysisTask.camera_id.label("camera_id"),
+                func.count(DetectionResult.id).label("detections"),
+                func.max(DetectionResult.frame_timestamp).label("last_detection"),
+            )
+            .join(DetectionResult, DetectionResult.task_id == AnalysisTask.id)
+            .where(
+                AnalysisTask.camera_name.isnot(None),
+                DetectionResult.frame_timestamp >= start_time,
+            )
+            .group_by(AnalysisTask.camera_name, AnalysisTask.camera_id)
+        )
+
+        detection_rows = (await db.execute(detection_stmt)).all()
+        metrics: Dict[str, Dict[str, Any]] = {}
+
+        for row in detection_rows:
+            key = row.camera_id or row.camera_name
+            if not key:
+                continue
+            metrics[key] = {
+                "camera_name": row.camera_name or "未命名攝影機",
+                "camera_id": row.camera_id,
+                "detections": int(row.detections or 0),
+                "runtime_seconds": 0.0,
+                "status": None,
+                "last_active": _normalize_datetime_input(row.last_detection),
+            }
+
+        task_stmt = (
+            select(
+                AnalysisTask.camera_name,
+                AnalysisTask.camera_id,
+                AnalysisTask.start_time,
+                AnalysisTask.end_time,
+                AnalysisTask.created_at,
+                AnalysisTask.status,
+            )
+            .where(
+                AnalysisTask.camera_name.isnot(None),
+                or_(
+                    AnalysisTask.end_time.is_(None),
+                    AnalysisTask.end_time >= start_time,
+                    AnalysisTask.start_time >= start_time,
+                    AnalysisTask.created_at >= start_time,
+                ),
+            )
+        )
+
+        task_rows = (await db.execute(task_stmt)).all()
+
+        for row in task_rows:
+            key = row.camera_id or row.camera_name
+            if not key:
+                continue
+
+            metric = metrics.get(key)
+            if metric is None:
+                metric = {
+                    "camera_name": row.camera_name or "未命名攝影機",
+                    "camera_id": row.camera_id,
+                    "detections": 0,
+                    "runtime_seconds": 0.0,
+                    "status": None,
+                    "last_active": None,
+                }
+                metrics[key] = metric
+
+            start_candidate = (
+                _normalize_datetime_input(row.start_time)
+                or _normalize_datetime_input(row.created_at)
+            )
+            if not start_candidate:
+                continue
+
+            effective_start = max(start_candidate, start_time)
+            end_candidate = _normalize_datetime_input(row.end_time) or now
+            if end_candidate <= start_time or end_candidate <= effective_start:
+                continue
+
+            metric["runtime_seconds"] += max(
+                0.0, (end_candidate - effective_start).total_seconds()
+            )
+            metric["status"] = metric["status"] or row.status
+
+            latest_point = _normalize_datetime_input(row.end_time) or now
+            if metric["last_active"] is None or (
+                latest_point and latest_point > metric["last_active"]
+            ):
+                metric["last_active"] = latest_point
+
+        if not metrics:
+            return []
+
+        performance_items: List[CameraPerformanceItem] = []
+        for payload in metrics.values():
+            runtime_hours = round(payload["runtime_seconds"] / 3600, 1)
+            performance_items.append(
+                CameraPerformanceItem(
+                    camera_name=payload["camera_name"],
+                    camera_id=payload["camera_id"],
+                    detections=payload["detections"],
+                    runtime_hours=runtime_hours,
+                    status=payload["status"],
+                    last_active=payload["last_active"],
+                )
+            )
+
+        performance_items.sort(
+            key=lambda item: (item.detections, item.runtime_hours),
+            reverse=True,
+        )
+
+        return performance_items[:limit]
+
+    except Exception as exc:
+        api_logger.error(f"獲取攝影機效能數據失敗: {exc}")
+        raise HTTPException(status_code=500, detail="無法取得攝影機效能數據")
+
 
 @router.get("/analytics", response_model=AnalyticsData)
 async def get_analytics(

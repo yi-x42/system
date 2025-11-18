@@ -665,6 +665,14 @@ export function CameraControl() {
   const selectedCameraData: CameraWithMeta | null =
     (selectedCamera ? cameras.find((cam) => cam.id?.toString() === selectedCamera) : null) ?? null;
 
+  const liveStreamActive =
+    pageActive && activeTab === "live-view" && pageVisible && previewInView;
+  const liveViewStatus = selectedCameraData
+    ? liveStreamActive
+      ? "online"
+      : selectedCameraData.status
+    : undefined;
+
   // 取得攝影機串流資訊
   return (
     <div className="space-y-6">
@@ -906,8 +914,8 @@ export function CameraControl() {
                   <CardTitle>即時影像串流</CardTitle>
                   {selectedCameraData && (
                     <div className="flex items-center gap-2">
-                      <Badge variant={getStatusColor(selectedCameraData.status)}>
-                        {getStatusText(selectedCameraData.status)}
+                      <Badge variant={getStatusColor(liveViewStatus || "offline")}>
+                        {getStatusText(liveViewStatus || "offline")}
                       </Badge>
                       <Badge variant="outline">{selectedCameraData.resolution}</Badge>
                     </div>
@@ -923,12 +931,7 @@ export function CameraControl() {
                     camera={selectedCameraData}
                     availableDevices={videoDevices}
                     onDevicesUpdated={handleDevicesUpdated}
-                    active={
-                      pageActive &&
-                      activeTab === "live-view" &&
-                      pageVisible &&
-                      previewInView
-                    }
+                    active={liveStreamActive}
                   />
                   {previewPauseMessage && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-2 bg-black/70">
@@ -989,8 +992,8 @@ export function CameraControl() {
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">狀態</span>
-                          <Badge variant={getStatusColor(selectedCameraData.status)}>
-                            {getStatusText(selectedCameraData.status)}
+                          <Badge variant={getStatusColor(liveViewStatus || "offline")}>
+                            {getStatusText(liveViewStatus || "offline")}
                           </Badge>
                         </div>
                         <div className="flex justify-between text-sm">

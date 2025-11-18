@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import apiClient from '../lib/api';
 
 // 定義從後端 API 回傳的系統統計資料結構
@@ -35,6 +35,39 @@ export const useSystemStats = () => {
     queryFn: fetchSystemStats,
     // 設定每 1 秒自動重新整理一次資料
     refetchInterval: 1000,
+  });
+};
+
+export interface CameraPerformanceItem {
+  camera_name: string;
+  camera_id?: string | null;
+  detections: number;
+  runtime_hours: number;
+  status?: string | null;
+  last_active?: string | null;
+}
+
+interface CameraPerformanceParams {
+  days?: number;
+  limit?: number;
+}
+
+const fetchCameraPerformance = async (
+  params: CameraPerformanceParams
+): Promise<CameraPerformanceItem[]> => {
+  const { data } = await apiClient.get('/frontend/analytics/camera-performance', {
+    params,
+  });
+  return data;
+};
+
+export const useCameraPerformance = (
+  { days = 7, limit = 5 }: CameraPerformanceParams = {}
+) => {
+  return useQuery<CameraPerformanceItem[], Error>({
+    queryKey: ['cameraPerformance', days, limit],
+    queryFn: () => fetchCameraPerformance({ days, limit }),
+    placeholderData: keepPreviousData,
   });
 };
 
@@ -1044,7 +1077,7 @@ export const useDetectionResults = (params: DetectionRecordsQuery = {}) => {
       params.maxConfidence,
     ],
     queryFn: () => fetchDetectionResults(params),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
   });
 };
 

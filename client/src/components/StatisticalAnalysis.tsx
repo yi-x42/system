@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -19,18 +20,41 @@ import {
   AreaChart,
   Area,
 } from "recharts";
-import {
-  TrendingUp,
-  TrendingDown,
-  Calendar,
-  Download,
-  Filter,
-  BarChart3,
-  PieChart as PieChartIcon,
-  Activity,
-} from "lucide-react";
+import { Download, Filter } from "lucide-react";
+import { useCameraPerformance } from "../hooks/react-query-hooks";
+
+const RANGE_DAY_MAP = {
+  "1day": 1,
+  "7days": 7,
+  "30days": 30,
+  "90days": 90,
+} as const;
+
+type RangeOption = keyof typeof RANGE_DAY_MAP;
+
+const STATUS_LABEL_MAP: Record<string, string> = {
+  running: "正常運行",
+  pending: "待啟動",
+  completed: "已完成",
+  failed: "異常",
+};
+
+const STATUS_VARIANT_MAP: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  running: "default",
+  pending: "secondary",
+  completed: "secondary",
+  failed: "destructive",
+};
 
 export function StatisticalAnalysis() {
+  const [range, setRange] = useState<RangeOption>("7days");
+  const selectedDays = RANGE_DAY_MAP[range];
+  const {
+    data: cameraPerformance = [],
+    isLoading: cameraPerformanceLoading,
+    isError: cameraPerformanceError,
+  } = useCameraPerformance({ days: selectedDays, limit: 5 });
+
   // 模擬統計數據
   const dailyDetections = [
     { date: "01/01", person: 145, vehicle: 89, total: 234 },
@@ -76,14 +100,6 @@ export function StatisticalAnalysis() {
     { name: "其他", value: 94, color: "#ff7c7c" },
   ];
 
-  const cameraPerformance = [
-    { camera: "大門入口", detections: 345, runtimeHours: 167.5 },
-    { camera: "停車場", detections: 256, runtimeHours: 142.8 },
-    { camera: "後門出口", detections: 189, runtimeHours: 158.3 },
-    { camera: "走廊A", detections: 167, runtimeHours: 171.2 },
-    { camera: "走廊B", detections: 134, runtimeHours: 164.9 },
-  ];
-
   const alertTrends = [
     { date: "01/01", high: 8, medium: 15, low: 23 },
     { date: "01/02", high: 12, medium: 18, low: 19 },
@@ -101,7 +117,7 @@ export function StatisticalAnalysis() {
       <div className="flex items-center justify-between">
         <h1>統計分析</h1>
         <div className="flex gap-2">
-          <Select defaultValue="7days">
+          <Select value={range} onValueChange={(value: RangeOption) => setRange(value)}>
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -140,24 +156,44 @@ export function StatisticalAnalysis() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {cameraPerformance.map((camera, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex justify-between items-start mb-3">
-                      <h4 className="font-medium">{camera.camera}</h4>
-                      <Badge variant="outline">{camera.detections} 次偵測</Badge>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div>
-                        <p className="text-sm text-muted-foreground">運行時間</p>
-                        <p>{camera.runtimeHours} 小時</p>
+                {cameraPerformanceLoading && (
+                  <p className="text-sm text-muted-foreground">載入攝影機效能中...</p>
+                )}
+                {cameraPerformanceError && (
+                  <p className="text-sm text-destructive">無法取得攝影機效能資料</p>
+                )}
+                {!cameraPerformanceLoading && !cameraPerformanceError && cameraPerformance.length === 0 && (
+                  <p className="text-sm text-muted-foreground">選定期間內沒有攝影機偵測紀錄。</p>
+                )}
+                {!cameraPerformanceLoading &&
+                  !cameraPerformanceError &&
+                  cameraPerformance.map((camera) => {
+                    const statusKey = camera.status ?? "unknown";
+                    const statusLabel = STATUS_LABEL_MAP[statusKey] ?? "未知狀態";
+                    const statusVariant = STATUS_VARIANT_MAP[statusKey] ?? "outline";
+                    const runtimeLabel = `${(camera.runtime_hours ?? 0).toFixed(1)} 小時`;
+                    const cameraName = camera.camera_name || camera.camera_id || "未命名攝影機";
+                    const key = camera.camera_id ?? camera.camera_name ?? `${camera.detections}-${runtimeLabel}`;
+
+                    return (
+                      <div key={key} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="font-medium">{cameraName}</h4>
+                          <Badge variant="outline">{camera.detections} 次偵測</Badge>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <p className="text-sm text-muted-foreground">運行時間</p>
+                            <p>{runtimeLabel}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-muted-foreground">狀態</p>
+                            <Badge variant={statusVariant}>{statusLabel}</Badge>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">狀態</p>
-                        <Badge variant="default">正常運行</Badge>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    );
+                  })}
               </div>
             </CardContent>
           </Card>
